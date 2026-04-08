@@ -1,0 +1,226 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // Collection: users
+    // Document ID: user.uid
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required)
+    //   - displayName: string (required)
+    //   - role: string (required, 'admin' | 'user')
+    //   - photoURL: string (optional)
+    //   - createdAt: string (required)
+    //   - updatedAt: string (required)
+    //
+    // Collection: elaboracion_reports
+    // Document ID: auto-generated
+    // Fields:
+    //   - fecha: string (required)
+    //   - turno: string (required)
+    //   - planilla: string (required)
+    //   - quimico: string (required)
+    //   - lote: string (required)
+    //   - linea: string (required)
+    //   - marca: string (required)
+    //   - sabor: string (required)
+    //   - tamano: number (required)
+    //   - createdAt: string (required)
+    //   - authorId: string (required)
+    //   - hourlyData: array (required)
+    //
+    // ===============================================================
+    //
+    // Collection: production_reports
+    // Document ID: auto-generated
+    // Fields:
+    //   - supervisor: string (required)
+    //   - fecha: string (required)
+    //   - planilla: string (required)
+    //   - lote: string (optional)
+    //   - linea: string (required)
+    //   - velocidad: number (optional)
+    //   - sabor: string (optional)
+    //   - tamano: number (optional)
+    //   - entraTurno: string (optional)
+    //   - saleTurno: string (optional)
+    //   - tiempoBruto: number (optional)
+    //   - jarabeInicial: number (optional)
+    //   - jarabeFinal: number (optional)
+    //   - contInicial: number (optional)
+    //   - contFinal: number (optional)
+    //   - botRotas: number (optional)
+    //   - botellas: number (optional)
+    //   - paquetes: number (optional)
+    //   - co2: number (optional)
+    //   - observaciones: string (optional)
+    //   - createdAt: string (required, immutable)
+    //   - authorId: string (required, immutable)
+    //   - authorName: string (optional)
+    //   - hourlyProduction: array (optional)
+    //   - downtimes: array (optional)
+    //
+    // ===============================================================
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.authorId;
+    }
+    
+    function uidUnchanged() {
+      return !('authorId' in request.resource.data) ||
+        request.resource.data.authorId == request.auth.uid;
+    }
+    
+    function uidNotModified() {
+      return !('authorId' in request.resource.data) ||
+        request.resource.data.authorId == resource.data.authorId;
+    }
+    
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+    
+    function validStringLength(field, minLen, maxLen) {
+      return request.resource.data[field] is string &&
+        request.resource.data[field].size() >= minLen &&
+        request.resource.data[field].size() <= maxLen;
+    }
+    
+    function isValidOptionalString(field, minLen, maxLen) {
+      return !(field in request.resource.data) ||
+             (request.resource.data[field] is string &&
+              request.resource.data[field].size() >= minLen &&
+              request.resource.data[field].size() <= maxLen);
+    }
+    
+    function isValidOptionalNumber(field) {
+      return !(field in request.resource.data) || request.resource.data[field] is number;
+    }
+    
+    function isValidOptionalArray(field) {
+      return !(field in request.resource.data) || request.resource.data[field] is list;
+    }
+    
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+             (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+              (request.auth.token.email == "fraed.fordrinks@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    // Domain Validators
+    function isValidProductionReport(data) {
+      return hasRequiredFields(['supervisor', 'fecha', 'planilla', 'linea', 'authorId', 'createdAt']) &&
+             data.supervisor is string && data.supervisor.size() > 0 && data.supervisor.size() < 100 &&
+             data.fecha is string && data.fecha.size() > 0 && data.fecha.size() < 50 &&
+             data.planilla is string && data.planilla.size() > 0 && data.planilla.size() < 50 &&
+             data.linea is string && data.linea.size() > 0 && data.linea.size() < 50 &&
+             data.authorId is string && data.authorId == request.auth.uid &&
+             data.createdAt is string &&
+             isValidOptionalString('lote', 0, 100) &&
+             isValidOptionalNumber('velocidad') &&
+             isValidOptionalString('sabor', 0, 100) &&
+             isValidOptionalNumber('tamano') &&
+             isValidOptionalString('entraTurno', 0, 20) &&
+             isValidOptionalString('saleTurno', 0, 20) &&
+             isValidOptionalNumber('tiempoBruto') &&
+             isValidOptionalNumber('jarabeInicial') &&
+             isValidOptionalNumber('jarabeFinal') &&
+             isValidOptionalNumber('contInicial') &&
+             isValidOptionalNumber('contFinal') &&
+             isValidOptionalNumber('botRotas') &&
+             isValidOptionalNumber('botellas') &&
+             isValidOptionalNumber('paquetes') &&
+             isValidOptionalNumber('co2') &&
+             isValidOptionalString('observaciones', 0, 5000) &&
+             isValidOptionalString('authorName', 0, 100) &&
+             isValidOptionalArray('hourlyProduction') &&
+             isValidOptionalArray('downtimes');
+    }
+
+    function isValidUser(data) {
+      return hasRequiredFields(['uid', 'email', 'displayName', 'role', 'createdAt', 'updatedAt']) &&
+             data.uid == request.auth.uid &&
+             data.email is string &&
+             data.displayName is string && data.displayName.size() > 0 &&
+             data.role in ['admin', 'user'] &&
+             data.createdAt is string &&
+             data.updatedAt is string;
+    }
+
+    function isValidElaboracionReport(data) {
+      return hasRequiredFields(['fecha', 'turno', 'planilla', 'quimico', 'lote', 'linea', 'marca', 'sabor', 'tamano', 'createdAt', 'authorId', 'hourlyData']) &&
+             data.fecha is string &&
+             data.turno is string &&
+             data.planilla is string &&
+             data.quimico is string &&
+             data.lote is string &&
+             data.linea is string &&
+             data.marca is string &&
+             data.sabor is string &&
+             data.tamano is number &&
+             data.createdAt is string &&
+             data.authorId == request.auth.uid &&
+             data.hourlyData is list;
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == 'user';
+      allow update: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && 
+                    (request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    match /elaboracion_reports/{reportId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidElaboracionReport(request.resource.data) && uidUnchanged();
+      allow update: if isAuthenticated() && isDocOwner() && isValidElaboracionReport(request.resource.data) && uidNotModified();
+      allow delete: if isAuthenticated() && isDocOwner();
+    }
+
+    match /config/{configId} {
+      // All authenticated users need to read config for NewReportForm filtering
+      allow read: if isAuthenticated();
+      // Only admin can modify config
+      allow write: if isAdmin();
+    }
+
+    match /live_production/{docId} {
+      // Any authenticated user can read and write live production data
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /production_reports/{reportId} {
+      // Allow any authenticated user to read reports for now, as it's a company dashboard
+      allow read: if isAuthenticated();
+      
+      allow create: if isAuthenticated() && 
+                    isValidProductionReport(request.resource.data) && 
+                    uidUnchanged();
+                    
+      allow update: if isAuthenticated() && 
+                    isDocOwner() &&
+                    isValidProductionReport(request.resource.data) && 
+                    uidNotModified() &&
+                    areImmutableFieldsUnchanged(['createdAt', 'authorId']);
+                    
+      allow delete: if isAuthenticated() && isDocOwner();
+    }
+  }
+}

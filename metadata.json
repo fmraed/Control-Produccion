@@ -1,0 +1,5 @@
+{
+  "name": "Control de Producción",
+  "description": "Aplicación para el registro y seguimiento de partes de producción en tiempo real.",
+  "requestFramePermissions": []
+}

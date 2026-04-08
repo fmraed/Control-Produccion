@@ -1,0 +1,86 @@
+{
+  "entities": {
+    "ProductionReport": {
+      "title": "Production Report",
+      "description": "A daily production report (parte de producción)",
+      "type": "object",
+      "properties": {
+        "supervisor": { "type": "string" },
+        "fecha": { "type": "string", "format": "date" },
+        "planilla": { "type": "string" },
+        "lote": { "type": "string" },
+        "linea": { "type": "string" },
+        "velocidad": { "type": "number" },
+        "sabor": { "type": "string" },
+        "tamano": { "type": "number" },
+        "entraTurno": { "type": "string" },
+        "saleTurno": { "type": "string" },
+        "tiempoBruto": { "type": "number" },
+        "jarabeInicial": { "type": "number" },
+        "jarabeFinal": { "type": "number" },
+        "contInicial": { "type": "number" },
+        "contFinal": { "type": "number" },
+        "botRotas": { "type": "number" },
+        "botellas": { "type": "number" },
+        "paquetes": { "type": "number" },
+        "co2": { "type": "number" },
+        "observaciones": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "hourlyProduction": { "type": "array" },
+        "downtimes": { "type": "array" }
+      },
+      "required": ["supervisor", "fecha", "planilla", "linea", "authorId", "createdAt"]
+    },
+    "User": {
+      "title": "User Profile",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "role", "createdAt", "updatedAt"]
+    },
+    "ElaboracionReport": {
+      "title": "Elaboracion Report",
+      "description": "A daily elaboration report",
+      "type": "object",
+      "properties": {
+        "fecha": { "type": "string", "format": "date" },
+        "turno": { "type": "string" },
+        "planilla": { "type": "string" },
+        "quimico": { "type": "string" },
+        "lote": { "type": "string" },
+        "linea": { "type": "string" },
+        "marca": { "type": "string" },
+        "sabor": { "type": "string" },
+        "tamano": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "authorId": { "type": "string" },
+        "hourlyData": { "type": "array" }
+      },
+      "required": ["fecha", "turno", "planilla", "quimico", "lote", "linea", "marca", "sabor", "tamano", "createdAt", "authorId", "hourlyData"]
+    }
+  },
+  "firestore": {
+    "production_reports/{reportId}": {
+      "schema": { "$ref": "#/entities/ProductionReport" },
+      "description": "Stores all production reports."
+    },
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles."
+    },
+    "elaboracion_reports/{reportId}": {
+      "schema": { "$ref": "#/entities/ElaboracionReport" },
+      "description": "Stores all elaboration reports."
+    }
+  }
+}
