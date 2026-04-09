@@ -87,7 +87,13 @@ export const Auth: React.FC<AuthProps> = ({ onSuccess }) => {
       onSuccess();
     } catch (err: any) {
       console.error("Google Auth error:", err);
-      setError("Error al iniciar sesión con Google.");
+      if (err.code === 'auth/popup-blocked') {
+        setError("El navegador bloqueó la ventana emergente. Por favor, habilita los pop-ups.");
+      } else if (err.code === 'auth/cancelled-popup-request') {
+        setError("Se canceló la solicitud de inicio de sesión.");
+      } else {
+        setError(err.message || "Error al iniciar sesión con Google.");
+      }
     } finally {
       setLoading(false);
     }

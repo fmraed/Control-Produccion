@@ -54,7 +54,10 @@ async function startServer() {
     try {
       let pool = await sql.connect(sqlConfig);
       
-      // Consulta proporcionada por el usuario adaptada para filtrar por fecha y línea seleccionada
+      // Calcular el rango de fecha para el "Día de Producción" (06:00 a 06:00 del día siguiente)
+      const startDate = `${date} 06:00:00`;
+      const endDate = new Date(new Date(date).getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0] + ' 06:00:00';
+
       const query = `
         SELECT 
             op.[nu_ordenProduccion],
@@ -73,12 +76,14 @@ async function startServer() {
         WHERE op.[id_sucursal] = 2
             AND op.[id_estado] = 50
             AND art.[id_categoria] = 1
-            AND CAST(op.[fe_inicio] AS DATE) = @date
+            AND op.[fe_inicio] >= @start
+            AND op.[fe_inicio] < @end
             AND maq.[no_descripcion] LIKE @lineFilter
       `;
 
       const result = await pool.request()
-        .input('date', sql.Date, date)
+        .input('start', sql.DateTime, startDate)
+        .input('end', sql.DateTime, endDate)
         .input('lineFilter', sql.VarChar, `%${line}%`)
         .query(query);
 

@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK } from '../constants';
-import { Settings, Save, CheckCircle2, XCircle, AlertCircle, Plus, Trash2, Users, Database, FlaskConical } from 'lucide-react';
+import { Settings, Save, CheckCircle2, XCircle, AlertCircle, Plus, Trash2, Users, Database, FlaskConical, Link2 } from 'lucide-react';
 import { SQLIntegration } from './SQLIntegration';
+import { SQLMappingEditor } from './SQLMappingEditor';
 
 interface AppConfig {
   flavors: string[];
@@ -30,7 +31,7 @@ export function AdminPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
-  const [activeTab, setActiveTab] = useState<'config' | 'sql'>('config');
+  const [activeTab, setActiveTab] = useState<'config' | 'sql' | 'mappings'>('config');
   
   // New item inputs
   const [newFlavor, setNewFlavor] = useState('');
@@ -515,10 +516,25 @@ export function AdminPanel() {
           <Database className="w-4 h-4" />
           Cruce SQL Server
         </button>
+        <button
+          onClick={() => setActiveTab('mappings')}
+          className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+            activeTab === 'mappings'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          }`}
+        >
+          <Link2 className="w-4 h-4" />
+          Mapeo de Códigos
+        </button>
       </div>
 
       {activeTab === 'sql' ? (
         <SQLIntegration />
+      ) : activeTab === 'mappings' ? (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <SQLMappingEditor />
+        </div>
       ) : (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-6">

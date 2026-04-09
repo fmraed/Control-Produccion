@@ -1,13 +1,58 @@
-import { useState } from 'react';
-import { Database, RefreshCw, AlertCircle, CheckCircle2, Search } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Database, RefreshCw, AlertCircle, CheckCircle2, Search, AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { db } from '../firebase';
+import { SQL_PRODUCT_MAPPING } from '../constants';
 
 export function SQLIntegration() {
   const [loading, setLoading] = useState(false);
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [line, setLine] = useState('1');
+  const [line, setLine] = useState('LINEA 1');
   const [results, setResults] = useState<any[] | null>(null);
+  const [firestoreTotals, setFirestoreTotals] = useState<Record<string, number>>({});
+  const [sqlMappings, setSqlMappings] = useState<Record<string, string>>(SQL_PRODUCT_MAPPING);
   const [error, setError] = useState<string | null>(null);
+
+  const fetchMappings = async () => {
+    try {
+      const mappingRef = doc(db, 'config', 'sql_mappings');
+      const docSnap = await getDoc(mappingRef);
+      if (docSnap.exists()) {
+        setSqlMappings(docSnap.data() as Record<string, string>);
+      }
+    } catch (err) {
+      console.error("Error fetching mappings:", err);
+    }
+  };
+
+  const fetchFirestoreData = async () => {
+    try {
+      await fetchMappings();
+      const reportsRef = collection(db, 'production_reports');
+      const q = query(
+        reportsRef, 
+        where('fecha', '==', date),
+        where('linea', '==', line.replace('LINEA ', ''))
+      );
+      
+      const querySnapshot = await getDocs(q);
+      const totals: Record<string, number> = {};
+      
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        const key = `${data.sabor}-${data.tamano}`;
+        const sqlCode = sqlMappings[key];
+        if (sqlCode) {
+          totals[sqlCode] = (totals[sqlCode] || 0) + (data.totalBotellas || 0);
+        }
+      });
+      
+      setFirestoreTotals(totals);
+    } catch (err) {
+      console.error("Error fetching firestore data:", err);
+    }
+  };
 
   const handleCheck = async () => {
     setLoading(true);
@@ -15,6 +60,7 @@ export function SQLIntegration() {
     setResults(null);
 
     try {
+      await fetchFirestoreData();
       const response = await fetch('/api/sql/check-production', {
         method: 'POST',
         headers: {
@@ -117,23 +163,47 @@ export function SQLIntegration() {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  {Object.keys(results[0]).map((key) => (
-                    <th key={key} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      {key}
-                    </th>
-                  ))}
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Orden</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Código</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Artículo</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cant. SQL</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cant. App</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Diferencia</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {results.map((row, i) => (
-                  <tr key={i}>
-                    {Object.values(row).map((val: any, j) => (
-                      <td key={j} className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                        {val?.toString() || '-'}
+                {results.map((row, i) => {
+                  const sqlCode = row.codigo_abreviado;
+                  const sqlCant = row.nu_cantFabri || 0;
+                  const appCant = firestoreTotals[sqlCode] || 0;
+                  const diff = appCant - sqlCant;
+                  const hasError = Math.abs(diff) > 0;
+
+                  return (
+                    <tr key={i} className={hasError ? 'bg-red-50' : ''}>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{row.nu_ordenProduccion}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{sqlCode}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{row.descripcion_articulo}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-blue-600">{sqlCant.toLocaleString()}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-purple-600">{appCant.toLocaleString()}</td>
+                      <td className={`px-4 py-3 whitespace-nowrap text-sm font-bold ${diff === 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString()}
                       </td>
-                    ))}
-                  </tr>
-                ))}
+                      <td className="px-4 py-3 whitespace-nowrap text-sm">
+                        {diff === 0 ? (
+                          <span className="flex items-center gap-1 text-green-600 font-medium">
+                            <CheckCircle2 className="w-4 h-4" /> Coincide
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-red-600 font-medium">
+                            <AlertTriangle className="w-4 h-4" /> Desvío
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

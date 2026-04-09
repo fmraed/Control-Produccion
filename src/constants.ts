@@ -111,6 +111,42 @@ export const REPORT_DOWNTIME_CATEGORIES = [
 ];
 
 // Tabla de Carbonatación (Presión en PSI, Temperatura en °C)
+export const SQL_PRODUCT_MAPPING: Record<string, string> = {
+  'Cola-500': '000001076',
+  'Cola-1500': '000000273',
+  'Cola-2250': '000000073',
+  'Cola-3000': '000001573',
+  'Naranja-500': '000001015',
+  'Naranja-1500': '000000213',
+  'Naranja-2250': '000000013',
+  'Naranja-3000': '000001513',
+  'Lima Limon-500': '000001036',
+  'Lima Limon-1500': '000000234',
+  'Lima Limon-2250': '000000033',
+  'Lima Limon-3000': '000001733',
+  'Manzana-500': '000001026',
+  'Manzana-1500': '000000224',
+  'Manzana-2250': '000001623',
+  'Manzana-3000': '000001723',
+  'Pomelo Blanco-500': '000000100',
+  'Pomelo Blanco-1500': '000000254',
+  'Pomelo Blanco-2250': '000001653',
+  'Pomelo Blanco-3000': '000001753',
+  'Citrus-3000': '000001583',
+  'Limonada-3000': '000001543',
+  'Agua Tónica-1500': '000030231',
+  'Granadina-500': '000010106',
+  'Granadina-1500': '000000293',
+  'Granadina-3000': '000001593',
+  'Soda-500': '000001096',
+  'Soda-1500': '000001210',
+  'Soda-2250': '000001188',
+  'Soda Sifon-2000': '000001090',
+  'Agua-500': '000001097',
+  'Agua-1500': '000001099',
+  'Agua-2250': '000001889',
+};
+
 export const CARBONATION_PRESSURES = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56];
 export const CARBONATION_TEMPS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30];
 export const CARBONATION_TABLE = [
