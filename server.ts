@@ -54,9 +54,10 @@ async function startServer() {
     try {
       let pool = await sql.connect(sqlConfig);
       
-      // Calcular el rango de fecha para el "Día de Producción" (06:00 a 06:00 del día siguiente)
-      const startDate = `${date} 06:00:00`;
-      const endDate = new Date(new Date(date).getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0] + ' 06:00:00';
+      // El usuario indica que el turno 06:00 a 14:00 debe figurar con el día en que se hizo.
+      // Definimos el día operativo de 06:00 AM a 06:00 AM del día siguiente.
+      const startDate = `${date}T06:00:00`;
+      const endDate = new Date(new Date(date).getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0] + 'T06:00:00';
 
       const query = `
         SELECT 

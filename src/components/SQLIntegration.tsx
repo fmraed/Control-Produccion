@@ -35,10 +35,12 @@ export function SQLIntegration() {
       if (line === 'TODAS') {
         q = query(reportsRef, where('fecha', '==', date));
       } else {
+        // Extraer solo el número de la línea (ej: "1" de "LINEA TUCUMAN 1")
+        const lineNum = line.match(/\d+/)?.[0];
         q = query(
           reportsRef, 
           where('fecha', '==', date),
-          where('linea', '==', line.replace('LINEA ', ''))
+          where('linea', '==', lineNum || line)
         );
       }
       
@@ -50,7 +52,9 @@ export function SQLIntegration() {
         const key = `${data.sabor}-${data.tamano}`;
         const sqlCode = sqlMappings[key];
         if (sqlCode) {
-          totals[sqlCode] = (totals[sqlCode] || 0) + (data.totalBotellas || 0);
+          // Asegurarse de sumar el campo correcto (totalBotellas)
+          const botellas = Number(data.totalBotellas) || 0;
+          totals[sqlCode] = (totals[sqlCode] || 0) + botellas;
         }
       });
       
@@ -128,10 +132,9 @@ export function SQLIntegration() {
               className="w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2"
             >
               <option value="TODAS">Todas las Líneas</option>
-              <option value="LINEA 1">Línea 1</option>
-              <option value="LINEA 2">Línea 2</option>
-              <option value="LINEA 3">Línea 3</option>
-              <option value="LINEA 4">Línea 4</option>
+              <option value="LINEA TUCUMAN 1">Línea Tucumán 1</option>
+              <option value="LINEA TUCUMAN 2">Línea Tucumán 2</option>
+              <option value="LINEA TUCUMAN 3">Línea Tucumán 3</option>
             </select>
           </div>
           <div className="flex items-end">
