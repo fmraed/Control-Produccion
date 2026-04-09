@@ -3,12 +3,12 @@ import { Database, RefreshCw, AlertCircle, CheckCircle2, Search, AlertTriangle }
 import { format } from 'date-fns';
 import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { SQL_PRODUCT_MAPPING } from '../constants';
+import { SQL_PRODUCT_MAPPING, BOTELLAS_POR_PACK } from '../constants';
 
 export function SQLIntegration() {
   const [loading, setLoading] = useState(false);
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [line, setLine] = useState('LINEA 1');
+  const [line, setLine] = useState('TODAS');
   const [results, setResults] = useState<any[] | null>(null);
   const [firestoreTotals, setFirestoreTotals] = useState<Record<string, number>>({});
   const [sqlMappings, setSqlMappings] = useState<Record<string, string>>(SQL_PRODUCT_MAPPING);
@@ -30,11 +30,17 @@ export function SQLIntegration() {
     try {
       await fetchMappings();
       const reportsRef = collection(db, 'production_reports');
-      const q = query(
-        reportsRef, 
-        where('fecha', '==', date),
-        where('linea', '==', line.replace('LINEA ', ''))
-      );
+      
+      let q;
+      if (line === 'TODAS') {
+        q = query(reportsRef, where('fecha', '==', date));
+      } else {
+        q = query(
+          reportsRef, 
+          where('fecha', '==', date),
+          where('linea', '==', line.replace('LINEA ', ''))
+        );
+      }
       
       const querySnapshot = await getDocs(q);
       const totals: Record<string, number> = {};
@@ -52,6 +58,14 @@ export function SQLIntegration() {
     } catch (err) {
       console.error("Error fetching firestore data:", err);
     }
+  };
+
+  const getProductSizeFromCode = (code: string) => {
+    const entry = Object.entries(sqlMappings).find(([_, val]) => val === code);
+    if (!entry) return null;
+    const [key] = entry;
+    const size = parseInt(key.split('-')[1]);
+    return size;
   };
 
   const handleCheck = async () => {
@@ -113,6 +127,7 @@ export function SQLIntegration() {
               onChange={(e) => setLine(e.target.value)}
               className="w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2"
             >
+              <option value="TODAS">Todas las Líneas</option>
               <option value="LINEA 1">Línea 1</option>
               <option value="LINEA 2">Línea 2</option>
               <option value="LINEA 3">Línea 3</option>
@@ -175,9 +190,15 @@ export function SQLIntegration() {
               <tbody className="bg-white divide-y divide-gray-200">
                 {results.map((row, i) => {
                   const sqlCode = row.codigo_abreviado;
-                  const sqlCant = row.nu_cantFabri || 0;
-                  const appCant = firestoreTotals[sqlCode] || 0;
-                  const diff = appCant - sqlCant;
+                  const sqlPacks = row.nu_cantFabri || 0;
+                  
+                  // Convertir packs de SQL a botellas para comparar
+                  const size = getProductSizeFromCode(sqlCode);
+                  const bottlesPerPack = size ? (BOTELLAS_POR_PACK[size] || 6) : 6;
+                  const sqlCantBottles = sqlPacks * bottlesPerPack;
+                  
+                  const appCantBottles = firestoreTotals[sqlCode] || 0;
+                  const diff = appCantBottles - sqlCantBottles;
                   const hasError = Math.abs(diff) > 0;
 
                   return (
@@ -185,8 +206,13 @@ export function SQLIntegration() {
                       <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{row.nu_ordenProduccion}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{sqlCode}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{row.descripcion_articulo}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-blue-600">{sqlCant.toLocaleString()}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-purple-600">{appCant.toLocaleString()}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm">
+                        <div className="font-bold text-blue-600">{sqlCantBottles.toLocaleString()} bot.</div>
+                        <div className="text-xs text-gray-500">({sqlPacks.toLocaleString()} packs)</div>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-purple-600">
+                        {appCantBottles.toLocaleString()} bot.
+                      </td>
                       <td className={`px-4 py-3 whitespace-nowrap text-sm font-bold ${diff === 0 ? 'text-green-600' : 'text-red-600'}`}>
                         {diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString()}
                       </td>

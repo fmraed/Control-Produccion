@@ -78,14 +78,18 @@ async function startServer() {
             AND art.[id_categoria] = 1
             AND op.[fe_inicio] >= @start
             AND op.[fe_inicio] < @end
-            AND maq.[no_descripcion] LIKE @lineFilter
+            ${line === 'TODAS' ? '' : 'AND maq.[no_descripcion] LIKE @lineFilter'}
       `;
 
-      const result = await pool.request()
+      const request = pool.request()
         .input('start', sql.DateTime, startDate)
-        .input('end', sql.DateTime, endDate)
-        .input('lineFilter', sql.VarChar, `%${line}%`)
-        .query(query);
+        .input('end', sql.DateTime, endDate);
+      
+      if (line !== 'TODAS') {
+        request.input('lineFilter', sql.VarChar, `%${line}%`);
+      }
+
+      const result = await request.query(query);
 
       res.json({
         success: true,
