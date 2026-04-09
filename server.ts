@@ -36,7 +36,11 @@ async function startServer() {
 
   // API Route for SQL Cross-Check
   app.post("/api/sql/check-production", async (req, res) => {
-    const { date, line } = req.body;
+    const { date, line, shift } = req.body;
+
+    if (!date || !line) {
+      return res.status(400).json({ error: "Fecha y Línea son requeridas" });
+    }
 
     if (!process.env.SQL_SERVER_SERVER || !process.env.SQL_SERVER_USER || !process.env.SQL_SERVER_PASSWORD) {
       const missing = [];
@@ -54,16 +58,32 @@ async function startServer() {
     try {
       let pool = await sql.connect(sqlConfig);
       
-      // El usuario indica que el turno 06:00 a 14:00 debe figurar con el día en que se hizo.
-      // Definimos el día operativo de 06:00 AM a 06:00 AM del día siguiente.
-      // Usamos strings simples para evitar problemas de zona horaria con el objeto Date de JS
-      const startDate = `${date} 06:00:00`;
-      
-      // Calcular el día siguiente sumando un día a la cadena de fecha
-      const dateObj = new Date(date + 'T12:00:00'); // Usamos mediodía para evitar saltos de día por zona horaria
-      dateObj.setDate(dateObj.getDate() + 1);
-      const nextDay = dateObj.toISOString().split('T')[0];
-      const endDate = `${nextDay} 06:00:00`;
+      let startDate: string;
+      let endDate: string;
+
+      if (shift && shift !== 'TODOS') {
+        // Lógica por turno específico
+        if (shift === 'Mañana') {
+          startDate = `${date} 06:00:00`;
+          endDate = `${date} 14:00:00`;
+        } else if (shift === 'Tarde') {
+          startDate = `${date} 14:00:00`;
+          endDate = `${date} 22:00:00`;
+        } else { // Noche
+          startDate = `${date} 22:00:00`;
+          const dateObj = new Date(date + 'T12:00:00');
+          dateObj.setDate(dateObj.getDate() + 1);
+          const nextDay = dateObj.toISOString().split('T')[0];
+          endDate = `${nextDay} 06:00:00`;
+        }
+      } else {
+        // Día operativo completo (06:00 a 06:00)
+        startDate = `${date} 06:00:00`;
+        const dateObj = new Date(date + 'T12:00:00');
+        dateObj.setDate(dateObj.getDate() + 1);
+        const nextDay = dateObj.toISOString().split('T')[0];
+        endDate = `${nextDay} 06:00:00`;
+      }
 
       const query = `
         SELECT 

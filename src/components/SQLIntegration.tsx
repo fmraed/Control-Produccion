@@ -9,6 +9,7 @@ export function SQLIntegration() {
   const [loading, setLoading] = useState(false);
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [line, setLine] = useState('TODAS');
+  const [shift, setShift] = useState('TODOS');
   const [results, setResults] = useState<any[] | null>(null);
   const [firestoreTotals, setFirestoreTotals] = useState<Record<string, { packs: number, bottles: number }>>({});
   const [sqlMappings, setSqlMappings] = useState<Record<string, string>>(SQL_PRODUCT_MAPPING);
@@ -33,15 +34,27 @@ export function SQLIntegration() {
       
       let q;
       if (line === 'TODAS') {
-        q = query(reportsRef, where('fecha', '==', date));
+        if (shift === 'TODOS') {
+          q = query(reportsRef, where('fecha', '==', date));
+        } else {
+          q = query(reportsRef, where('fecha', '==', date), where('turno', '==', shift));
+        }
       } else {
-        // Extraer solo el número de la línea (ej: "1" de "LINEA TUCUMAN 1")
         const lineNum = line.match(/\d+/)?.[0];
-        q = query(
-          reportsRef, 
-          where('fecha', '==', date),
-          where('linea', '==', lineNum || line)
-        );
+        if (shift === 'TODOS') {
+          q = query(
+            reportsRef, 
+            where('fecha', '==', date),
+            where('linea', '==', lineNum || line)
+          );
+        } else {
+          q = query(
+            reportsRef, 
+            where('fecha', '==', date),
+            where('linea', '==', lineNum || line),
+            where('turno', '==', shift)
+          );
+        }
       }
       
       const querySnapshot = await getDocs(q);
@@ -86,7 +99,7 @@ export function SQLIntegration() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ date, line }),
+        body: JSON.stringify({ date, line, shift }),
       });
 
       const data = await response.json();
@@ -116,7 +129,7 @@ export function SQLIntegration() {
           Esta herramienta permite consultar la base de datos central (SQL Server) para verificar que los partes cargados en esta aplicación coincidan con los registros oficiales.
         </p>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Fecha a Consultar</label>
             <input
@@ -137,6 +150,19 @@ export function SQLIntegration() {
               <option value="LINEA TUCUMAN 1">Línea Tucumán 1</option>
               <option value="LINEA TUCUMAN 2">Línea Tucumán 2</option>
               <option value="LINEA TUCUMAN 3">Línea Tucumán 3</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Turno</label>
+            <select
+              value={shift}
+              onChange={(e) => setShift(e.target.value)}
+              className="w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2"
+            >
+              <option value="TODOS">Día Completo (06-06)</option>
+              <option value="Mañana">Mañana (06-14)</option>
+              <option value="Tarde">Tarde (14-22)</option>
+              <option value="Noche">Noche (22-06)</option>
             </select>
           </div>
           <div className="flex items-end">
@@ -193,48 +219,69 @@ export function SQLIntegration() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {results.map((row, i) => {
-                  const sqlCode = row.codigo_abreviado;
-                  const sqlPacks = row.nu_cantFabri || 0;
-                  
-                  const appData = firestoreTotals[sqlCode] || { packs: 0, bottles: 0 };
-                  const appPacks = appData.packs;
-                  const appBottles = appData.bottles;
+                {(() => {
+                  // Agrupar resultados de SQL por código de producto para comparar totales
+                  const groupedSql: Record<string, any> = {};
+                  results.forEach(row => {
+                    const code = row.codigo_abreviado;
+                    if (!groupedSql[code]) {
+                      groupedSql[code] = {
+                        ...row,
+                        nu_cantFabri: 0,
+                        ordenes: []
+                      };
+                    }
+                    groupedSql[code].nu_cantFabri += row.nu_cantFabri || 0;
+                    groupedSql[code].ordenes.push(row.nu_ordenProduccion);
+                  });
 
-                  const diffPacks = appPacks - sqlPacks;
-                  const hasError = Math.abs(diffPacks) > 0;
+                  return Object.values(groupedSql).map((row: any, i) => {
+                    const sqlCode = row.codigo_abreviado;
+                    const sqlPacks = row.nu_cantFabri || 0;
+                    
+                    const appData = firestoreTotals[sqlCode] || { packs: 0, bottles: 0 };
+                    const appPacks = appData.packs;
+                    const appBottles = appData.bottles;
 
-                  return (
-                    <tr key={i} className={`hover:bg-gray-50 transition-colors ${hasError ? 'bg-red-50/50' : ''}`}>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-600">{row.nu_ordenProduccion}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-500">{sqlCode}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 font-medium">{row.descripcion_articulo}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm">
-                        <div className="font-mono font-bold text-blue-700">{sqlPacks.toLocaleString()} packs</div>
-                        <div className="text-[10px] text-gray-400 uppercase tracking-wider">SQL Server</div>
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm">
-                        <div className="font-mono font-bold text-purple-700">{appPacks.toLocaleString()} packs</div>
-                        <div className="text-[10px] text-gray-400 uppercase tracking-wider">App (Partes)</div>
-                        <div className="text-[10px] text-purple-400 italic mt-0.5">{appBottles.toLocaleString()} botellas</div>
-                      </td>
-                      <td className={`px-4 py-3 whitespace-nowrap text-sm font-mono font-bold ${diffPacks === 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {diffPacks > 0 ? `+${diffPacks.toLocaleString()}` : diffPacks.toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm">
-                        {diffPacks === 0 ? (
-                          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-green-100 text-green-700 text-xs font-bold uppercase tracking-tight">
-                            <CheckCircle2 className="w-3 h-3" /> OK
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold uppercase tracking-tight">
-                            <AlertTriangle className="w-3 h-3" /> Desvío
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                    const diffPacks = appPacks - sqlPacks;
+                    const hasError = Math.abs(diffPacks) > 0;
+
+                    return (
+                      <tr key={i} className={`hover:bg-gray-50 transition-colors ${hasError ? 'bg-red-50/50' : ''}`}>
+                        <td className="px-4 py-3 text-sm font-mono text-gray-600">
+                          <div className="max-w-[150px] overflow-hidden text-ellipsis" title={row.ordenes.join(', ')}>
+                            {row.ordenes.join(', ')}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-500">{sqlCode}</td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 font-medium">{row.descripcion_articulo}</td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm">
+                          <div className="font-mono font-bold text-blue-700">{sqlPacks.toLocaleString()} packs</div>
+                          <div className="text-[10px] text-gray-400 uppercase tracking-wider">SQL Server (Total)</div>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm">
+                          <div className="font-mono font-bold text-purple-700">{appPacks.toLocaleString()} packs</div>
+                          <div className="text-[10px] text-gray-400 uppercase tracking-wider">App (Total {shift === 'TODOS' ? 'Día' : 'Turno'})</div>
+                          <div className="text-[10px] text-purple-400 italic mt-0.5">{appBottles.toLocaleString()} botellas</div>
+                        </td>
+                        <td className={`px-4 py-3 whitespace-nowrap text-sm font-mono font-bold ${diffPacks === 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {diffPacks > 0 ? `+${diffPacks.toLocaleString()}` : diffPacks.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm">
+                          {diffPacks === 0 ? (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-green-100 text-green-700 text-xs font-bold uppercase tracking-tight">
+                              <CheckCircle2 className="w-3 h-3" /> OK
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold uppercase tracking-tight">
+                              <AlertTriangle className="w-3 h-3" /> Desvío
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  });
+                })()}
               </tbody>
             </table>
           </div>
