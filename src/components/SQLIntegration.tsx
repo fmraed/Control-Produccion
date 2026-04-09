@@ -10,7 +10,7 @@ export function SQLIntegration() {
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [line, setLine] = useState('TODAS');
   const [results, setResults] = useState<any[] | null>(null);
-  const [firestoreTotals, setFirestoreTotals] = useState<Record<string, number>>({});
+  const [firestoreTotals, setFirestoreTotals] = useState<Record<string, { packs: number, bottles: number }>>({});
   const [sqlMappings, setSqlMappings] = useState<Record<string, string>>(SQL_PRODUCT_MAPPING);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,16 +45,18 @@ export function SQLIntegration() {
       }
       
       const querySnapshot = await getDocs(q);
-      const totals: Record<string, number> = {};
+      const totals: Record<string, { packs: number, bottles: number }> = {};
       
       querySnapshot.forEach((doc) => {
-        const data = doc.data();
+        const data = doc.data() as any;
         const key = `${data.sabor}-${data.tamano}`;
         const sqlCode = sqlMappings[key];
         if (sqlCode) {
-          // Asegurarse de sumar el campo correcto (totalBotellas)
-          const botellas = Number(data.totalBotellas) || 0;
-          totals[sqlCode] = (totals[sqlCode] || 0) + botellas;
+          if (!totals[sqlCode]) {
+            totals[sqlCode] = { packs: 0, bottles: 0 };
+          }
+          totals[sqlCode].packs += Number(data.paquetes) || 0;
+          totals[sqlCode].bottles += Number(data.botellas) || 0;
         }
       });
       
@@ -195,38 +197,38 @@ export function SQLIntegration() {
                   const sqlCode = row.codigo_abreviado;
                   const sqlPacks = row.nu_cantFabri || 0;
                   
-                  // Convertir packs de SQL a botellas para comparar
-                  const size = getProductSizeFromCode(sqlCode);
-                  const bottlesPerPack = size ? (BOTELLAS_POR_PACK[size] || 6) : 6;
-                  const sqlCantBottles = sqlPacks * bottlesPerPack;
-                  
-                  const appCantBottles = firestoreTotals[sqlCode] || 0;
-                  const diff = appCantBottles - sqlCantBottles;
-                  const hasError = Math.abs(diff) > 0;
+                  const appData = firestoreTotals[sqlCode] || { packs: 0, bottles: 0 };
+                  const appPacks = appData.packs;
+                  const appBottles = appData.bottles;
+
+                  const diffPacks = appPacks - sqlPacks;
+                  const hasError = Math.abs(diffPacks) > 0;
 
                   return (
-                    <tr key={i} className={hasError ? 'bg-red-50' : ''}>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{row.nu_ordenProduccion}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{sqlCode}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{row.descripcion_articulo}</td>
+                    <tr key={i} className={`hover:bg-gray-50 transition-colors ${hasError ? 'bg-red-50/50' : ''}`}>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-600">{row.nu_ordenProduccion}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-500">{sqlCode}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 font-medium">{row.descripcion_articulo}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm">
-                        <div className="font-bold text-blue-600">{sqlCantBottles.toLocaleString()} bot.</div>
-                        <div className="text-xs text-gray-500">({sqlPacks.toLocaleString()} packs)</div>
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-purple-600">
-                        {appCantBottles.toLocaleString()} bot.
-                      </td>
-                      <td className={`px-4 py-3 whitespace-nowrap text-sm font-bold ${diff === 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString()}
+                        <div className="font-mono font-bold text-blue-700">{sqlPacks.toLocaleString()} packs</div>
+                        <div className="text-[10px] text-gray-400 uppercase tracking-wider">SQL Server</div>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm">
-                        {diff === 0 ? (
-                          <span className="flex items-center gap-1 text-green-600 font-medium">
-                            <CheckCircle2 className="w-4 h-4" /> Coincide
+                        <div className="font-mono font-bold text-purple-700">{appPacks.toLocaleString()} packs</div>
+                        <div className="text-[10px] text-gray-400 uppercase tracking-wider">App (Partes)</div>
+                        <div className="text-[10px] text-purple-400 italic mt-0.5">{appBottles.toLocaleString()} botellas</div>
+                      </td>
+                      <td className={`px-4 py-3 whitespace-nowrap text-sm font-mono font-bold ${diffPacks === 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {diffPacks > 0 ? `+${diffPacks.toLocaleString()}` : diffPacks.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm">
+                        {diffPacks === 0 ? (
+                          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-green-100 text-green-700 text-xs font-bold uppercase tracking-tight">
+                            <CheckCircle2 className="w-3 h-3" /> OK
                           </span>
                         ) : (
-                          <span className="flex items-center gap-1 text-red-600 font-medium">
-                            <AlertTriangle className="w-4 h-4" /> Desvío
+                          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold uppercase tracking-tight">
+                            <AlertTriangle className="w-3 h-3" /> Desvío
                           </span>
                         )}
                       </td>

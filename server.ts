@@ -56,8 +56,14 @@ async function startServer() {
       
       // El usuario indica que el turno 06:00 a 14:00 debe figurar con el día en que se hizo.
       // Definimos el día operativo de 06:00 AM a 06:00 AM del día siguiente.
-      const startDate = `${date}T06:00:00`;
-      const endDate = new Date(new Date(date).getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0] + 'T06:00:00';
+      // Usamos strings simples para evitar problemas de zona horaria con el objeto Date de JS
+      const startDate = `${date} 06:00:00`;
+      
+      // Calcular el día siguiente sumando un día a la cadena de fecha
+      const dateObj = new Date(date + 'T12:00:00'); // Usamos mediodía para evitar saltos de día por zona horaria
+      dateObj.setDate(dateObj.getDate() + 1);
+      const nextDay = dateObj.toISOString().split('T')[0];
+      const endDate = `${nextDay} 06:00:00`;
 
       const query = `
         SELECT 
@@ -83,8 +89,8 @@ async function startServer() {
       `;
 
       const request = pool.request()
-        .input('start', sql.DateTime, startDate)
-        .input('end', sql.DateTime, endDate);
+        .input('start', sql.VarChar, startDate)
+        .input('end', sql.VarChar, endDate);
       
       if (line !== 'TODAS') {
         request.input('lineFilter', sql.VarChar, `%${line}%`);
