@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Database, RefreshCw, AlertCircle, CheckCircle2, Search, AlertTriangle } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, addDays } from 'date-fns';
 import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SQL_PRODUCT_MAPPING, BOTELLAS_POR_PACK } from '../constants';
+import { getLogicalDate } from '../utils';
 
 export function SQLIntegration() {
   const [loading, setLoading] = useState(false);
@@ -32,36 +33,43 @@ export function SQLIntegration() {
       await fetchMappings();
       const reportsRef = collection(db, 'production_reports');
       
-      let q;
-      if (line === 'TODAS') {
-        if (shift === 'TODOS') {
-          q = query(reportsRef, where('fecha', '==', date));
-        } else {
-          q = query(reportsRef, where('fecha', '==', date), where('turno', '==', shift));
-        }
-      } else {
-        const lineNum = line.match(/\d+/)?.[0];
-        if (shift === 'TODOS') {
-          q = query(
-            reportsRef, 
-            where('fecha', '==', date),
-            where('linea', '==', lineNum || line)
-          );
-        } else {
-          q = query(
-            reportsRef, 
-            where('fecha', '==', date),
-            where('linea', '==', lineNum || line),
-            where('turno', '==', shift)
-          );
-        }
-      }
+      // Para ser consistentes con la lógica de "Día Operativo" (06:00 a 06:00),
+      // debemos traer los partes de la fecha seleccionada Y del día siguiente,
+      // y luego filtrar por la "Fecha Lógica" (getLogicalDate).
+      const nextDay = format(addDays(new Date(date + 'T12:00:00'), 1), 'yyyy-MM-dd');
       
-      const querySnapshot = await getDocs(q);
+      const qCurrent = query(reportsRef, where('fecha', '==', date));
+      const qNext = query(reportsRef, where('fecha', '==', nextDay));
+      
+      const [snapCurrent, snapNext] = await Promise.all([
+        getDocs(qCurrent),
+        getDocs(qNext)
+      ]);
+
+      // Combinar resultados y filtrar por fecha lógica y línea/turno
+      const allDocs = [...snapCurrent.docs, ...snapNext.docs];
       const totals: Record<string, { packs: number, bottles: number }> = {};
       
-      querySnapshot.forEach((doc) => {
+      const lineNum = line !== 'TODAS' ? line.match(/\d+/)?.[0] : null;
+
+      allDocs.forEach((doc) => {
         const data = doc.data() as any;
+        const logicalDate = getLogicalDate(data);
+        
+        // Filtrar por fecha lógica
+        if (logicalDate !== date) return;
+
+        // Filtrar por línea si no es TODAS
+        if (line !== 'TODAS') {
+          const reportLine = data.linea;
+          if (reportLine !== (lineNum || line)) return;
+        }
+
+        // Filtrar por turno si no es TODOS
+        if (shift !== 'TODOS') {
+          if (data.turno !== shift) return;
+        }
+
         const key = `${data.sabor}-${data.tamano}`;
         const sqlCode = sqlMappings[key];
         if (sqlCode) {

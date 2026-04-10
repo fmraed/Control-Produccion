@@ -15,7 +15,8 @@ export function getLogicalDate(report: ProductionReport | ElaboracionReport): st
   
   if (!startTime) return report.fecha;
   
-  if (startTime >= '22:00' || startTime < '05:00') {
+  // Si el turno empieza entre las 00:00 y las 05:59, pertenece al día operativo anterior
+  if (startTime < '06:00') {
     const date = parseISO(report.fecha);
     const prevDay = subDays(date, 1);
     return format(prevDay, 'yyyy-MM-dd');
