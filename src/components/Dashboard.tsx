@@ -2,10 +2,11 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { ProductionReport } from '../types';
-import { FileText, Calendar, Clock, Activity, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, Trash2, Settings2, Info } from 'lucide-react';
+import { FileText, Calendar, Clock, Activity, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, Trash2, Settings2, Info, Printer } from 'lucide-react';
 import { format, parseISO, isAfter, subHours } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { getLogicalDate } from '../utils';
+import { printProductionReport } from '../utils/printReport';
 import { useAppConfig } from '../hooks/useAppConfig';
 import { doc, deleteDoc } from 'firebase/firestore';
 
@@ -14,7 +15,7 @@ interface DashboardProps {
   onEditReport: (report: ProductionReport) => void;
 }
 
-export function Dashboard({ onNewReport, onEditReport }: DashboardProps) {
+export function Dashboard({ onNewReport, onEditReport, isAdmin }: DashboardProps & { isAdmin?: boolean }) {
   const { 
     availableFlavors, 
     availableSizes, 
@@ -91,6 +92,10 @@ export function Dashboard({ onNewReport, onEditReport }: DashboardProps) {
       console.error("Error deleting report:", err);
       alert("Error al eliminar el reporte.");
     }
+  };
+
+  const handlePrint = (report: ProductionReport) => {
+    printProductionReport(report);
   };
 
   if (loading) {
@@ -236,8 +241,8 @@ export function Dashboard({ onNewReport, onEditReport }: DashboardProps) {
                   return contInicial || 0;
                 };
 
-                // Check if report was created in the last 24 hours
-                const isEditable = report.createdAt ? isAfter(parseISO(report.createdAt), subHours(new Date(), 24)) : false;
+                // Check if report was created in the last 24 hours OR if user is admin
+                const isEditable = (report.createdAt ? isAfter(parseISO(report.createdAt), subHours(new Date(), 24)) : false) || isAdmin;
                 const logicalDate = getLogicalDate(report);
                 const showLogicalDate = logicalDate && logicalDate !== report.fecha;
                 const isExpanded = expandedReport === report.id;
@@ -329,6 +334,13 @@ export function Dashboard({ onNewReport, onEditReport }: DashboardProps) {
                       title={isExpanded ? "Ocultar detalle" : "Ver detalle completo"}
                     >
                       {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    </button>
+                    <button
+                      onClick={() => handlePrint(report)}
+                      className="text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 p-2 rounded-md transition-colors"
+                      title="Imprimir para Expedición"
+                    >
+                      <Printer className="w-4 h-4" />
                     </button>
                     {isEditable && (
                       <button

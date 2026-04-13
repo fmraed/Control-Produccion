@@ -61,28 +61,32 @@ async function startServer() {
       let startDate: string;
       let endDate: string;
 
+      const dateObj = new Date(date + 'T12:00:00');
+      const isSaturday = dateObj.getDay() === 6;
+
       if (shift && shift !== 'TODOS') {
         // Lógica por turno específico
         if (shift === 'Mañana') {
-          startDate = `${date} 06:00:00`;
+          startDate = isSaturday ? `${date} 05:00:00` : `${date} 06:00:00`;
           endDate = `${date} 14:00:00`;
         } else if (shift === 'Tarde') {
           startDate = `${date} 14:00:00`;
           endDate = `${date} 22:00:00`;
         } else { // Noche
           startDate = `${date} 22:00:00`;
-          const dateObj = new Date(date + 'T12:00:00');
-          dateObj.setDate(dateObj.getDate() + 1);
-          const nextDay = dateObj.toISOString().split('T')[0];
-          endDate = `${nextDay} 06:00:00`;
+          const nextDayObj = new Date(dateObj);
+          nextDayObj.setDate(nextDayObj.getDate() + 1);
+          const nextDay = nextDayObj.toISOString().split('T')[0];
+          // Sábado noche corta a las 05:00
+          endDate = isSaturday ? `${nextDay} 05:00:00` : `${nextDay} 06:00:00`;
         }
       } else {
-        // Día operativo completo (06:00 a 06:00)
-        startDate = `${date} 06:00:00`;
-        const dateObj = new Date(date + 'T12:00:00');
-        dateObj.setDate(dateObj.getDate() + 1);
-        const nextDay = dateObj.toISOString().split('T')[0];
-        endDate = `${nextDay} 06:00:00`;
+        // Día operativo completo (06:00 a 06:00, o 05:00 en sábados)
+        startDate = isSaturday ? `${date} 05:00:00` : `${date} 06:00:00`;
+        const nextDayObj = new Date(dateObj);
+        nextDayObj.setDate(nextDayObj.getDate() + 1);
+        const nextDay = nextDayObj.toISOString().split('T')[0];
+        endDate = isSaturday ? `${nextDay} 05:00:00` : `${nextDay} 06:00:00`;
       }
 
       const query = `
@@ -103,8 +107,13 @@ async function startServer() {
         WHERE op.[id_sucursal] = 2
             AND op.[id_estado] = 50
             AND art.[id_categoria] = 1
-            AND op.[fe_inicio] >= @start
-            AND op.[fe_inicio] < @end
+            AND (
+                (op.[fe_inicio] >= @start AND op.[fe_inicio] < @end)
+                OR 
+                (op.[fe_finReal] > @start AND op.[fe_finReal] <= @end)
+                OR
+                (op.[fe_inicio] < @start AND op.[fe_finReal] > @end)
+            )
             ${line === 'TODAS' ? '' : 'AND maq.[no_descripcion] LIKE @lineFilter'}
       `;
 

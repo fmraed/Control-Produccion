@@ -36,6 +36,7 @@ export interface ProductionReport {
   botellas?: number;
   paquetes?: number;
   parcialAnterior?: number;
+  resetParcial?: boolean;
   ajusteParcial?: number;
   tickets?: number;
   parcialActual?: number;

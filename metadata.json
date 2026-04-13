@@ -1,5 +1,5 @@
 {
-  "name": "Control de Producción",
-  "description": "Aplicación para el registro y seguimiento de partes de producción en tiempo real.",
+  "name": "ProdTrack - Gestión de Producción",
+  "description": "Sistema de gestión de producción y elaboración con soporte offline y sincronización en tiempo real.",
   "requestFramePermissions": []
 }

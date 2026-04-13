@@ -31,6 +31,21 @@ export default function App() {
   const [paretoMonth, setParetoMonth] = useState<string>('');
   const [activeMenu, setActiveMenu] = useState<'data' | 'reports' | null>(null);
 
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
@@ -121,6 +136,12 @@ export default function App() {
               <span className="text-xl font-bold text-gray-900">ProdTrack</span>
             </div>
             <div className="flex items-center gap-4">
+              {!isOnline && (
+                <div className="flex items-center gap-1.5 px-2 py-1 bg-orange-100 text-orange-700 rounded-md text-xs font-bold animate-pulse">
+                  <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
+                  MODO OFFLINE
+                </div>
+              )}
               <button 
                 onClick={() => setCurrentView('profile')}
                 className="hidden sm:flex items-center gap-2 text-sm text-gray-600 hover:bg-gray-100 p-1 px-2 rounded-lg transition-colors"
@@ -352,7 +373,7 @@ export default function App() {
         </div>
 
         {currentView === 'dashboard' && (
-          <Dashboard onNewReport={handleNewReport} onEditReport={handleEditReport} />
+          <Dashboard onNewReport={handleNewReport} onEditReport={handleEditReport} isAdmin={isAdmin} />
         )}
         {currentView === 'consolidated' && (
           <ConsolidatedReport />
@@ -436,7 +457,7 @@ export default function App() {
           />
         )}
         {currentView === 'elaboracion_history' && (
-          <ElaboracionHistory onEditReport={handleEditElabReport} onNewReport={() => setCurrentView('elaboracion')} />
+          <ElaboracionHistory onEditReport={handleEditElabReport} onNewReport={() => setCurrentView('elaboracion')} isAdmin={isAdmin} />
         )}
         {currentView === 'new' && (
           <NewReportForm 

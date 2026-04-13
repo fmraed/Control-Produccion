@@ -3,26 +3,39 @@ import { ProductionReport, ElaboracionReport } from './types';
 
 /**
  * Returns the logical date for a report.
- * If a shift starts at or after 22:00, the report's date is the next day.
- * This function returns the actual start date (the day before).
+ * According to the user's rule:
+ * 1. The input date changes at 22:00 (anything from 22:00 onwards is entered as the next day).
+ * 2. This means a 'Noche' shift (starting at 22:00) is ALWAYS entered with the date of the next day.
+ * 3. For analysis (Industrial Day), we want the date the shift started.
+ * So, if it's 'Noche', we subtract 1 day from the entered date.
  */
 export function getLogicalDate(report: ProductionReport | ElaboracionReport): string {
   if (!report.fecha) return '';
   
-  const startTime = 'entraTurno' in report 
-    ? (report as ProductionReport).entraTurno 
-    : (report as ElaboracionReport).horaInicio;
-  
-  if (!startTime) return report.fecha;
-  
-  // Si el turno empieza entre las 00:00 y las 05:59, pertenece al día operativo anterior
-  if (startTime < '06:00') {
+  if (report.turno === 'Noche') {
     const date = parseISO(report.fecha);
     const prevDay = subDays(date, 1);
     return format(prevDay, 'yyyy-MM-dd');
   }
   
   return report.fecha;
+}
+
+/**
+ * Returns the default date for the input form based on the 22:00 rule.
+ */
+export function getDefaultInputDate(): string {
+  const now = new Date();
+  const hours = now.getHours();
+  
+  // Si son las 22:00 o más, la fecha por defecto es mañana
+  if (hours >= 22) {
+    const tomorrow = new Date(now);
+    tomorrow.setDate(now.getDate() + 1);
+    return tomorrow.toISOString().split('T')[0];
+  }
+  
+  return now.toISOString().split('T')[0];
 }
 
 export function getShiftHours(turno: string, fecha: string): string[] {

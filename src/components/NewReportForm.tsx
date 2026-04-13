@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { collection, addDoc, query, where, orderBy, limit, getDocs, doc, updateDoc, writeBatch, deleteDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Save, X, Plus, Trash2, Clock, Activity, AlertCircle, FileText, CheckCircle2 } from 'lucide-react';
+import { Save, X, Plus, Trash2, Clock, Activity, AlertCircle, FileText, CheckCircle2, Printer } from 'lucide-react';
 import { ProductionReport, HourlyProduction, Downtime } from '../types';
 import { 
   SUPERVISORES, TURNOS, LINEAS, MARCAS, SABORES, TAMANOS, SABORES_SIN_JARABE,
@@ -12,7 +12,8 @@ import {
   DOWNTIME_CATEGORIES
 } from '../constants';
 import { useAppConfig } from '../hooks/useAppConfig';
-import { getShiftHours } from '../utils';
+import { getShiftHours, getDefaultInputDate } from '../utils';
+import { printProductionReport } from '../utils/printReport';
 
 const CO2_VOLUMES: Record<string, Record<string, number>> = {
   'Torasso': {
@@ -40,7 +41,6 @@ function formatNumber(num: number): string {
 }
 
 function getAvailableMinutesInHour(horaStr: string, entraTurno?: string, saleTurno?: string): number {
-  let available = 60;
   let endHourNum = parseInt(horaStr, 10);
   if (endHourNum === 24) endHourNum = 0;
   let startHourNum = endHourNum - 1;
@@ -64,27 +64,34 @@ function getAvailableMinutesInHour(horaStr: string, entraTurno?: string, saleTur
     if (saleH === 24) saleH = 0;
   }
 
-  if (entraH === startHourNum && saleH === startHourNum) {
-    return Math.max(0, saleM - entraM);
-  }
+  if (entraH === -1 || saleH === -1) return 60;
 
-  if (entraH === startHourNum) {
-    available = 60 - entraM;
-  } else if (saleH === startHourNum) {
-    available = saleM;
-  } else if (entraH !== -1 && saleH !== -1) {
-    // Check if hour is outside the shift
-    let isOutside = false;
-    if (entraH < saleH) {
-      if (startHourNum < entraH || startHourNum >= saleH) isOutside = true;
-    } else {
-      // Shift crosses midnight
-      if (startHourNum < entraH && startHourNum >= saleH) isOutside = true;
-    }
-    if (isOutside) available = 0;
-  }
+  const totalEntra = entraH * 60 + entraM;
+  const totalSale = saleH * 60 + saleM;
+  const hourStart = startHourNum * 60;
+  const hourEnd = startHourNum * 60 + 60;
 
-  return Math.max(0, available);
+  if (totalEntra < totalSale) {
+    // Turno en el mismo día
+    const intersectionStart = Math.max(hourStart, totalEntra);
+    const intersectionEnd = Math.min(hourEnd, totalSale);
+    return Math.max(0, intersectionEnd - intersectionStart);
+  } else if (totalEntra > totalSale) {
+    // Turno cruza medianoche
+    // El turno es [totalEntra, 24*60] UNION [0, totalSale]
+    const part1Start = Math.max(hourStart, totalEntra);
+    const part1End = Math.min(hourEnd, 24 * 60);
+    const part1 = Math.max(0, part1End - part1Start);
+
+    const part2Start = Math.max(hourStart, 0);
+    const part2End = Math.min(hourEnd, totalSale);
+    const part2 = Math.max(0, part2End - part2Start);
+
+    return part1 + part2;
+  } else {
+    // totalEntra === totalSale -> Asumimos 24 horas
+    return 60;
+  }
 }
 
 function parseTime(t: string): number {
@@ -218,6 +225,7 @@ const reportSchema = z.object({
     co2: z.number().min(0).optional(),
     observaciones: z.string().optional(),
     parcialAnterior: z.number().min(0).optional(),
+    resetParcial: z.boolean().optional(),
     ajusteParcial: z.number().optional(),
     hourlyProduction: z.array(z.object({
       hora: z.string(),
@@ -264,6 +272,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+  const [lastSavedReport, setLastSavedReport] = useState<ProductionReport | null>(null);
   const lastShiftDate = useRef<Record<number, string>>({});
 
   const createDefaultHourlyProduction = (turno: string = TURNOS[0], fecha: string = new Date().toISOString().split('T')[0]): HourlyProduction[] => {
@@ -277,7 +286,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
   };
 
   const createDefaultReport = (index: number): any => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getDefaultInputDate();
     const defaultTurno = TURNOS[0];
     return {
       supervisor: '',
@@ -289,6 +298,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
       sabor: '',
       tamano: 0,
       parcialAnterior: 0,
+      resetParcial: false,
       ajusteParcial: 0,
       botRotas: 0,
       jarabeInicial: 0,
@@ -527,6 +537,14 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
     if (!isDraftLoaded) return;
     reports?.forEach(async (report, index) => {
       if (report.linea && report.sabor && report.tamano) {
+        // Si el usuario marcó reiniciar, forzamos a 0 y no buscamos en la DB
+        if (report.resetParcial) {
+          if (report.parcialAnterior !== 0) {
+            setValue(`reports.${index}.parcialAnterior`, 0, { shouldValidate: true });
+          }
+          return;
+        }
+
         const key = `parcial-${report.linea}-${report.sabor}-${report.tamano}`;
         const isNewFlavor = lastFlavorKeys.current[index] !== key;
         lastFlavorKeys.current[index] = key;
@@ -894,9 +912,10 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
       }
 
       setSaveSuccess(initialData ? `Parte actualizado correctamente.` : `Parte ${activeTab + 1} guardado correctamente.`);
-      setTimeout(() => setSaveSuccess(null), 3000);
+      setLastSavedReport(reportData);
+      setTimeout(() => setSaveSuccess(null), 5000);
       
-      setTimeout(onSuccess, 1500);
+      // setTimeout(onSuccess, 1500); // Removed to stay on form
     } catch (err) {
       console.error("Error saving report:", err);
       setError("Ocurrió un error al guardar el parte de producción.");
@@ -1314,7 +1333,24 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700">Parcial Anterior</label>
+                        <div className="flex justify-between items-center mb-1">
+                          <label className="block text-sm font-medium text-gray-700">Parcial Anterior</label>
+                          <Controller
+                            name={`reports.${index}.resetParcial`}
+                            control={control}
+                            render={({ field }) => (
+                              <label className="flex items-center gap-1 cursor-pointer group">
+                                <input
+                                  type="checkbox"
+                                  checked={field.value}
+                                  onChange={(e) => field.onChange(e.target.checked)}
+                                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-3 h-3"
+                                />
+                                <span className="text-[10px] text-gray-400 group-hover:text-blue-600 transition-colors">Reiniciar</span>
+                              </label>
+                            )}
+                          />
+                        </div>
                         <input type="number" value={parcialAnterior} readOnly className="mt-1 block w-full rounded-md border-gray-300 shadow-sm bg-gray-50 sm:text-sm border p-2 text-gray-500" />
                       </div>
                       <Controller
@@ -1615,8 +1651,20 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
             className="inline-flex items-center gap-2 px-6 py-2.5 border border-gray-300 shadow-sm text-sm font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
           >
             <X className="w-4 h-4" />
-            Cancelar
+            {saveSuccess ? 'Cerrar' : 'Cancelar'}
           </button>
+          
+          {lastSavedReport && (
+            <button
+              type="button"
+              onClick={() => printProductionReport(lastSavedReport)}
+              className="inline-flex items-center gap-2 px-6 py-2.5 border border-gray-300 shadow-sm text-sm font-medium rounded-lg text-blue-700 bg-blue-50 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              <Printer className="w-4 h-4" />
+              Imprimir para Expedición
+            </button>
+          )}
+
           <button
             type="button"
             onClick={handleSaveCurrentPart}

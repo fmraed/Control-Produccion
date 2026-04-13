@@ -13,7 +13,7 @@ interface ElaboracionHistoryProps {
   onNewReport: () => void;
 }
 
-export function ElaboracionHistory({ onEditReport, onNewReport }: ElaboracionHistoryProps) {
+export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: ElaboracionHistoryProps & { isAdmin?: boolean }) {
   const { 
     availableFlavors, 
     availableSizes, 
@@ -192,7 +192,7 @@ export function ElaboracionHistory({ onEditReport, onNewReport }: ElaboracionHis
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredReports.map((report) => {
-                const isEditable = report.createdAt ? isAfter(parseISO(report.createdAt), subHours(new Date(), 24)) : false;
+                const isEditable = (report.createdAt ? isAfter(parseISO(report.createdAt), subHours(new Date(), 24)) : false) || isAdmin;
                 const isExpanded = expandedReport === report.id;
                 const logicalDate = getLogicalDate(report);
                 const showLogicalDate = logicalDate && logicalDate !== report.fecha;

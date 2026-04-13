@@ -189,8 +189,8 @@ service cloud.firestore {
     match /elaboracion_reports/{reportId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidElaboracionReport(request.resource.data) && uidUnchanged();
-      allow update: if isAuthenticated() && isDocOwner() && isValidElaboracionReport(request.resource.data) && uidNotModified();
-      allow delete: if isAuthenticated() && isDocOwner();
+      allow update: if isAuthenticated() && (isDocOwner() || isAdmin()) && isValidElaboracionReport(request.resource.data) && uidNotModified();
+      allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
     }
 
     match /config/{configId} {
@@ -215,12 +215,12 @@ service cloud.firestore {
                     uidUnchanged();
                     
       allow update: if isAuthenticated() && 
-                    isDocOwner() &&
+                    (isDocOwner() || isAdmin()) &&
                     isValidProductionReport(request.resource.data) && 
                     uidNotModified() &&
                     areImmutableFieldsUnchanged(['createdAt', 'authorId']);
                     
-      allow delete: if isAuthenticated() && isDocOwner();
+      allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
     }
   }
 }

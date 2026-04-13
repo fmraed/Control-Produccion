@@ -6,7 +6,7 @@ import { ElaboracionReport, ElaboracionHourlyData } from '../types';
 import { Save, X, Plus, Trash2, Beaker, Thermometer, Droplets, Gauge, CheckCircle2, AlertCircle, Clock, Activity } from 'lucide-react';
 import { TURNOS, CARBONATION_TABLE, CARBONATION_PRESSURES, CARBONATION_TEMPS, SABORES_SIN_JARABE } from '../constants';
 import { useAppConfig } from '../hooks/useAppConfig';
-import { getShiftHours } from '../utils';
+import { getShiftHours, getDefaultInputDate } from '../utils';
 
 interface ElaboracionFormValues {
   reports: ElaboracionReport[];
@@ -100,7 +100,7 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
   };
 
   const createDefaultReport = (): ElaboracionReport => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getDefaultInputDate();
     const defaultTurno = TURNOS[0];
     return {
       fecha: today,
