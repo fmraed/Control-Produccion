@@ -59,7 +59,7 @@ export function StockControl() {
       if (result.success) {
         setSqlStock(result.data);
       } else {
-        setError(result.error || "Error al conectar con SQL Server");
+        setError(result.details ? `${result.error}: ${result.details}` : result.error || "Error al conectar con SQL Server");
       }
     } catch (err) {
       console.error("Error fetching SQL stock:", err);

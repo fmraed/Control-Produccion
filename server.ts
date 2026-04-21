@@ -184,7 +184,10 @@ async function startServer() {
       });
     } catch (err) {
       console.error("SQL Stock Error:", err);
-      res.status(500).json({ error: "Error al consultar stock en SQL" });
+      res.status(500).json({ 
+        error: "Error al consultar stock en SQL",
+        details: err instanceof Error ? err.message : String(err)
+      });
     }
   });
 
