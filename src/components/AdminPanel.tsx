@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
-import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { useState, useEffect, Fragment } from 'react';
+import { collection, query, orderBy, onSnapshot, doc, getDoc, setDoc, addDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK } from '../constants';
-import { Settings, Save, CheckCircle2, XCircle, AlertCircle, Plus, Trash2, Users, Database, FlaskConical, Link2 } from 'lucide-react';
+import { Settings, Save, CheckCircle2, XCircle, AlertCircle, Plus, Trash2, Users, Database, FlaskConical, Link2, Clock, Calendar, ShieldCheck, UserCog, Briefcase } from 'lucide-react';
+import { UserProfile, UserRole, RolePermissions } from '../types';
 import { SQLIntegration } from './SQLIntegration';
 import { SQLMappingEditor } from './SQLMappingEditor';
 
@@ -21,9 +22,20 @@ interface AppConfig {
   enabledChemists: Record<string, boolean>;
   brandFlavorCombinations: Record<string, string[]>;
   lineSizeCombinations: Record<string, number[]>;
+  activeProducts?: Record<string, Record<string, string[]>>; // Brand -> Size -> Flavors[]
   velocidadMatrix: Record<string, Record<number, number>>;
   packsPorPaleta: Record<number, number>;
   botellasPorPack: Record<number, number>;
+  shiftConfig?: {
+    standardShiftDuration: number;
+    shiftDurations: {
+      Mañana: number;
+      Tarde: number;
+      Noche: number;
+    };
+    weeklyPlan: Record<string, Record<string, { count: number, duration: number }>>;
+    holidays?: string[];
+  };
 }
 
 export function AdminPanel() {
@@ -31,8 +43,26 @@ export function AdminPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
-  const [activeTab, setActiveTab] = useState<'config' | 'sql' | 'mappings'>('config');
+  const [activeTab, setActiveTab] = useState<'config' | 'sql' | 'mappings' | 'shifts' | 'users' | 'permissions'>('config');
+
+  // User management states
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [allowedUsers, setAllowedUsers] = useState<any[]>([]);
+  const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   
+  // New user form states
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserRole, setNewUserRole] = useState<UserRole>('produccion');
+  const [newUserSector, setNewUserSector] = useState('');
+  const [isAddingUser, setIsAddingUser] = useState(false);
+
+  // Permission states
+  const [rolePermissions, setRolePermissions] = useState<Record<UserRole, RolePermissions> | null>(null);
+  
+  // Active product config selection
+  const [selectedBrandForTriple, setSelectedBrandForTriple] = useState('');
+  const [selectedSizeForTriple, setSelectedSizeForTriple] = useState<number | null>(null);
+
   // New item inputs
   const [newFlavor, setNewFlavor] = useState('');
   const [newSize, setNewSize] = useState('');
@@ -51,6 +81,65 @@ export function AdminPanel() {
       if (docSnap.exists()) {
         const data = docSnap.data() as any;
         // Merge with defaults to ensure all fields exist even if the document is old
+        let shiftConfig = data.shiftConfig || {
+          standardShiftDuration: 480,
+          shiftDurations: { Mañana: 480, Tarde: 480, Noche: 480 },
+          weeklyPlan: {
+            monday: ['Mañana', 'Tarde', 'Noche'],
+            tuesday: ['Mañana', 'Tarde', 'Noche'],
+            wednesday: ['Mañana', 'Tarde', 'Noche'],
+            thursday: ['Mañana', 'Tarde', 'Noche'],
+            friday: ['Mañana', 'Tarde', 'Noche'],
+            saturday: ['Mañana'],
+            sunday: []
+          }
+        };
+
+        // Normalize weeklyPlan if it's in the old format
+        if (shiftConfig.weeklyPlan) {
+          const normalizedWeeklyPlan: any = {};
+          const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+          const enabledLinesCount = data.lines?.filter((l: string) => data.enabledLines?.[l] !== false).length || 3;
+          
+          days.forEach(day => {
+            const val = shiftConfig.weeklyPlan[day];
+            normalizedWeeklyPlan[day] = {};
+            
+            ['Mañana', 'Tarde', 'Noche'].forEach(shift => {
+              if (Array.isArray(val)) {
+                // Format from previous turn (array of strings)
+                const isActive = val.includes(shift);
+                normalizedWeeklyPlan[day][shift] = {
+                  count: isActive ? enabledLinesCount : 0,
+                  duration: shiftConfig.shiftDurations?.[shift] || 480
+                };
+              } else if (typeof val === 'object' && val !== null && val[shift]) {
+                // Already in new format
+                normalizedWeeklyPlan[day][shift] = val[shift];
+              } else {
+                // Old numeric format or missing
+                normalizedWeeklyPlan[day][shift] = { count: 0, duration: 480 };
+              }
+            });
+          });
+          shiftConfig.weeklyPlan = normalizedWeeklyPlan;
+        }
+
+        // Ensure shiftDurations exists
+        if (!shiftConfig.shiftDurations) {
+          shiftConfig.shiftDurations = { Mañana: 480, Tarde: 480, Noche: 480 };
+        }
+
+        // Ensure holidays exists
+        if (!shiftConfig.holidays) {
+          shiftConfig.holidays = [];
+        }
+
+        // Ensure holidayNightDuration exists
+        if (shiftConfig.holidayNightDuration === undefined) {
+          shiftConfig.holidayNightDuration = 360;
+        }
+
         const mergedConfig: AppConfig = {
           flavors: Array.isArray(data.flavors) ? data.flavors : SABORES,
           enabledFlavors: data.enabledFlavors || {},
@@ -66,9 +155,11 @@ export function AdminPanel() {
           enabledChemists: data.enabledChemists || {},
           brandFlavorCombinations: data.brandFlavorCombinations || {},
           lineSizeCombinations: data.lineSizeCombinations || {},
+          activeProducts: data.activeProducts || {},
           velocidadMatrix: data.velocidadMatrix || VELOCIDAD_MATRIX,
           packsPorPaleta: data.packsPorPaleta || PACKS_POR_PALETA,
-          botellasPorPack: data.botellasPorPack || BOTELLAS_POR_PACK
+          botellasPorPack: data.botellasPorPack || BOTELLAS_POR_PACK,
+          shiftConfig: shiftConfig
         };
         setConfig(mergedConfig);
       } else {
@@ -115,9 +206,52 @@ export function AdminPanel() {
           enabledChemists: initialChemists,
           brandFlavorCombinations: initialBrandCombinations,
           lineSizeCombinations: initialLineCombinations,
+          activeProducts: {},
           velocidadMatrix: VELOCIDAD_MATRIX,
           packsPorPaleta: PACKS_POR_PALETA,
-          botellasPorPack: BOTELLAS_POR_PACK
+          botellasPorPack: BOTELLAS_POR_PACK,
+          shiftConfig: {
+            standardShiftDuration: 480,
+            shiftDurations: { Mañana: 480, Tarde: 480, Noche: 480 },
+            weeklyPlan: {
+              monday: { 
+                Mañana: { count: 3, duration: 480 }, 
+                Tarde: { count: 3, duration: 480 }, 
+                Noche: { count: 3, duration: 480 } 
+              },
+              tuesday: { 
+                Mañana: { count: 3, duration: 480 }, 
+                Tarde: { count: 3, duration: 480 }, 
+                Noche: { count: 3, duration: 480 } 
+              },
+              wednesday: { 
+                Mañana: { count: 3, duration: 480 }, 
+                Tarde: { count: 3, duration: 480 }, 
+                Noche: { count: 3, duration: 480 } 
+              },
+              thursday: { 
+                Mañana: { count: 3, duration: 480 }, 
+                Tarde: { count: 3, duration: 480 }, 
+                Noche: { count: 3, duration: 480 } 
+              },
+              friday: { 
+                Mañana: { count: 3, duration: 480 }, 
+                Tarde: { count: 3, duration: 480 }, 
+                Noche: { count: 3, duration: 420 } 
+              },
+              saturday: { 
+                Mañana: { count: 3, duration: 480 }, 
+                Tarde: { count: 0, duration: 480 }, 
+                Noche: { count: 0, duration: 480 } 
+              },
+              sunday: { 
+                Mañana: { count: 0, duration: 480 }, 
+                Tarde: { count: 0, duration: 480 }, 
+                Noche: { count: 3, duration: 360 } 
+              }
+            },
+            holidays: []
+          }
         };
         setConfig(defaultConfig);
       }
@@ -130,6 +264,114 @@ export function AdminPanel() {
 
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'users') {
+      const unsubUsers = onSnapshot(collection(db, 'users'), (snap) => {
+        setUsers(snap.docs.map(d => d.data() as UserProfile));
+      });
+      const unsubAllowed = onSnapshot(collection(db, 'allowed_users'), (snap) => {
+        setAllowedUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      });
+      return () => {
+        unsubUsers();
+        unsubAllowed();
+      };
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'permissions') {
+      const unsub = onSnapshot(doc(db, 'config', 'permissions'), (snap) => {
+        if (snap.exists()) {
+          setRolePermissions(snap.data() as Record<UserRole, RolePermissions>);
+        } else {
+          // Initialize with defaults if empty
+          const defaults: Record<UserRole, RolePermissions> = {
+            admin: {
+              viewReports: true, editReports: true, viewElaboracion: true, editElaboracion: true,
+              viewScheduler: true, editScheduler: true, viewPersonnel: true, editPersonnel: true,
+              viewLiveMonitor: true, viewAnalytics: true, viewAdmin: true
+            },
+            jefe_produccion: {
+              viewReports: true, editReports: true, viewElaboracion: true, editElaboracion: true,
+              viewScheduler: true, editScheduler: true, viewPersonnel: true, editPersonnel: true,
+              viewLiveMonitor: true, viewAnalytics: true, viewAdmin: false
+            },
+            produccion: {
+              viewReports: true, editReports: true, viewElaboracion: true, editElaboracion: true,
+              viewScheduler: true, editScheduler: false, viewPersonnel: true, editPersonnel: true,
+              viewLiveMonitor: true, viewAnalytics: false, viewAdmin: false
+            },
+            calidad: {
+              viewReports: true, editReports: false, viewElaboracion: true, editElaboracion: true,
+              viewScheduler: true, editScheduler: false, viewPersonnel: true, editPersonnel: true,
+              viewLiveMonitor: true, viewAnalytics: false, viewAdmin: false
+            }
+          };
+          setRolePermissions(defaults);
+        }
+      });
+      return () => unsub();
+    }
+  }, [activeTab]);
+
+  const handleUpdateUser = async (user: UserProfile) => {
+    try {
+      await setDoc(doc(db, 'users', user.uid), {
+        ...user,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      setMessage({ type: 'success', text: 'Usuario actualizado' });
+      setEditingUser(null);
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Error al actualizar usuario' });
+    }
+  };
+
+  const handleAddAllowedUser = async () => {
+    if (!newUserEmail.trim()) return;
+    setIsAddingUser(true);
+    try {
+      const email = newUserEmail.toLowerCase().trim();
+      await setDoc(doc(db, 'allowed_users', email), {
+        email,
+        role: newUserRole,
+        sector: newUserSector,
+        createdAt: new Date().toISOString()
+      });
+      setNewUserEmail('');
+      setNewUserSector('');
+      setMessage({ type: 'success', text: 'Usuario habilitado correctamente' });
+    } catch (error) {
+      console.error("Error adding allowed user:", error);
+      setMessage({ type: 'error', text: 'Error al habilitar usuario' });
+    } finally {
+      setIsAddingUser(false);
+    }
+  };
+
+  const handleDeleteAllowedUser = async (email: string) => {
+    try {
+      await deleteDoc(doc(db, 'allowed_users', email));
+      setMessage({ type: 'success', text: 'Permiso eliminado' });
+    } catch (error) {
+      console.error("Error deleting allowed user:", error);
+      setMessage({ type: 'error', text: 'Error al eliminar permiso' });
+    }
+  };
+
+  const handleUpdatePermissions = async (role: UserRole, perms: RolePermissions) => {
+    if (!rolePermissions) return;
+    const newPerms = { ...rolePermissions, [role]: perms };
+    setRolePermissions(newPerms);
+    try {
+      await setDoc(doc(db, 'config', 'permissions'), newPerms);
+      setMessage({ type: 'success', text: 'Permisos actualizados' });
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Error al actualizar permisos' });
+    }
+  };
 
   const handleAddFlavor = () => {
     if (!config || !newFlavor.trim()) return;
@@ -420,6 +662,36 @@ export function AdminPanel() {
     });
   };
 
+  const handleToggleTripleCombination = (brand: string, size: number, flavor: string) => {
+    if (!config) return;
+    const sizeStr = size.toString();
+    const currentActiveProducts = config.activeProducts || {};
+    const brandActiveProducts = currentActiveProducts[brand] || {};
+    
+    // Check if the specific size exists in activeProducts to avoid incorrect fallback
+    const sizeFlavors = (brandActiveProducts && sizeStr in brandActiveProducts)
+      ? (brandActiveProducts as any)[sizeStr]
+      : (config.brandFlavorCombinations[brand] || []);
+    
+    let newFlavors;
+    if (sizeFlavors.includes(flavor)) {
+      newFlavors = sizeFlavors.filter(f => f !== flavor);
+    } else {
+      newFlavors = [...sizeFlavors, flavor];
+    }
+    
+    setConfig({
+      ...config,
+      activeProducts: {
+        ...currentActiveProducts,
+        [brand]: {
+          ...brandActiveProducts,
+          [sizeStr]: newFlavors
+        }
+      }
+    });
+  };
+
   const handleUpdateVelocidad = (line: string, size: number, speed: string) => {
     if (!config) return;
     const numSpeed = parseInt(speed, 10);
@@ -527,6 +799,39 @@ export function AdminPanel() {
           <Link2 className="w-4 h-4" />
           Mapeo de Códigos
         </button>
+        <button
+          onClick={() => setActiveTab('shifts')}
+          className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+            activeTab === 'shifts'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          }`}
+        >
+          <Clock className="w-4 h-4" />
+          Configuración de Turnos
+        </button>
+        <button
+          onClick={() => setActiveTab('users')}
+          className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+            activeTab === 'users'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          }`}
+        >
+          <UserCog className="w-4 h-4" />
+          Usuarios y Roles
+        </button>
+        <button
+          onClick={() => setActiveTab('permissions')}
+          className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+            activeTab === 'permissions'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          }`}
+        >
+          <ShieldCheck className="w-4 h-4" />
+          Permisos Dinámicos
+        </button>
       </div>
 
       {activeTab === 'sql' ? (
@@ -534,6 +839,279 @@ export function AdminPanel() {
       ) : activeTab === 'mappings' ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <SQLMappingEditor />
+        </div>
+      ) : activeTab === 'shifts' ? (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-2">
+              <Clock className="w-6 h-6 text-blue-600" />
+              <h2 className="text-xl font-bold text-gray-900">Planificación de Turnos</h2>
+            </div>
+            <button
+              onClick={saveConfig}
+              disabled={saving}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+            >
+              {saving ? <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" /> : <Save className="w-4 h-4" />}
+              Guardar Planificación
+            </button>
+          </div>
+
+          <div className="max-w-4xl space-y-8">
+            <section>
+              <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-gray-400" />
+                Planificación Semanal Detallada
+              </h3>
+              <p className="text-sm text-gray-500 mb-4">
+                Configura la cantidad de turnos (líneas activas) y la duración específica para cada turno por día.
+              </p>
+              
+              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider border-r">Día</th>
+                      {['Mañana', 'Tarde', 'Noche'].map(s => (
+                        <th key={s} className="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider border-r" colSpan={2}>{s}</th>
+                      ))}
+                      <th className="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Total</th>
+                    </tr>
+                    <tr className="bg-gray-100/50">
+                      <th className="border-r"></th>
+                      {['Mañana', 'Tarde', 'Noche'].map(s => (
+                        <Fragment key={s}>
+                          <th className="px-2 py-1 text-[10px] text-gray-400 font-medium text-center border-r">Cant.</th>
+                          <th className="px-2 py-1 text-[10px] text-gray-400 font-medium text-center border-r">Min.</th>
+                        </Fragment>
+                      ))}
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map((day) => {
+                      const dayPlan = config.shiftConfig?.weeklyPlan[day] || {};
+                      let totalDayShifts = 0;
+                      Object.values(dayPlan).forEach((p: any) => totalDayShifts += (p.count || 0));
+                      
+                      return (
+                        <tr key={day} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-gray-700 capitalize border-r bg-gray-50/30">
+                            {day === 'monday' && 'Lunes'}
+                            {day === 'tuesday' && 'Martes'}
+                            {day === 'wednesday' && 'Miércoles'}
+                            {day === 'thursday' && 'Jueves'}
+                            {day === 'friday' && 'Viernes'}
+                            {day === 'saturday' && 'Sábado'}
+                            {day === 'sunday' && 'Domingo'}
+                          </td>
+                          {['Mañana', 'Tarde', 'Noche'].map(shift => {
+                            const p = (dayPlan as any)[shift] || { count: 0, duration: 480 };
+                            return (
+                              <Fragment key={shift}>
+                                <td className="px-2 py-2 border-r">
+                                  <input 
+                                    type="number"
+                                    min="0"
+                                    max="10"
+                                    step="0.5"
+                                    value={p.count}
+                                    onChange={(e) => {
+                                      const count = Math.max(0, Number(e.target.value));
+                                      setConfig({
+                                        ...config,
+                                        shiftConfig: {
+                                          ...config.shiftConfig!,
+                                          weeklyPlan: {
+                                            ...config.shiftConfig!.weeklyPlan,
+                                            [day]: {
+                                              ...dayPlan,
+                                              [shift]: { ...p, count }
+                                            }
+                                          }
+                                        }
+                                      });
+                                    }}
+                                    className={`w-12 text-center text-sm border rounded p-1 focus:ring-1 focus:ring-blue-500 ${p.count > 0 ? 'bg-blue-50 border-blue-200 font-bold text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}
+                                  />
+                                </td>
+                                <td className="px-2 py-2 border-r">
+                                  <input 
+                                    type="number"
+                                    min="0"
+                                    value={p.duration}
+                                    onChange={(e) => {
+                                      const duration = Math.max(0, Number(e.target.value));
+                                      setConfig({
+                                        ...config,
+                                        shiftConfig: {
+                                          ...config.shiftConfig!,
+                                          weeklyPlan: {
+                                            ...config.shiftConfig!.weeklyPlan,
+                                            [day]: {
+                                              ...dayPlan,
+                                              [shift]: { ...p, duration }
+                                            }
+                                          }
+                                        }
+                                      });
+                                    }}
+                                    className={`w-16 text-center text-xs border rounded p-1 focus:ring-1 focus:ring-blue-500 ${p.count > 0 ? 'bg-white border-gray-300' : 'bg-gray-50 border-gray-100 text-gray-300'}`}
+                                  />
+                                </td>
+                              </Fragment>
+                            );
+                          })}
+                          <td className="px-4 py-3 text-right text-sm font-black text-blue-600 bg-blue-50/20">
+                            {totalDayShifts}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-100">
+                <h4 className="text-sm font-bold text-blue-800 mb-2">Resumen de Horas Semanales Planificadas:</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                  {['Mañana', 'Tarde', 'Noche'].map(shift => {
+                    let weeklyHours = 0;
+                    Object.values(config.shiftConfig?.weeklyPlan || {}).forEach((dayPlan: any) => {
+                      const p = dayPlan[shift];
+                      if (p && p.count > 0) {
+                        // We calculate hours per line (duration of the shift)
+                        weeklyHours += p.duration / 60;
+                      }
+                    });
+                    return (
+                      <div key={shift} className="bg-white p-2 rounded border border-blue-200">
+                        <span className="text-xs text-gray-500 block">{shift}</span>
+                        <span className="text-lg font-black text-blue-700">{weeklyHours.toFixed(1)} hs/sem</span>
+                      </div>
+                    );
+                  })}
+                  
+                  {(() => {
+                    const standardDays = ['monday', 'tuesday', 'wednesday', 'thursday'];
+                    let standardDaysSum = 0;
+                    standardDays.forEach(day => {
+                      const dayPlan = config.shiftConfig?.weeklyPlan[day] || {};
+                      ['Mañana', 'Tarde', 'Noche'].forEach(shift => {
+                        standardDaysSum += (dayPlan[shift]?.count || 0);
+                      });
+                    });
+                    const avg = standardDaysSum / standardDays.length;
+                    return (
+                      <div className="bg-blue-600 p-2 rounded border border-blue-700 text-white shadow-sm">
+                        <span className="text-xs text-blue-100 block">Promedio Lun-Jue</span>
+                        <span className="text-lg font-black">{avg.toFixed(1)} turnos/día</span>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            </section>
+
+            <section className="border-t border-gray-100 pt-8">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                  <Calendar className="w-5 h-5 text-gray-400" />
+                  Feriados y Días No Operativos
+                </h3>
+                
+                <div className="flex items-center gap-3 bg-orange-50 p-2 rounded-lg border border-orange-100">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-orange-600" />
+                    <span className="text-xs font-bold text-orange-800 uppercase">Duración Noche Feriado:</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="number"
+                      min="0"
+                      step="30"
+                      value={config.shiftConfig?.holidayNightDuration || 360}
+                      onChange={(e) => {
+                        const val = Math.max(0, Number(e.target.value));
+                        setConfig({
+                          ...config,
+                          shiftConfig: {
+                            ...config.shiftConfig!,
+                            holidayNightDuration: val
+                          }
+                        });
+                      }}
+                      className="w-16 text-center text-xs border border-orange-200 rounded p-1 focus:ring-1 focus:ring-orange-500 bg-white font-bold text-orange-700"
+                    />
+                    <span className="text-[10px] font-bold text-orange-400 uppercase">min</span>
+                  </div>
+                </div>
+              </div>
+              <p className="text-sm text-gray-500 mb-4">
+                Agrega fechas específicas donde la planta no operará (feriados). Los turnos planificados para estas fechas se considerarán 0.
+              </p>
+              
+              <div className="flex flex-wrap gap-4 items-end mb-6">
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Nueva Fecha</label>
+                  <input 
+                    type="date"
+                    id="new-holiday"
+                    className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+                  />
+                </div>
+                <button 
+                  onClick={() => {
+                    const input = document.getElementById('new-holiday') as HTMLInputElement;
+                    const date = input.value;
+                    if (date && !config.shiftConfig?.holidays?.includes(date)) {
+                      setConfig({
+                        ...config,
+                        shiftConfig: {
+                          ...config.shiftConfig!,
+                          holidays: [...(config.shiftConfig!.holidays || []), date].sort()
+                        }
+                      });
+                      input.value = '';
+                    }
+                  }}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm font-bold"
+                >
+                  <Plus className="w-4 h-4" />
+                  Agregar Feriado
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                {config.shiftConfig?.holidays?.map(date => (
+                  <div key={date} className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 group">
+                    <span className="text-xs font-bold text-gray-700">
+                      {new Date(date + 'T00:00:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                    </span>
+                    <button 
+                      onClick={() => {
+                        setConfig({
+                          ...config,
+                          shiftConfig: {
+                            ...config.shiftConfig!,
+                            holidays: config.shiftConfig!.holidays?.filter(h => h !== date) || []
+                          }
+                        });
+                      }}
+                      className="text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-all"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+                {(!config.shiftConfig?.holidays || config.shiftConfig.holidays.length === 0) && (
+                  <div className="col-span-full py-4 text-center text-gray-400 text-xs italic">
+                    No hay feriados configurados.
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
         </div>
       ) : (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
@@ -947,6 +1525,164 @@ export function AdminPanel() {
 
         {/* Combinaciones Marca-Sabor */}
         <section className="mt-12">
+          <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Productos Activos por Calibre</h3>
+          <p className="text-sm text-gray-500 mb-6 font-medium">Define qué combinaciones exactas de Marca, Calibre y Sabor están activas.</p>
+          
+          {/* Summary of Active Combinations */}
+          {config.activeProducts && Object.keys(config.activeProducts).length > 0 && (
+            <div className="mb-8 bg-gray-50 rounded-2xl border border-gray-200 p-6">
+              <h4 className="text-sm font-black text-gray-700 uppercase tracking-widest mb-4">Resumen de Combinaciones Configuradas</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {Object.entries(config.activeProducts).map(([brand, sizes]) => (
+                  Object.entries(sizes).map(([size, flavors]) => (
+                    flavors.length > 0 && (
+                      <div key={`${brand}-${size}`} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-black text-indigo-600 uppercase tracking-tighter">{brand}</span>
+                          <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-bold">{size} cc</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {flavors.map(f => (
+                            <span key={f} className="text-[9px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-medium">{f}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  ))
+                )).flat().filter(Boolean)}
+              </div>
+            </div>
+          )}
+
+          <div className="bg-blue-50/50 p-6 rounded-2xl border border-blue-100 flex flex-wrap gap-6 items-end mb-8 shadow-sm">
+            <div className="flex-1 min-w-[200px]">
+              <label className="block text-xs font-black text-blue-800 uppercase mb-2 tracking-widest">1. Seleccionar Marca</label>
+              <select 
+                value={selectedBrandForTriple}
+                onChange={(e) => setSelectedBrandForTriple(e.target.value)}
+                className="w-full bg-white border border-blue-200 rounded-xl px-4 py-3 text-sm font-bold shadow-sm outline-none focus:ring-2 focus:ring-blue-500 text-blue-900"
+              >
+                <option value="">Seleccione una marca...</option>
+                {config.brands.filter(b => config.enabledBrands?.[b] !== false).map(b => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+            </div>
+            
+            <div className="flex-1 min-w-[200px]">
+              <label className="block text-xs font-black text-blue-800 uppercase mb-2 tracking-widest">2. Seleccionar Calibre</label>
+              <select 
+                value={selectedSizeForTriple || ''}
+                onChange={(e) => setSelectedSizeForTriple(e.target.value ? Number(e.target.value) : null)}
+                className="w-full bg-white border border-blue-200 rounded-xl px-4 py-3 text-sm font-bold shadow-sm outline-none focus:ring-2 focus:ring-blue-500 text-blue-900"
+              >
+                <option value="">Seleccione un calibre...</option>
+                {config.sizes.filter(s => config.enabledSizes?.[s] !== false).map(s => (
+                  <option key={s} value={s}>{s} cc</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {selectedBrandForTriple && selectedSizeForTriple ? (
+            <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h4 className="text-xl font-black text-gray-900 font-mono uppercase tracking-tighter">
+                    {selectedBrandForTriple} - {selectedSizeForTriple} cc
+                    {!(config.activeProducts?.[selectedBrandForTriple] && selectedSizeForTriple.toString() in config.activeProducts[selectedBrandForTriple]) && (
+                      <span className="ml-3 text-[10px] bg-amber-100 text-amber-700 px-2 py-1 rounded-full align-middle normal-case font-bold tracking-normal">
+                        Usando valores por defecto de marca
+                      </span>
+                    )}
+                  </h4>
+                  <p className="text-sm text-gray-400 font-medium">Habilitar/Deshabilitar sabores para esta combinación específica:</p>
+                </div>
+                <div className="flex gap-2">
+                   <button 
+                    onClick={() => {
+                      const sizeStr = selectedSizeForTriple.toString();
+                      const currentActiveProducts = config.activeProducts || {};
+                      const brandActiveProducts = currentActiveProducts[selectedBrandForTriple] || {};
+                      
+                      setConfig({
+                        ...config,
+                        activeProducts: {
+                          ...currentActiveProducts,
+                          [selectedBrandForTriple]: {
+                            ...brandActiveProducts,
+                            [sizeStr]: [...config.flavors]
+                          }
+                        }
+                      });
+                    }}
+                    className="text-[10px] font-black uppercase px-3 py-1 bg-blue-50 text-blue-600 rounded-full hover:bg-blue-100 transition-colors"
+                   >
+                     Habilitar Todos
+                   </button>
+                   <button 
+                    onClick={() => {
+                      const sizeStr = selectedSizeForTriple.toString();
+                      const currentActiveProducts = config.activeProducts || {};
+                      const brandActiveProducts = currentActiveProducts[selectedBrandForTriple] || {};
+                      
+                      setConfig({
+                        ...config,
+                        activeProducts: {
+                          ...currentActiveProducts,
+                          [selectedBrandForTriple]: {
+                            ...brandActiveProducts,
+                            [sizeStr]: []
+                          }
+                        }
+                      });
+                    }}
+                    className="text-[10px] font-black uppercase px-3 py-1 bg-red-50 text-red-600 rounded-full hover:bg-red-100 transition-colors"
+                   >
+                     Deshabilitar Todos
+                   </button>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                {config.flavors.map(flavor => {
+                  const sizeStr = selectedSizeForTriple.toString();
+                  const brandActiveProducts = config.activeProducts?.[selectedBrandForTriple];
+                  const hasSpecificConfig = brandActiveProducts && sizeStr in brandActiveProducts;
+                  const currentActiveFlavors = hasSpecificConfig
+                    ? brandActiveProducts[sizeStr]
+                    : (config.brandFlavorCombinations[selectedBrandForTriple] || []);
+                  
+                  const isEnabled = currentActiveFlavors.includes(flavor);
+                  const isFlavorActive = config.enabledFlavors?.[flavor] !== false;
+
+                  return (
+                    <button
+                      key={flavor}
+                      disabled={!isFlavorActive}
+                      onClick={() => handleToggleTripleCombination(selectedBrandForTriple, selectedSizeForTriple, flavor)}
+                      className={`px-4 py-3 rounded-2xl border text-xs font-black uppercase transition-all flex items-center justify-between gap-2 shadow-sm ${
+                        isEnabled
+                          ? 'bg-blue-600 border-blue-600 text-white ring-4 ring-blue-50 shadow-blue-100'
+                          : 'bg-white border-gray-100 text-gray-400 hover:border-blue-200 hover:text-blue-600'
+                      } ${(!isFlavorActive) ? 'opacity-20 grayscale cursor-not-allowed border-dashed' : ''}`}
+                    >
+                      <span className="truncate">{flavor}</span>
+                      {isEnabled && <CheckCircle2 className="w-4 h-4" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-12 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+              <Plus className="w-12 h-12 text-gray-200 mx-auto mb-4" />
+              <p className="text-gray-400 font-medium">Selecciona una marca y un calibre para empezar a configurar las combinaciones de sabores.</p>
+            </div>
+          )}
+        </section>
+
+        <section className="mt-12">
           <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Combinaciones Marca - Sabor</h3>
           <p className="text-sm text-gray-500 mb-6">Selecciona qué sabores están permitidos para cada marca.</p>
           
@@ -1125,6 +1861,220 @@ export function AdminPanel() {
           </div>
         </section>
       </div>
+      )}
+
+      {activeTab === 'users' && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+            <div className="flex items-center gap-2">
+              <UserCog className="w-6 h-6 text-blue-600" />
+              <h2 className="text-xl font-bold text-gray-900">Gestión de Usuarios</h2>
+            </div>
+            
+            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 flex flex-wrap gap-3 items-end">
+              <div className="flex-1 min-w-[200px]">
+                <label className="block text-[10px] font-black text-blue-800 uppercase mb-1 tracking-widest">Email del Usuario</label>
+                <input 
+                  type="email"
+                  value={newUserEmail}
+                  onChange={e => setNewUserEmail(e.target.value)}
+                  placeholder="ejemplo@correo.com"
+                  className="w-full bg-white border border-blue-200 rounded-lg px-3 py-2 text-sm font-bold shadow-sm outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="w-40">
+                <label className="block text-[10px] font-black text-blue-800 uppercase mb-1 tracking-widest">Rol</label>
+                <select 
+                  value={newUserRole}
+                  onChange={e => setNewUserRole(e.target.value as UserRole)}
+                  className="w-full bg-white border border-blue-200 rounded-lg px-3 py-2 text-sm font-bold shadow-sm outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="produccion">Producción</option>
+                  <option value="calidad">Calidad</option>
+                  <option value="jefe_produccion">Jefe Producción</option>
+                  <option value="admin">Admin General</option>
+                </select>
+              </div>
+              <div className="w-40">
+                <label className="block text-[10px] font-black text-blue-800 uppercase mb-1 tracking-widest">Sector</label>
+                <select 
+                  value={newUserSector}
+                  onChange={e => setNewUserSector(e.target.value)}
+                  className="w-full bg-white border border-blue-200 rounded-lg px-3 py-2 text-sm font-bold shadow-sm outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Cualquiera</option>
+                  <option value="Producción">Producción</option>
+                  <option value="Elaboración">Elaboración</option>
+                  <option value="Calidad">Calidad</option>
+                </select>
+              </div>
+              <button
+                onClick={handleAddAllowedUser}
+                disabled={isAddingUser || !newUserEmail.trim()}
+                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-widest transition-all h-[38px] flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                Habilitar
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-8">
+            <div>
+              <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4" />
+                Usuarios con Acceso Habilitado (Sin Registro)
+              </h3>
+              {allowedUsers.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Email</th>
+                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Rol Pre-definido</th>
+                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Sector</th>
+                        <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-widest">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {allowedUsers.map(au => (
+                        <tr key={au.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-blue-600">{au.email}</td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className="px-2 py-1 text-[10px] font-black uppercase bg-amber-100 text-amber-700 rounded-full">{au.role}</span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{au.sector || 'Cualquiera'}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right">
+                            <button 
+                              onClick={() => handleDeleteAllowedUser(au.id)}
+                              className="text-red-500 hover:text-red-700"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-8 border-2 border-dashed border-gray-100 rounded-2xl">
+                  <p className="text-gray-400 text-sm italic">No hay invitaciones pendientes</p>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                <Users className="w-4 h-4" />
+                Usuarios Registrados
+              </h3>
+              <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Usuario</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Email</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Rol</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Sector</th>
+                  <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-widest">Acciones</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {users.map(u => (
+                  <tr key={u.uid} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center font-bold text-blue-600">
+                          {u.displayName?.substring(0, 1)}
+                        </div>
+                        <span className="text-sm font-bold text-gray-900">{u.displayName}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{u.email}</td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <select
+                        value={u.role}
+                        onChange={(e) => handleUpdateUser({ ...u, role: e.target.value as UserRole })}
+                        className="text-xs font-bold uppercase tracking-widest bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                      >
+                        <option value="admin">Admin General</option>
+                        <option value="jefe_produccion">Jefe Producción</option>
+                        <option value="produccion">Producción</option>
+                        <option value="calidad">Calidad</option>
+                      </select>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <select
+                        value={u.sector || ''}
+                        onChange={(e) => handleUpdateUser({ ...u, sector: e.target.value })}
+                        className="text-xs font-bold uppercase tracking-widest bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                      >
+                        <option value="">Sin Sector</option>
+                        <option value="Producción">Producción</option>
+                        <option value="Elaboración">Elaboración</option>
+                        <option value="Calidad">Calidad</option>
+                        <option value="Administración">Administración</option>
+                      </select>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right">
+                      <button className="text-blue-600 hover:text-blue-800 font-bold text-xs uppercase tracking-widest">
+                        LOGS
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  )}
+
+      {activeTab === 'permissions' && rolePermissions && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center gap-2 mb-6">
+            <ShieldCheck className="w-6 h-6 text-blue-600" />
+            <h2 className="text-xl font-bold text-gray-900">Configuración de Permisos por Rol</h2>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {(['produccion', 'calidad', 'jefe_produccion', 'admin'] as UserRole[]).map(role => (
+              <div key={role} className="bg-gray-50 rounded-2xl p-5 border border-gray-100 flex flex-col h-full">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className={`p-2 rounded-lg ${role === 'admin' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}>
+                    <Briefcase className="w-4 h-4" />
+                  </div>
+                  <h3 className="font-black uppercase tracking-tighter text-sm text-gray-800">
+                    {role === 'admin' ? 'Admin General' : 
+                     role === 'jefe_produccion' ? 'Jefe Producción' : 
+                     role === 'produccion' ? 'Producción' : 'Calidad'}
+                  </h3>
+                </div>
+
+                <div className="space-y-3 flex-1">
+                  {Object.entries(rolePermissions[role]).map(([perm, value]) => (
+                    <label key={perm} className="flex items-center justify-between p-2 hover:bg-white rounded-lg transition-colors cursor-pointer group">
+                      <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest group-hover:text-blue-600 transition-colors">
+                        {perm.replace(/([A-Z])/g, ' $1').trim()}
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={value as boolean}
+                        onChange={(e) => {
+                          const newPerms = { ...rolePermissions[role], [perm]: e.target.checked };
+                          handleUpdatePermissions(role, newPerms);
+                        }}
+                        className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );

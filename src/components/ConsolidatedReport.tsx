@@ -225,17 +225,21 @@ export function ConsolidatedReport() {
                       const cell = consolidatedData.data[key][tamano];
                       const totalForSize = consolidatedData.totalsBySize[tamano] || 0;
                       const percentage = totalForSize > 0 ? (cell.packs / totalForSize) * 100 : 0;
+                      const isActive = getFilteredFlavors(marca, tamano).includes(sabor);
 
                       return (
-                        <td key={tamano} colSpan={3} className="px-0 py-0 border-r border-gray-200">
-                          <div className="grid grid-cols-3 h-full items-center text-center divide-x divide-gray-100">
-                            <span className={`py-2 text-sm ${cell.packs > 0 ? 'font-bold text-blue-700' : 'text-gray-300'}`}>
+                        <td key={tamano} colSpan={3} className={`px-0 py-0 border-r border-gray-300 ${isActive ? '' : 'bg-gray-300/80 relative'}`}>
+                          {!isActive && (
+                            <div className="absolute inset-0 opacity-[0.1] pointer-events-none bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,#000_10px,#000_20px)]"></div>
+                          )}
+                          <div className={`grid grid-cols-3 h-full items-center text-center divide-x divide-gray-200 ${isActive ? '' : 'opacity-30'}`}>
+                            <span className={`py-2 text-sm ${cell.packs > 0 ? 'font-bold text-blue-700' : (isActive ? 'text-gray-200' : 'text-gray-800 font-black')}`}>
                               {cell.packs > 0 ? cell.packs.toLocaleString('es-AR') : '-'}
                             </span>
-                            <span className={`py-2 text-xs ${cell.extraBot > 0 ? 'text-orange-600 font-medium' : 'text-gray-300'}`}>
+                            <span className={`py-2 text-xs ${cell.extraBot > 0 ? 'text-orange-600 font-medium' : 'text-transparent'}`}>
                               {cell.extraBot > 0 ? cell.extraBot : ''}
                             </span>
-                            <span className={`py-2 text-[10px] ${percentage > 0 ? 'text-green-600 font-medium' : 'text-gray-300'}`}>
+                            <span className={`py-2 text-[10px] ${percentage > 0 ? 'text-green-600 font-medium' : 'text-transparent'}`}>
                               {percentage > 0 ? `${percentage.toFixed(1)}%` : ''}
                             </span>
                           </div>

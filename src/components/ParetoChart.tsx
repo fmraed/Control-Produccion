@@ -28,6 +28,7 @@ interface ParetoChartProps {
 export function ParetoChart({ linea, month, onBack }: ParetoChartProps) {
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedFormat, setSelectedFormat] = useState<string>('all');
 
   useEffect(() => {
     const q = query(collection(db, 'production_reports'), orderBy('fecha', 'desc'));
@@ -47,15 +48,31 @@ export function ParetoChart({ linea, month, onBack }: ParetoChartProps) {
     return () => unsubscribe();
   }, []);
 
-  const chartData = useMemo(() => {
-    // Filter by month and line
-    const filteredReports = reports.filter(r => {
+  // Filter reports by month and line first to get available formats
+  const baseFilteredReports = useMemo(() => {
+    return reports.filter(r => {
       const logicalDate = getLogicalDate(r);
       return logicalDate && logicalDate.startsWith(month) && r.linea === linea;
     });
+  }, [reports, month, linea]);
+
+  // Get unique formats available in the current selection
+  const availableFormats = useMemo(() => {
+    const formats = new Set<number>();
+    baseFilteredReports.forEach(r => {
+      if (r.tamano) formats.add(r.tamano);
+    });
+    return Array.from(formats).sort((a, b) => b - a);
+  }, [baseFilteredReports]);
+
+  const chartData = useMemo(() => {
+    // Further filter by selected format if needed
+    const filteredReports = selectedFormat === 'all' 
+      ? baseFilteredReports 
+      : baseFilteredReports.filter(r => r.tamano?.toString() === selectedFormat);
 
     // Aggregate downtime minutes by reason
-    const downtimeByReason: Record<string, number> = {};
+    const aggregatedData: Record<string, number> = {};
     let totalDowntime = 0;
 
     filteredReports.forEach(report => {
@@ -72,18 +89,15 @@ export function ParetoChart({ linea, month, onBack }: ParetoChartProps) {
         const minutes = dt.totalMinutes || 0;
         
         if (minutes > 0) {
-          if (!downtimeByReason[reason]) {
-            downtimeByReason[reason] = 0;
-          }
-          downtimeByReason[reason] += minutes;
+          aggregatedData[reason] = (aggregatedData[reason] || 0) + minutes;
           totalDowntime += minutes;
         }
       });
     });
 
     // Convert to array and sort descending by minutes
-    const sortedData = Object.entries(downtimeByReason)
-      .map(([reason, minutes]) => ({ reason, minutes }))
+    const sortedData = Object.entries(aggregatedData)
+      .map(([label, minutes]) => ({ label, minutes }))
       .sort((a, b) => b.minutes - a.minutes);
 
     // Calculate cumulative percentage
@@ -98,11 +112,11 @@ export function ParetoChart({ linea, month, onBack }: ParetoChartProps) {
     });
 
     return dataWithCumulative;
-  }, [reports, month, linea]);
+  }, [baseFilteredReports, selectedFormat]);
 
-  const paretoCutoffReason = useMemo(() => {
+  const paretoCutoffLabel = useMemo(() => {
     const cutoffItem = chartData.find(item => item.cumulativePercentage >= 80);
-    return cutoffItem ? cutoffItem.reason : undefined;
+    return cutoffItem ? cutoffItem.label : undefined;
   }, [chartData]);
 
   const monthName = useMemo(() => {
@@ -121,7 +135,7 @@ export function ParetoChart({ linea, month, onBack }: ParetoChartProps) {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 flex items-center justify-between">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <button
             onClick={onBack}
@@ -132,11 +146,28 @@ export function ParetoChart({ linea, month, onBack }: ParetoChartProps) {
           </button>
           <div className="flex items-center gap-2 text-gray-800 font-bold">
             <BarChart2 className="w-6 h-6 text-blue-600" />
-            <h2 className="text-xl">Diagrama de Pareto - Línea {linea}</h2>
+            <h2 className="text-xl">Pareto Línea {linea} - Por Motivo</h2>
           </div>
         </div>
-        <div className="text-sm font-medium text-gray-500 bg-gray-100 px-3 py-1.5 rounded-lg">
-          {monthName}
+
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label htmlFor="format-filter" className="text-xs font-bold text-gray-500 uppercase">Filtrar Formato:</label>
+            <select
+              id="format-filter"
+              value={selectedFormat}
+              onChange={(e) => setSelectedFormat(e.target.value)}
+              className="text-sm font-bold border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 p-1.5 bg-white shadow-sm"
+            >
+              <option value="all">Todos los Formatos</option>
+              {availableFormats.map(f => (
+                <option key={f} value={f.toString()}>{f} cc</option>
+              ))}
+            </select>
+          </div>
+          <div className="text-sm font-medium text-gray-500 bg-gray-100 px-3 py-1.5 rounded-lg whitespace-nowrap">
+            {monthName}
+          </div>
         </div>
       </div>
 
@@ -160,7 +191,7 @@ export function ParetoChart({ linea, month, onBack }: ParetoChartProps) {
               >
                 <CartesianGrid stroke="#f5f5f5" strokeDasharray="3 3" vertical={false} />
                 <XAxis 
-                  dataKey="reason" 
+                  dataKey="label" 
                   angle={-45} 
                   textAnchor="end" 
                   interval={0} 
@@ -193,8 +224,8 @@ export function ParetoChart({ linea, month, onBack }: ParetoChartProps) {
                 <Bar yAxisId="left" dataKey="minutes" name="Minutos" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                 <Line yAxisId="right" type="monotone" dataKey="cumulativePercentage" name="% Acumulado" stroke="#ef4444" strokeWidth={3} dot={{ r: 4, fill: '#ef4444', strokeWidth: 2, stroke: '#fff' }} />
                 <ReferenceLine yAxisId="right" y={80} stroke="#f97316" strokeDasharray="5 5" label={{ position: 'top', value: '80%', fill: '#f97316', fontSize: 12, fontWeight: 'bold' }} />
-                {paretoCutoffReason && (
-                  <ReferenceLine x={paretoCutoffReason} yAxisId="right" stroke="#f97316" strokeDasharray="5 5" />
+                {paretoCutoffLabel && (
+                  <ReferenceLine x={paretoCutoffLabel} yAxisId="right" stroke="#f97316" strokeDasharray="5 5" />
                 )}
               </ComposedChart>
             </ResponsiveContainer>
@@ -206,22 +237,26 @@ export function ParetoChart({ linea, month, onBack }: ParetoChartProps) {
       {chartData.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
           <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
-            <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wider">Detalle de Paradas</h3>
+            <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wider">
+              Detalle por Motivo {selectedFormat !== 'all' ? `(${selectedFormat} cc)` : '(Todos los Formatos)'}
+            </h3>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="px-6 py-3 text-left font-bold text-gray-600 border-r border-gray-200">Motivo</th>
+                  <th className="px-6 py-3 text-left font-bold text-gray-600 border-r border-gray-200">
+                    Motivo
+                  </th>
                   <th className="px-6 py-3 text-center font-bold text-gray-600 border-r border-gray-200">Minutos</th>
                   <th className="px-6 py-3 text-center font-bold text-gray-600">% Acumulado</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {chartData.map((item, index) => (
-                  <tr key={item.reason} className="hover:bg-gray-50">
+                  <tr key={item.label} className="hover:bg-gray-50">
                     <td className="px-6 py-3 text-gray-800 border-r border-gray-200 font-medium">
-                      {index + 1}. {item.reason}
+                      {index + 1}. {item.label}
                     </td>
                     <td className="px-6 py-3 text-center text-blue-700 font-bold border-r border-gray-200">
                       {item.minutes}

@@ -136,9 +136,9 @@ export function LiveMonitor() {
       
       // Sort by line
       data.sort((a, b) => {
-        const lineA = parseInt(a.linea) || 0;
-        const lineB = parseInt(b.linea) || 0;
-        return lineA - lineB;
+        const lineA = a.linea || '';
+        const lineB = b.linea || '';
+        return lineA.localeCompare(lineB, undefined, { numeric: true, sensitivity: 'base' });
       });
       
       setLiveData(data);
@@ -168,7 +168,6 @@ export function LiveMonitor() {
   });
 
   const productionReports = activeReports.filter(r => r.type === 'production');
-  const elaboracionReports = activeReports.filter(r => r.type === 'elaboracion');
 
   return (
     <div className="space-y-6">
@@ -214,32 +213,32 @@ export function LiveMonitor() {
                     }
                   }
 
-                  // Calculate total downtime and find max machine
+                  // Calculate total downtime and find max reason (machine)
                   let totalDowntime = 0;
-                  const machineDowntimes: Record<string, number> = {};
+                  const reasonDowntimes: Record<string, number> = {};
                   if (report.downtimes) {
                     report.downtimes.forEach(d => {
-                      const category = d.category || 'Otros';
-                      let machineMinutes = 0;
+                      const reason = d.reason || 'Otros';
+                      let reasonMinutes = 0;
                       if (d.minutes && Array.isArray(d.minutes)) {
                         d.minutes.forEach(m => {
                           const val = Number(m);
                           if (!isNaN(val) && val > 0) {
                             totalDowntime += val;
-                            machineMinutes += val;
+                            reasonMinutes += val;
                           }
                         });
                       }
-                      machineDowntimes[category] = (machineDowntimes[category] || 0) + machineMinutes;
+                      reasonDowntimes[reason] = (reasonDowntimes[reason] || 0) + reasonMinutes;
                     });
                   }
 
-                  let maxMachine = '';
-                  let maxMachineTime = 0;
-                  Object.entries(machineDowntimes).forEach(([machine, time]) => {
-                    if (time > maxMachineTime) {
-                      maxMachineTime = time;
-                      maxMachine = machine;
+                  let maxReason = '';
+                  let maxReasonTime = 0;
+                  Object.entries(reasonDowntimes).forEach(([reason, time]) => {
+                    if (time > maxReasonTime) {
+                      maxReasonTime = time;
+                      maxReason = reason;
                     }
                   });
 
@@ -305,8 +304,8 @@ export function LiveMonitor() {
                               <AlertCircle className="w-4 h-4" />
                               <div className="flex flex-col">
                                 <span>Tiempo de parada: {totalDowntime} min</span>
-                                {maxMachine && (
-                                  <span className="text-[10px] opacity-80">Máx: {maxMachine} ({maxMachineTime} min)</span>
+                                {maxReason && (
+                                  <span className="text-[10px] opacity-80">Máx: {maxReason} ({maxReasonTime} min)</span>
                                 )}
                               </div>
                             </div>

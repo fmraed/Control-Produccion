@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, orderBy, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { collection, query, orderBy, limit, getDocs, startAfter, doc, deleteDoc, QueryDocumentSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { ElaboracionReport } from '../types';
-import { Beaker, Calendar, Clock, Activity, AlertCircle, Edit2, Filter, Trash2, Gauge, Droplets, ChevronDown, ChevronUp, PlusCircle } from 'lucide-react';
-import { format, parseISO, isAfter, subHours } from 'date-fns';
+import { Beaker, Calendar, Clock, Activity, AlertCircle, Edit2, Filter, Trash2, Gauge, Droplets, ChevronDown, ChevronUp, PlusCircle, RefreshCw } from 'lucide-react';
+import { format, parseISO, isAfter, subHours, subMonths, startOfMonth } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { getLogicalDate } from '../utils';
 import { useAppConfig } from '../hooks/useAppConfig';
@@ -22,7 +22,11 @@ export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: Elabo
   } = useAppConfig();
   const [reports, setReports] = useState<ElaboracionReport[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | null>(null);
+  const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const PAGE_SIZE = 25;
   const [expandedReport, setExpandedReport] = useState<string | null>(null);
 
   // Filters state
@@ -31,36 +35,58 @@ export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: Elabo
   const [selectedMarca, setSelectedMarca] = useState<string>('');
   const [selectedSabor, setSelectedSabor] = useState<string>('');
 
-  useEffect(() => {
-    const q = query(collection(db, 'elaboracion_reports'), orderBy('createdAt', 'desc'));
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const reportsData: ElaboracionReport[] = [];
-      snapshot.forEach((doc) => {
-        reportsData.push({ id: doc.id, ...doc.data() } as ElaboracionReport);
-      });
-      setReports(reportsData);
-      setLoading(false);
-    }, (err) => {
+  const fetchReports = useCallback(async (isNextPage = false) => {
+    if (isNextPage) setLoadingMore(true);
+    else setLoading(true);
+
+    try {
+      const reportsRef = collection(db, 'elaboracion_reports');
+      let q = query(reportsRef, orderBy('createdAt', 'desc'), limit(PAGE_SIZE));
+
+      if (isNextPage && lastDoc) {
+        q = query(reportsRef, orderBy('createdAt', 'desc'), startAfter(lastDoc), limit(PAGE_SIZE));
+      }
+
+      const snapshot = await getDocs(q);
+      
+      const newReports = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as ElaboracionReport));
+
+      if (isNextPage) {
+        setReports(prev => [...prev, ...newReports]);
+      } else {
+        setReports(newReports);
+      }
+
+      setLastDoc(snapshot.docs[snapshot.docs.length - 1] || null);
+      setHasMore(snapshot.docs.length === PAGE_SIZE);
+      setError(null);
+    } catch (err) {
       console.error("Error fetching elaboration reports:", err);
       setError("No se pudieron cargar los datos de elaboración.");
+    } finally {
       setLoading(false);
-    });
+      setLoadingMore(false);
+    }
+  }, [lastDoc]);
 
-    return () => unsubscribe();
+  useEffect(() => {
+    fetchReports();
   }, []);
 
   // Filter options
   const months = useMemo(() => {
-    const uniqueMonths = new Set<string>();
-    reports.forEach(r => {
-      const logicalDate = getLogicalDate(r);
-      if (logicalDate) {
-        uniqueMonths.add(logicalDate.substring(0, 7)); // yyyy-MM
-      }
-    });
-    return Array.from(uniqueMonths).sort().reverse();
-  }, [reports]);
+    const monthsList = [];
+    const now = new Date();
+    // Generate last 24 months for the filter
+    for (let i = 0; i < 24; i++) {
+      const date = subMonths(startOfMonth(now), i);
+      monthsList.push(format(date, 'yyyy-MM'));
+    }
+    return monthsList;
+  }, []);
 
   // Apply filters
   const filteredReports = useMemo(() => {
@@ -348,6 +374,25 @@ export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: Elabo
           </table>
         </div>
       </div>
+
+      {hasMore && (
+        <div className="flex justify-center pt-4">
+          <button
+            onClick={() => fetchReports(true)}
+            disabled={loadingMore}
+            className="flex items-center gap-2 px-6 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl text-sm font-bold hover:bg-gray-50 transition-all shadow-sm disabled:opacity-50"
+          >
+            {loadingMore ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin text-blue-600" />
+                Cargando...
+              </>
+            ) : (
+              'Cargar más reportes'
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

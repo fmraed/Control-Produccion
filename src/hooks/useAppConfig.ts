@@ -18,9 +18,23 @@ interface AppConfig {
   enabledChemists: Record<string, boolean>;
   brandFlavorCombinations: Record<string, string[]>;
   lineSizeCombinations: Record<string, number[]>;
+  activeProducts?: Record<string, Record<string, string[]>>; // Brand -> Size -> Flavors[]
   velocidadMatrix: Record<string, Record<number, number>>;
   packsPorPaleta: Record<number, number>;
   botellasPorPack: Record<number, number>;
+  schedulerDefaults?: Record<string, { marca: string, tamano: number, plannedPacks: number }>; // Key is Line ID
+  calibreDefaults?: Record<number, number>; // Key is Size (tamano), Value is plannedPacks
+  shiftConfig?: {
+    standardShiftDuration: number;
+    shiftDurations: {
+      Mañana: number;
+      Tarde: number;
+      Noche: number;
+    };
+    weeklyPlan: Record<string, Record<string, { count: number, duration: number }>>;
+    holidays?: string[];
+    holidayNightDuration?: number;
+  };
 }
 
 export function useAppConfig() {
@@ -49,9 +63,13 @@ export function useAppConfig() {
           enabledChemists: data.enabledChemists || {},
           brandFlavorCombinations: data.brandFlavorCombinations || {},
           lineSizeCombinations: data.lineSizeCombinations || {},
+          activeProducts: data.activeProducts || {},
           velocidadMatrix: data.velocidadMatrix || VELOCIDAD_MATRIX,
           packsPorPaleta: data.packsPorPaleta || PACKS_POR_PALETA,
-          botellasPorPack: data.botellasPorPack || BOTELLAS_POR_PACK
+          botellasPorPack: data.botellasPorPack || BOTELLAS_POR_PACK,
+          schedulerDefaults: data.schedulerDefaults || {},
+          calibreDefaults: data.calibreDefaults || {},
+          shiftConfig: data.shiftConfig
         };
         setConfig(mergedConfig);
       } else {
@@ -98,6 +116,7 @@ export function useAppConfig() {
           enabledChemists: initialChemists,
           brandFlavorCombinations: initialBrandCombinations,
           lineSizeCombinations: initialLineCombinations,
+          activeProducts: {},
           velocidadMatrix: VELOCIDAD_MATRIX,
           packsPorPaleta: PACKS_POR_PALETA,
           botellasPorPack: BOTELLAS_POR_PACK
@@ -142,9 +161,21 @@ export function useAppConfig() {
     return config.chemists.filter(c => config.enabledChemists?.[c] !== false);
   }, [config]);
 
-  const getFilteredFlavors = (brand?: string) => {
+  const getFilteredFlavors = (brand?: string, size?: number) => {
     let filtered = availableFlavors;
     
+    // Triple filter (Brand + Size -> Flavors)
+    if (brand && size && config?.activeProducts?.[brand]) {
+      const brandProducts = config.activeProducts[brand];
+      if (size.toString() in brandProducts) {
+        const allowed = brandProducts[size.toString()];
+        if (Array.isArray(allowed)) {
+          return filtered.filter(s => allowed.includes(s));
+        }
+      }
+    }
+
+    // Fallback to Brand -> Flavors filter
     if (brand && config?.brandFlavorCombinations?.[brand]) {
       const allowedForBrand = config.brandFlavorCombinations[brand];
       if (Array.isArray(allowedForBrand)) {

@@ -112,6 +112,10 @@ service cloud.firestore {
     function isValidOptionalArray(field) {
       return !(field in request.resource.data) || request.resource.data[field] is list;
     }
+
+    function isValidOptionalMap(field) {
+      return !(field in request.resource.data) || request.resource.data[field] is map;
+    }
     
     function areImmutableFieldsUnchanged(fields) {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
@@ -119,7 +123,7 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() && 
-             (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+             ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
               (request.auth.token.email == "fraed.fordrinks@gmail.com" && request.auth.token.email_verified == true));
     }
 
@@ -158,9 +162,16 @@ service cloud.firestore {
              data.uid == request.auth.uid &&
              data.email is string &&
              data.displayName is string && data.displayName.size() > 0 &&
-             data.role in ['admin', 'user'] &&
+             data.role in ['admin', 'produccion', 'calidad', 'jefe_produccion'] &&
              data.createdAt is string &&
              data.updatedAt is string;
+    }
+
+    function isValidAllowedUser(data) {
+      return hasRequiredFields(['email', 'role', 'createdAt']) &&
+             data.email is string &&
+             data.role in ['admin', 'produccion', 'calidad', 'jefe_produccion'] &&
+             data.createdAt is string;
     }
 
     function isValidElaboracionReport(data) {
@@ -179,11 +190,121 @@ service cloud.firestore {
              data.hourlyData is list;
     }
 
+    function isValidEmployee(data) {
+      return hasRequiredFields(['name', 'legajo', 'active', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 &&
+             data.legajo is string && data.legajo.size() > 0 &&
+             data.active is bool &&
+             data.createdAt is string &&
+             isValidOptionalString('position', 0, 100) &&
+             isValidOptionalString('type', 0, 50) &&
+             isValidOptionalString('sector', 0, 50) &&
+             isValidOptionalString('hireDate', 0, 50) &&
+             isValidOptionalString('terminationDate', 0, 50) &&
+             isValidOptionalNumber('vacationAdjustment') &&
+             isValidOptionalNumber('compensationAdjustment');
+    }
+
+    function isValidMonthlyGoal(data) {
+      return hasRequiredFields(['month', 'marca', 'sabor', 'tamano', 'quantity', 'createdAt', 'updatedAt']) &&
+             data.month is string &&
+             data.marca is string &&
+             data.sabor is string &&
+             data.tamano is number &&
+             data.quantity is number &&
+             data.createdAt is string &&
+             data.updatedAt is string;
+    }
+
+    function isValidAttendanceRecord(data) {
+      return hasRequiredFields(['employeeId', 'date', 'shift', 'status', 'createdAt', 'authorId']) &&
+             data.employeeId is string &&
+             data.date is string &&
+             data.shift is string &&
+             data.status in ["Presente", "Ausente", "Tarde", "Licencia", "Vacaciones", "Feriado", "Compensado"] &&
+             data.createdAt is string &&
+             data.authorId == request.auth.uid &&
+             isValidOptionalString('employeeName', 0, 100) &&
+             isValidOptionalString('employeeLegajo', 0, 50) &&
+             isValidOptionalString('line', 0, 50) &&
+             isValidOptionalNumber('overtimeHours') &&
+             isValidOptionalString('observations', 0, 1000);
+    }
+
+    function isValidShiftAssignment(data) {
+      return hasRequiredFields(['employeeId', 'date', 'shift', 'line', 'createdAt', 'authorId']) &&
+             data.employeeId is string &&
+             data.date is string &&
+             data.shift is string &&
+             data.line is string &&
+             data.createdAt is string &&
+             data.authorId == request.auth.uid;
+    }
+
+    function isValidMonthlySnapshot(data) {
+      return hasRequiredFields(['month', 'year', 'stats', 'isClosed', 'createdAt']) &&
+             data.month is string &&
+             data.year is number &&
+             data.stats is map &&
+             data.isClosed is bool &&
+             data.createdAt is string &&
+             isValidOptionalMap('configAtTime');
+    }
+
+    function isValidProductionPlan(data) {
+      return hasRequiredFields(['date', 'shift', 'linea', 'marca', 'sabor', 'tamano', 'plannedPacks', 'status', 'createdAt', 'authorId']) &&
+             data.date is string &&
+             data.shift in ['Mañana', 'Tarde', 'Noche'] &&
+             data.linea is string &&
+             data.marca is string &&
+             data.sabor is string &&
+             data.tamano is number &&
+             data.plannedPacks is number &&
+             data.status in ['Draft', 'Published'] &&
+             data.createdAt is string &&
+             data.authorId == request.auth.uid;
+    }
+
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == 'user';
-      allow update: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && 
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isAuthenticated() && (isOwner(userId) || isAdmin()) && isValidUser(request.resource.data) && 
                     (request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    match /allowed_users/{email} {
+      allow read, delete: if isAuthenticated() && (request.auth.token.email.lower() == email.lower() || isAdmin());
+      allow create, update: if isAdmin();
+    }
+
+    match /employees/{employeeId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidEmployee(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /attendance_records/{recordId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidAttendanceRecord(request.resource.data) && uidUnchanged();
+      allow update: if isAuthenticated() && (isDocOwner() || isAdmin()) && isValidAttendanceRecord(request.resource.data) && uidNotModified();
+      allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
+    }
+
+    match /shift_assignments/{assignmentId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidShiftAssignment(request.resource.data) && uidUnchanged();
+      allow update: if isAuthenticated() && (isDocOwner() || isAdmin()) && isValidShiftAssignment(request.resource.data) && uidNotModified();
+      allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
+    }
+
+    match /monthly_snapshots/{snapshotId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /monthly_goals/{goalId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
 
     match /elaboracion_reports/{reportId} {
@@ -204,6 +325,13 @@ service cloud.firestore {
       // Any authenticated user can read and write live production data
       allow read: if isAuthenticated();
       allow write: if isAuthenticated();
+    }
+
+    match /production_plans/{planId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidProductionPlan(request.resource.data) && uidUnchanged();
+      allow update: if isAuthenticated() && (isDocOwner() || isAdmin()) && isValidProductionPlan(request.resource.data) && uidNotModified();
+      allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
     }
 
     match /production_reports/{reportId} {

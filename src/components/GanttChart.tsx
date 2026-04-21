@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { ProductionReport } from '../types';
+import { FLAVOR_COLORS } from '../constants';
 import { ArrowLeft, CalendarDays } from 'lucide-react';
 import { format, subDays, startOfDay, endOfDay, parseISO, addDays, differenceInMinutes, isAfter, isBefore } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -11,22 +12,6 @@ import { useAppConfig } from '../hooks/useAppConfig';
 interface GanttChartProps {
   onBack: () => void;
 }
-
-const FLAVOR_COLORS: Record<string, string> = {
-  'Manzana': 'bg-amber-600 text-white', // Marrón claro
-  'Naranja': 'bg-orange-500 text-white',
-  'Cola': 'bg-red-600 text-white', // Rojo
-  'Lima Limon': 'bg-green-500 text-white',
-  'Pomelo': 'bg-yellow-400 text-gray-900', // Amarillo
-  'Agua Tónica': 'bg-black text-white', // Negro
-  'Pomelo Blanco': 'bg-yellow-200 text-gray-900',
-  'Citrus': 'bg-green-400 text-gray-900', // Verde Claro
-  'Granadina': 'bg-purple-400 text-white', // Violeta Claro
-  'Limonada': 'bg-green-800 text-white', // Verde Oscuro
-  'Soda': 'bg-blue-800 text-white', // Azul Oscuro
-  'Soda Sifon': 'bg-blue-800 text-white', // Azul Oscuro
-  'Agua': 'bg-sky-400 text-gray-900', // Celeste
-};
 
 export function GanttChart({ onBack }: GanttChartProps) {
   const { availableLines } = useAppConfig();
@@ -113,7 +98,7 @@ export function GanttChart({ onBack }: GanttChartProps) {
           width: widthPercent,
           start: clampedStart,
           end: clampedEnd,
-          colorClass: FLAVOR_COLORS[report.sabor || ''] || 'bg-gray-400 text-white'
+          bgColor: FLAVOR_COLORS[report.sabor || ''] || '#cbd5e1'
         });
       }
     });
@@ -256,23 +241,27 @@ export function GanttChart({ onBack }: GanttChartProps) {
                     />
                   ))}
 
-                  {/* Production Blocks */}
-                  {blocksByLine[linea].map((block, i) => (
-                    <div
-                      key={block.id || i}
-                      className={`absolute top-1 bottom-1 rounded-md shadow-sm flex items-center justify-center overflow-hidden px-2 text-[10px] leading-tight font-bold border border-black/10 transition-all hover:z-20 hover:scale-[1.02] ${block.colorClass}`}
-                      style={{ 
-                        left: `${block.left}%`, 
-                        width: `${block.width}%`,
-                        minWidth: '20px'
-                      }}
-                      title={`${block.sabor} - ${block.tamano}cc\nInicio: ${format(block.start, 'dd/MM HH:mm')}\nFin: ${format(block.end, 'dd/MM HH:mm')}\nPacks: ${block.paquetes}`}
-                    >
-                      <span className="text-center">
-                        {block.sabor}<br/>{block.tamano}cc ({block.paquetes}p)
-                      </span>
-                    </div>
-                  ))}
+                   {/* Production Blocks */}
+                   {blocksByLine[linea].map((block, i) => {
+                     const isLight = ['Soda', 'Agua', 'Pomelo Blanco', 'Lima Limon'].includes(block.sabor);
+                     return (
+                      <div
+                        key={block.id || i}
+                        className={`absolute top-1 bottom-1 rounded-md shadow-sm flex items-center justify-center overflow-hidden px-2 text-[10px] leading-tight font-bold border border-black/10 transition-all hover:z-20 hover:scale-[1.02] ${isLight ? 'text-gray-900' : 'text-white'}`}
+                        style={{ 
+                          left: `${block.left}%`, 
+                          width: `${block.width}%`,
+                          minWidth: '20px',
+                          backgroundColor: block.bgColor
+                        }}
+                        title={`${block.sabor} - ${block.tamano}cc\nInicio: ${format(block.start, 'dd/MM HH:mm')}\nFin: ${format(block.end, 'dd/MM HH:mm')}\nPacks: ${block.paquetes}`}
+                      >
+                        <span className="text-center truncate">
+                          {block.sabor}<br/>{block.tamano}cc ({block.paquetes}p)
+                        </span>
+                      </div>
+                     );
+                   })}
                 </div>
               </div>
             ))}
@@ -280,12 +269,12 @@ export function GanttChart({ onBack }: GanttChartProps) {
           
           {/* Legend */}
           <div className="mt-8 pt-6 border-t border-gray-200">
-            <h4 className="text-sm font-semibold text-gray-600 mb-3">Leyenda de Sabores</h4>
+            <h4 className="text-sm font-semibold text-gray-600 mb-3 uppercase tracking-widest text-[10px]">Leyenda de Sabores</h4>
             <div className="flex flex-wrap gap-3">
-              {Object.entries(FLAVOR_COLORS).map(([sabor, colorClass]) => (
-                <div key={sabor} className="flex items-center gap-2">
-                  <div className={`w-4 h-4 rounded ${colorClass} border border-black/10`}></div>
-                  <span className="text-xs text-gray-600">{sabor}</span>
+              {Object.entries(FLAVOR_COLORS).map(([sabor, color]) => (
+                <div key={sabor} className="flex items-center gap-2 bg-gray-50 px-2 py-1 rounded-md border border-gray-100">
+                  <div className="w-3 h-3 rounded-full border border-black/10 shadow-sm" style={{ backgroundColor: color }}></div>
+                  <span className="text-[10px] font-black text-gray-600 uppercase">{sabor}</span>
                 </div>
               ))}
             </div>

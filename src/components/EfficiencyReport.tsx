@@ -207,11 +207,12 @@ export function EfficiencyReport() {
     return { data, plantaTotal };
   }, [filteredReports, filteredLines, getFilteredSizes]);
 
-  const calculateMetrics = (d: any) => {
+  const calculateMetrics = (d: any, isPlanta = false) => {
     const efOperativa = d.marchaBruta > 0 ? (d.marchaNeta / d.marchaBruta) * 100 : 0;
     const efMecanica = d.marchaBruta > 0 ? ((d.marchaBruta - d.paradaMecanica) / d.marchaBruta) * 100 : 0;
     const efLinea = (d.marchaBruta + d.cambioFormato) > 0 ? (d.marchaNeta / (d.marchaBruta + d.cambioFormato)) * 100 : 0;
-    const utilizacion = totalPossibleMinutes > 0 ? (d.marchaBruta / totalPossibleMinutes) * 100 : 0;
+    const divisor = isPlanta ? (totalPossibleMinutes * filteredLines.length) : totalPossibleMinutes;
+    const utilizacion = divisor > 0 ? (d.marchaBruta / divisor) * 100 : 0;
     const real = d.marchaBruta > 0 ? (d.produccion / d.marchaBruta) * 480 : 0;
 
     return {
@@ -233,7 +234,7 @@ export function EfficiencyReport() {
 
   // Define which sizes to show per line based on the user's image
   const renderRow = (label: string, d: any, isTotal = false, isPlanta = false, lineColorClass = '') => {
-    const metrics = calculateMetrics(d);
+    const metrics = calculateMetrics(d, isPlanta);
     const hasData = d.marchaBruta > 0 || d.produccion > 0;
     
     let bgClass = 'hover:bg-gray-50';

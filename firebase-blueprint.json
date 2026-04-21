@@ -41,12 +41,24 @@
         "uid": { "type": "string" },
         "email": { "type": "string" },
         "displayName": { "type": "string" },
-        "role": { "type": "string", "enum": ["admin", "user"] },
+        "role": { "type": "string", "enum": ["admin", "produccion", "calidad", "jefe_produccion"] },
         "photoURL": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "email", "displayName", "role", "createdAt", "updatedAt"]
+    },
+    "AllowedUser": {
+      "title": "Allowed User",
+      "description": "Pre-registered users allowed to sign up",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "produccion", "calidad", "jefe_produccion"] },
+        "sector": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "role", "createdAt"]
     },
     "ElaboracionReport": {
       "title": "Elaboracion Report",
@@ -67,12 +79,114 @@
         "hourlyData": { "type": "array" }
       },
       "required": ["fecha", "turno", "planilla", "quimico", "lote", "linea", "marca", "sabor", "tamano", "createdAt", "authorId", "hourlyData"]
+    },
+    "Employee": {
+      "title": "Employee",
+      "description": "Personnel information",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "legajo": { "type": "string" },
+        "position": { "type": "string" },
+        "active": { "type": "boolean" },
+        "hireDate": { "type": "string" },
+        "terminationDate": { "type": "string" },
+        "vacationAdjustment": { "type": "number" },
+        "compensationAdjustment": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "legajo", "active", "createdAt"]
+    },
+    "MonthlyGoal": {
+      "title": "Monthly Goal",
+      "description": "Monthly production target for a specific product",
+      "type": "object",
+      "properties": {
+        "month": { "type": "string" },
+        "marca": { "type": "string" },
+        "sabor": { "type": "string" },
+        "tamano": { "type": "number" },
+        "quantity": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["month", "marca", "sabor", "tamano", "quantity", "createdAt", "updatedAt"]
+    },
+    "AttendanceRecord": {
+      "title": "Attendance Record",
+      "description": "Daily attendance and overtime",
+      "type": "object",
+      "properties": {
+        "employeeId": { "type": "string" },
+        "employeeName": { "type": "string" },
+        "employeeLegajo": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "shift": { "type": "string" },
+        "line": { "type": "string" },
+        "status": { "type": "string", "enum": ["Presente", "Ausente", "Tarde", "Licencia", "Vacaciones", "Feriado"] },
+        "overtimeHours": { "type": "number" },
+        "observations": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "authorId": { "type": "string" }
+      },
+      "required": ["employeeId", "date", "shift", "status", "createdAt", "authorId"]
+    },
+    "ShiftAssignment": {
+      "title": "Shift Assignment",
+      "description": "Weekly planning assignment",
+      "type": "object",
+      "properties": {
+        "employeeId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "shift": { "type": "string" },
+        "line": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "authorId": { "type": "string" }
+      },
+      "required": ["employeeId", "date", "shift", "line", "createdAt", "authorId"]
+    },
+    "MonthlySnapshot": {
+      "title": "Monthly Snapshot",
+      "description": "Persisted results of a month's management summary",
+      "type": "object",
+      "properties": {
+        "month": { "type": "string" },
+        "year": { "type": "number" },
+        "stats": { "type": "object" },
+        "configAtTime": { "type": "object" },
+        "isClosed": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["month", "year", "stats", "isClosed", "createdAt"]
+    },
+    "ProductionPlan": {
+      "title": "Production Plan",
+      "description": "Planned production for a specific shift and line",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "format": "date" },
+        "shift": { "type": "string", "enum": ["Mañana", "Tarde", "Noche"] },
+        "linea": { "type": "string" },
+        "marca": { "type": "string" },
+        "sabor": { "type": "string" },
+        "tamano": { "type": "number" },
+        "plannedPacks": { "type": "number" },
+        "status": { "type": "string", "enum": ["Draft", "Published"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "authorId": { "type": "string" }
+      },
+      "required": ["date", "shift", "linea", "marca", "sabor", "tamano", "plannedPacks", "status", "createdAt", "authorId"]
     }
   },
   "firestore": {
     "production_reports/{reportId}": {
       "schema": { "$ref": "#/entities/ProductionReport" },
       "description": "Stores all production reports."
+    },
+    "production_plans/{planId}": {
+      "schema": { "$ref": "#/entities/ProductionPlan" },
+      "description": "Stores future production plans."
     },
     "users/{userId}": {
       "schema": { "$ref": "#/entities/User" },
@@ -81,6 +195,30 @@
     "elaboracion_reports/{reportId}": {
       "schema": { "$ref": "#/entities/ElaboracionReport" },
       "description": "Stores all elaboration reports."
+    },
+    "employees/{employeeId}": {
+      "schema": { "$ref": "#/entities/Employee" },
+      "description": "Stores personnel list."
+    },
+    "attendance_records/{recordId}": {
+      "schema": { "$ref": "#/entities/AttendanceRecord" },
+      "description": "Stores daily attendance and overtime."
+    },
+    "shift_assignments/{assignmentId}": {
+      "schema": { "$ref": "#/entities/ShiftAssignment" },
+      "description": "Stores weekly planning assignments."
+    },
+    "monthly_snapshots/{snapshotId}": {
+      "schema": { "$ref": "#/entities/MonthlySnapshot" },
+      "description": "Stores persisted monthly management summaries."
+    },
+    "allowed_users/{email}": {
+      "schema": { "$ref": "#/entities/AllowedUser" },
+      "description": "Stores pre-registered users whitelist."
+    },
+    "monthly_goals/{goalId}": {
+      "schema": { "$ref": "#/entities/MonthlyGoal" },
+      "description": "Stores monthly production targets."
     }
   }
 }

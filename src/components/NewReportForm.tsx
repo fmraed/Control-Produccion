@@ -200,6 +200,31 @@ function calculateLiveEfficiency(report: any, botellasTotales: number): number {
   return Number(((botellasTotales / expectedBottles) * 100).toFixed(1));
 }
 
+// Función para detectar turno automáticamente
+const detectTurno = (timeStr: string, dateStr: string): string => {
+  if (!timeStr || !dateStr) return '';
+  const parts = timeStr.split(':');
+  const hours = parseInt(parts[0], 10);
+  const minutes = parts.length > 1 ? parseInt(parts[1], 10) : 0;
+  const timeInMinutes = hours * 60 + (isNaN(minutes) ? 0 : minutes);
+  
+  // Parse date manually YYYY-MM-DD to avoid timezone issues
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  const dayOfWeek = date.getDay(); // 0 = Domingo, 1 = Lunes, ..., 6 = Sábado
+  const isSaturday = dayOfWeek === 6;
+
+  if (isSaturday) {
+    if (timeInMinutes >= 5 * 60 && timeInMinutes < 13 * 60) return 'Mañana';
+    if (timeInMinutes >= 13 * 60 && timeInMinutes < 22 * 60) return 'Tarde';
+    return 'Noche';
+  } else {
+    if (timeInMinutes >= 6 * 60 && timeInMinutes < 14 * 60) return 'Mañana';
+    if (timeInMinutes >= 14 * 60 && timeInMinutes < 22 * 60) return 'Tarde';
+    return 'Noche';
+  }
+};
+
 // --- Esquema de Validación ---
 const reportSchema = z.object({
   reports: z.array(z.object({
@@ -213,14 +238,14 @@ const reportSchema = z.object({
     velocidad: z.number().min(0).optional(),
     sabor: z.string().min(1, 'Requerido'),
     tamano: z.number().min(1, 'Requerido'),
-    entraTurno: z.string().optional(),
-    saleTurno: z.string().optional(),
+    entraTurno: z.string().min(1, 'Requerido'),
+    saleTurno: z.string().min(1, 'Requerido'),
     tiempoTurno: z.number().min(0).optional(),
     jarabeInicial: z.number().min(0).optional(),
     jarabeConsumido: z.number().min(0).optional(),
     jarabeFinal: z.number().min(0).optional(),
-    contInicial: z.number().min(0).optional(),
-    contFinal: z.number().min(0).optional(),
+    contInicial: z.number().min(1, 'Requerido'),
+    contFinal: z.number().min(1, 'Requerido'),
     botRotas: z.number().min(0).optional(),
     co2: z.number().min(0).optional(),
     observaciones: z.string().optional(),
@@ -247,6 +272,12 @@ const reportSchema = z.object({
     desperdicioTapas: z.number().min(0).optional(),
     desperdicioSifones: z.number().min(0).optional(),
     desperdicioTermo: z.number().min(0).optional(),
+  }).refine(data => {
+    if (!data.entraTurno || !data.fecha || !data.turno) return true;
+    return detectTurno(data.entraTurno, data.fecha) === data.turno;
+  }, {
+    message: "El turno no coincide con el horario de inicio",
+    path: ["turno"]
   })).min(1),
 });
 
@@ -272,8 +303,17 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showTimeWarningModal, setShowTimeWarningModal] = useState(false);
+  const [skipTimeCheck, setSkipTimeCheck] = useState(false);
   const [lastSavedReport, setLastSavedReport] = useState<ProductionReport | null>(null);
   const lastShiftDate = useRef<Record<number, string>>({});
+
+  useEffect(() => {
+    if (skipTimeCheck) {
+      handleSaveCurrentPart();
+    }
+  }, [skipTimeCheck]);
 
   const createDefaultHourlyProduction = (turno: string = TURNOS[0], fecha: string = new Date().toISOString().split('T')[0]): HourlyProduction[] => {
     const hours = getShiftHours(turno, fecha);
@@ -335,6 +375,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
     defaultValues: {
       reports: initialData ? [{
         ...initialData,
+        resetParcial: initialData.id ? (initialData.resetParcial ?? false) : false,
         scrapSoplado: initialData.scrapSoplado || 0,
         scrapEtiquetado: initialData.scrapEtiquetado || 0,
         scrapLlenado: initialData.scrapLlenado || 0,
@@ -449,9 +490,9 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
     };
   }, [initialData, isDraftLoaded, getValues]);
 
-  // Sync to live_production every 3 minutes
+  // Sync to live_production
   useEffect(() => {
-    if (initialData || !isDraftLoaded) return;
+    if (!isDraftLoaded) return;
 
     const syncToLive = async () => {
       const currentReports = getValues('reports');
@@ -461,8 +502,10 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
           currentReports.forEach(report => {
             if (report.linea) {
               const docRef = doc(db, 'live_production', `linea_${report.linea}`);
+              // Clean undefined values for Firestore
+              const cleanReport = JSON.parse(JSON.stringify(report));
               batch.set(docRef, { 
-                ...report, 
+                ...cleanReport, 
                 updatedAt: new Date().toISOString(),
                 type: 'production'
               });
@@ -475,15 +518,43 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
       }
     };
 
-    // Sync immediately once on mount/load
-    syncToLive();
+    // Sync immediately on change (debounced 5s to avoid too many writes)
+    const syncTimeout = setTimeout(syncToLive, 5000);
 
-    const intervalId = setInterval(syncToLive, 180000); // 3 minutes interval
-    return () => {
-      clearInterval(intervalId);
-      syncToLive(); // Sync on unmount
+    return () => clearTimeout(syncTimeout);
+  }, [watchedReports, isDraftLoaded, getValues, initialData]);
+
+  // Periodic sync as fallback
+  useEffect(() => {
+    if (!isDraftLoaded) return;
+
+    const syncToLive = async () => {
+      const currentReports = getValues('reports');
+      if (currentReports && currentReports.length > 0) {
+        try {
+          const batch = writeBatch(db);
+          currentReports.forEach(report => {
+            if (report.linea) {
+              const docRef = doc(db, 'live_production', `linea_${report.linea}`);
+              // Clean undefined values for Firestore
+              const cleanReport = JSON.parse(JSON.stringify(report));
+              batch.set(docRef, { 
+                ...cleanReport, 
+                updatedAt: new Date().toISOString(),
+                type: 'production'
+              });
+            }
+          });
+          await batch.commit();
+        } catch (e) {
+          console.error("Error syncing live data:", e);
+        }
+      }
     };
-  }, [initialData, isDraftLoaded, getValues]);
+
+    const intervalId = setInterval(syncToLive, 60000); // 1 minute fallback
+    return () => clearInterval(intervalId);
+  }, [isDraftLoaded, getValues]);
 
   const { fields: reportFields } = useFieldArray({
     control,
@@ -537,6 +608,15 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
     if (!isDraftLoaded) return;
     reports?.forEach(async (report, index) => {
       if (report.linea && report.sabor && report.tamano) {
+        // Si estamos editando un reporte existente (initialData) y es el primer tab,
+        // no sobrescribimos el parcialAnterior si el sabor/tamaño es el mismo que el original.
+        if (initialData && index === 0 && 
+            report.sabor === initialData.sabor && 
+            report.tamano === initialData.tamano &&
+            report.linea === initialData.linea) {
+          return;
+        }
+
         // Si el usuario marcó reiniciar, forzamos a 0 y no buscamos en la DB
         if (report.resetParcial) {
           if (report.parcialAnterior !== 0) {
@@ -614,31 +694,6 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
       }
     });
   }, [reports, setValue]);
-
-  // Función para detectar turno automáticamente
-  const detectTurno = (timeStr: string, dateStr: string): string => {
-    if (!timeStr || !dateStr) return '';
-    const parts = timeStr.split(':');
-    const hours = parseInt(parts[0], 10);
-    const minutes = parts.length > 1 ? parseInt(parts[1], 10) : 0;
-    const timeInMinutes = hours * 60 + (isNaN(minutes) ? 0 : minutes);
-    
-    // Parse date manually YYYY-MM-DD to avoid timezone issues
-    const [year, month, day] = dateStr.split('-').map(Number);
-    const date = new Date(year, month - 1, day);
-    const dayOfWeek = date.getDay(); // 0 = Domingo, 1 = Lunes, ..., 6 = Sábado
-    const isSaturday = dayOfWeek === 6;
-
-    if (isSaturday) {
-      if (timeInMinutes >= 5 * 60 && timeInMinutes < 13 * 60) return 'Mañana';
-      if (timeInMinutes >= 13 * 60 && timeInMinutes < 22 * 60) return 'Tarde';
-      return 'Noche';
-    } else {
-      if (timeInMinutes >= 6 * 60 && timeInMinutes < 14 * 60) return 'Mañana';
-      if (timeInMinutes >= 14 * 60 && timeInMinutes < 22 * 60) return 'Tarde';
-      return 'Noche';
-    }
-  };
 
   // Efecto para actualizar horas según el turno y el día
   useEffect(() => {
@@ -789,6 +844,48 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
       return;
     }
 
+    // Check for time discrepancy
+    if (currentReport.entraTurno && currentReport.fecha && currentReport.turno && !skipTimeCheck) {
+      const detected = detectTurno(currentReport.entraTurno, currentReport.fecha);
+      if (detected !== currentReport.turno) {
+        setShowTimeWarningModal(true);
+        return;
+      }
+    }
+
+    // Check for counter discrepancy
+    const contInicial = currentReport.contInicial || 0;
+    const contFinal = currentReport.contFinal || 0;
+    const hourlyData = currentReport.hourlyProduction || [];
+    
+    // Use the same logic as getBotellasTotales but WITHOUT subtracting botRotas
+    let totalFromCounters = 0;
+    if (contFinal > 0) {
+      totalFromCounters = Math.max(0, contFinal - contInicial);
+    } else {
+      let maxMarcador = 0;
+      for (const h of hourlyData) {
+        if ((h.marcador || 0) > maxMarcador) {
+          maxMarcador = h.marcador;
+        }
+      }
+      totalFromCounters = Math.max(0, maxMarcador - contInicial);
+    }
+
+    const hourlyBotellas = hourlyData.reduce((sum, h) => {
+      const prevMarcador = getPrevMarcador(hourlyData, hourlyData.indexOf(h), contInicial);
+      return sum + Math.max(0, (h.marcador || 0) - prevMarcador);
+    }, 0);
+
+    const isCounterMismatch = Math.abs(totalFromCounters - hourlyBotellas) > 0;
+    
+    // Only block save or show error if there's a discrepancy
+    if (isCounterMismatch) {
+        setError("La suma de la producción por hora no coincide con la diferencia entre contador final e inicial.");
+        return;
+    }
+
+    setSkipTimeCheck(false); // Reset for next time
     setIsSubmitting(true);
     setError(null);
     setSaveSuccess(null);
@@ -883,37 +980,41 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
       
       lastCalculated.current = {}; // Reset cache to force refetch of previous partials
       
-      // Clear specific fields as requested by user after successful save
-      setValue(`reports.${activeTab}.downtimes`, DOWNTIME_CATEGORIES.flatMap(cat => 
-        cat.reasons.map(reason => ({
-          category: cat.name,
-          reason,
-          minutes: Array(8).fill(''),
-        }))
-      ));
-      setValue(`reports.${activeTab}.observaciones`, "");
-      setValue(`reports.${activeTab}.scrapSoplado`, 0);
-      setValue(`reports.${activeTab}.scrapEtiquetado`, 0);
-      setValue(`reports.${activeTab}.scrapLlenado`, 0);
-      setValue(`reports.${activeTab}.scrapHorno`, 0);
-      setValue(`reports.${activeTab}.desperdicioEtiquetas`, 0);
-      setValue(`reports.${activeTab}.desperdicioTapas`, 0);
-      setValue(`reports.${activeTab}.desperdicioSifones`, 0);
-      setValue(`reports.${activeTab}.desperdicioTermo`, 0);
-      setValue(`reports.${activeTab}.botRotas`, 0);
-      setValue(`reports.${activeTab}.ajusteParcial`, 0);
-      
-      // Reset hourly production markers
-      const currentHourly = getValues(`reports.${activeTab}.hourlyProduction`);
-      if (currentHourly) {
-        currentHourly.forEach((_, hIdx) => {
-          setValue(`reports.${activeTab}.hourlyProduction.${hIdx}.marcador`, 0);
-        });
+      if (!initialData) {
+        // Clear specific fields as requested by user after successful save of a NEW report
+        setValue(`reports.${activeTab}.downtimes`, DOWNTIME_CATEGORIES.flatMap(cat => 
+          cat.reasons.map(reason => ({
+            category: cat.name,
+            reason,
+            minutes: Array(8).fill(''),
+          }))
+        ));
+        setValue(`reports.${activeTab}.observaciones`, "");
+        setValue(`reports.${activeTab}.scrapSoplado`, 0);
+        setValue(`reports.${activeTab}.scrapEtiquetado`, 0);
+        setValue(`reports.${activeTab}.scrapLlenado`, 0);
+        setValue(`reports.${activeTab}.scrapHorno`, 0);
+        setValue(`reports.${activeTab}.desperdicioEtiquetas`, 0);
+        setValue(`reports.${activeTab}.desperdicioTapas`, 0);
+        setValue(`reports.${activeTab}.desperdicioSifones`, 0);
+        setValue(`reports.${activeTab}.desperdicioTermo`, 0);
+        setValue(`reports.${activeTab}.botRotas`, 0);
+        setValue(`reports.${activeTab}.ajusteParcial`, 0);
+        setValue(`reports.${activeTab}.resetParcial`, false);
+        
+        // Reset hourly production markers
+        const currentHourly = getValues(`reports.${activeTab}.hourlyProduction`);
+        if (currentHourly) {
+          currentHourly.forEach((_, hIdx) => {
+            setValue(`reports.${activeTab}.hourlyProduction.${hIdx}.marcador`, 0);
+          });
+        }
       }
 
       setSaveSuccess(initialData ? `Parte actualizado correctamente.` : `Parte ${activeTab + 1} guardado correctamente.`);
       setLastSavedReport(reportData);
-      setTimeout(() => setSaveSuccess(null), 5000);
+      setShowSuccessModal(true);
+      // setTimeout(() => setSaveSuccess(null), 5000);
       
       // setTimeout(onSuccess, 1500); // Removed to stay on form
     } catch (err) {
@@ -1037,20 +1138,6 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
                   )}
                 />
                 <Controller
-                  name={`reports.${index}.sabor`}
-                  control={control}
-                  render={({ field }) => (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Sabor</label>
-                      <select {...field} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
-                        <option value="">Seleccione...</option>
-                        {getFilteredFlavors(reports[index]?.marca).map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                      {errors.reports?.[index]?.sabor && <p className="text-red-500 text-xs mt-1">{errors.reports?.[index]?.sabor?.message}</p>}
-                    </div>
-                  )}
-                />
-                <Controller
                   name={`reports.${index}.tamano`}
                   control={control}
                   render={({ field }) => (
@@ -1061,6 +1148,20 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
                         {getFilteredSizes(reports[index]?.linea).map(t => <option key={t} value={t}>{t} cc</option>)}
                       </select>
                       {errors.reports?.[index]?.tamano && <p className="text-red-500 text-xs mt-1">{errors.reports?.[index]?.tamano?.message}</p>}
+                    </div>
+                  )}
+                />
+                <Controller
+                  name={`reports.${index}.sabor`}
+                  control={control}
+                  render={({ field }) => (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Sabor</label>
+                      <select {...field} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
+                        <option value="">Seleccione...</option>
+                        {getFilteredFlavors(reports[index]?.marca, reports[index]?.tamano).map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                      {errors.reports?.[index]?.sabor && <p className="text-red-500 text-xs mt-1">{errors.reports?.[index]?.sabor?.message}</p>}
                     </div>
                   )}
                 />
@@ -1084,6 +1185,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
                             ? 'border-orange-500 bg-orange-50 focus:border-orange-500'
                             : 'border-gray-300 focus:border-blue-500'
                         }`} />
+                        {errors.reports?.[index]?.entraTurno && <p className="text-red-500 text-xs mt-1">{errors.reports?.[index]?.entraTurno?.message}</p>}
                         {field.value && reports[index]?.fecha && detectTurno(field.value, reports[index].fecha) !== reports[index].turno && (
                           <p className="mt-1 text-xs text-orange-600 flex items-center gap-1">
                             <AlertCircle className="w-3 h-3" />
@@ -1100,6 +1202,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
                       <div>
                         <label className="block text-sm font-medium text-gray-700">Hora Final</label>
                         <input type="time" {...field} value={field.value ?? ''} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2" />
+                        {errors.reports?.[index]?.saleTurno && <p className="text-red-500 text-xs mt-1">{errors.reports?.[index]?.saleTurno?.message}</p>}
                       </div>
                     )}
                   />
@@ -1151,6 +1254,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
                           }} 
                           className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2 font-mono" 
                         />
+                        {errors.reports?.[index]?.contInicial && <p className="text-red-500 text-xs mt-1">{errors.reports?.[index]?.contInicial?.message}</p>}
                       </div>
                     );
                   }}
@@ -1175,6 +1279,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
                           }} 
                           className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2 font-mono" 
                         />
+                        {errors.reports?.[index]?.contFinal && <p className="text-red-500 text-xs mt-1">{errors.reports?.[index]?.contFinal?.message}</p>}
                       </div>
                     );
                   }}
@@ -1641,45 +1746,129 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
         </div>
       ))}
 
+      {/* Success Modal Overlay */}
+      {saveSuccess && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white p-8 rounded-2xl shadow-2xl border border-green-100 flex flex-col items-center gap-6 max-w-md w-full text-center animate-in fade-in zoom-in duration-300">
+            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center">
+              <CheckCircle2 className="w-12 h-12 text-green-600" />
+            </div>
+            <div>
+              <h3 className="text-2xl font-black text-gray-900">¡Parte Guardado!</h3>
+              <p className="text-gray-600 mt-2 font-medium">{saveSuccess}</p>
+            </div>
+            <div className="grid grid-cols-1 gap-3 w-full">
+              {lastSavedReport && (
+                <button
+                  type="button"
+                  onClick={() => printProductionReport(lastSavedReport)}
+                  className="flex items-center justify-center gap-3 px-6 py-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all shadow-lg hover:shadow-blue-200 active:scale-95"
+                >
+                  <Printer className="w-6 h-6" />
+                  Imprimir para Expedición
+                </button>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  className="flex items-center justify-center gap-2 px-4 py-4 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-all active:scale-95"
+                >
+                  <X className="w-5 h-5" />
+                  Cerrar
+                </button>
+                {!initialData && reportFields.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextTab = (activeTab + 1) % reportFields.length;
+                      setActiveTab(nextTab);
+                      setSaveSuccess(null);
+                      setLastSavedReport(null);
+                    }}
+                    className="flex items-center justify-center gap-2 px-4 py-4 bg-indigo-50 text-indigo-700 font-bold rounded-xl hover:bg-indigo-100 transition-all active:scale-95"
+                  >
+                    <FileText className="w-5 h-5" />
+                    Otro Parte
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Time Discrepancy Warning Modal */}
+      {showTimeWarningModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full text-center transform animate-in zoom-in-95 duration-300 border-4 border-orange-100">
+            <div className="w-20 h-20 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <AlertCircle className="w-10 h-10 text-orange-600" />
+            </div>
+            <h3 className="text-2xl font-black text-gray-900 mb-2 font-mono uppercase tracking-tighter">Advertencia de Horario</h3>
+            <p className="text-gray-600 mb-6 font-medium">
+              El horario de inicio <span className="text-orange-600 font-bold">({getValues(`reports.${activeTab}.entraTurno`)})</span> no coincide con el turno seleccionado <span className="text-orange-600 font-bold">({getValues(`reports.${activeTab}.turno`)})</span>.
+            </p>
+            <div className="bg-blue-50 p-4 rounded-2xl mb-8 text-left border border-blue-100">
+              <p className="text-xs font-bold text-blue-800 uppercase mb-2">Sugerencia:</p>
+              <p className="text-sm text-blue-700">
+                Se detectó que el horario ingresado corresponde al turno: <span className="font-bold underline">{detectTurno(getValues(`reports.${activeTab}.entraTurno`) || '', getValues(`reports.${activeTab}.fecha`) || '')}</span>
+              </p>
+            </div>
+            <div className="flex flex-col gap-3">
+              <button
+                type="button"
+                onClick={() => setShowTimeWarningModal(false)}
+                className="w-full px-6 py-4 bg-gray-100 text-gray-700 rounded-2xl font-bold hover:bg-gray-200 transition-all active:scale-95"
+              >
+                Volver y Corregir
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTimeWarningModal(false);
+                  setSkipTimeCheck(true);
+                  handleSaveCurrentPart();
+                }}
+                className="w-full px-6 py-2 text-xs text-orange-600 font-bold hover:underline"
+              >
+                Ignorar y Guardar de todos modos
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Botones de Acción */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg z-20">
-        <div className="max-w-full mx-auto flex justify-end gap-4 px-4 sm:px-6 lg:px-8">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={isSubmitting}
-            className="inline-flex items-center gap-2 px-6 py-2.5 border border-gray-300 shadow-sm text-sm font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-          >
-            <X className="w-4 h-4" />
-            {saveSuccess ? 'Cerrar' : 'Cancelar'}
-          </button>
-          
-          {lastSavedReport && (
+      {!saveSuccess && (
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg z-20">
+          <div className="max-w-full mx-auto flex justify-end gap-4 px-4 sm:px-6 lg:px-8">
             <button
               type="button"
-              onClick={() => printProductionReport(lastSavedReport)}
-              className="inline-flex items-center gap-2 px-6 py-2.5 border border-gray-300 shadow-sm text-sm font-medium rounded-lg text-blue-700 bg-blue-50 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              onClick={onCancel}
+              disabled={isSubmitting}
+              className="inline-flex items-center gap-2 px-6 py-2.5 border border-gray-300 shadow-sm text-sm font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
             >
-              <Printer className="w-4 h-4" />
-              Imprimir para Expedición
+              <X className="w-4 h-4" />
+              Cancelar
             </button>
-          )}
-
-          <button
-            type="button"
-            onClick={handleSaveCurrentPart}
-            disabled={isSubmitting}
-            className="inline-flex items-center gap-2 px-6 py-2.5 border border-transparent shadow-sm text-sm font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-          >
-            {isSubmitting ? (
-              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-            ) : (
-              <Save className="w-4 h-4" />
-            )}
-            {initialData ? 'Actualizar Parte' : `Guardar Parte ${activeTab + 1}`}
-          </button>
+            
+            <button
+              type="button"
+              onClick={handleSaveCurrentPart}
+              disabled={isSubmitting}
+              className="inline-flex items-center gap-2 px-6 py-2.5 border border-transparent shadow-sm text-sm font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+            >
+              {isSubmitting ? (
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              ) : (
+                <Save className="w-4 h-4" />
+              )}
+              {initialData ? 'Actualizar Parte' : `Guardar Parte ${activeTab + 1}`}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
     </form>
   );
 }

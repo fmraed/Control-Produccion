@@ -6,6 +6,22 @@ export const SABORES = ['Manzana', 'Naranja', 'Cola', 'Lima Limon', 'Pomelo', 'A
 export const SABORES_SIN_JARABE = ['Soda', 'Soda Sifon', 'Agua'];
 export const TAMANOS = [500, 1000, 1500, 2000, 2250, 3000];
 
+export const FLAVOR_COLORS: Record<string, string> = {
+  'Manzana': '#d97706',
+  'Naranja': '#f97316',
+  'Cola': '#dc2626',
+  'Lima Limon': '#22c55e',
+  'Pomelo': '#facc15',
+  'Agua Tónica': '#000000',
+  'Pomelo Blanco': '#fef08a',
+  'Citrus': '#4ade80',
+  'Granadina': '#c084fc',
+  'Limonada': '#166534',
+  'Soda': '#1e40af',
+  'Soda Sifon': '#1e40af',
+  'Agua': '#38bdf8'
+};
+
 export const PACKS_POR_PALETA: Record<number, number> = {
   3000: 60,
   2250: 80,

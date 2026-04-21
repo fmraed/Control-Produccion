@@ -141,6 +141,67 @@ async function startServer() {
     }
   });
 
+  // API Route for Stock Control
+  app.post("/api/sql/stock", async (req, res) => {
+    const { month } = req.body; // format 'yyyy-MM'
+
+    if (!month) {
+      return res.status(400).json({ error: "Mes es requerido" });
+    }
+
+    if (!process.env.SQL_SERVER_SERVER || !process.env.SQL_SERVER_USER || !process.env.SQL_SERVER_PASSWORD) {
+      return res.status(400).json({ error: "Configuración SQL incompleta" });
+    }
+
+    try {
+      let pool = await sql.connect(sqlConfig);
+      
+      const startOfMonthDate = `${month}-01 00:00:00`;
+      
+      // Updated query using the user-provided stock view and logic
+      const query = `
+        SELECT 
+            a.[co_codAbre] AS codigo,
+            a.[no_descripcion] AS descripcion,
+            s.[nu_actual] AS stock_actual,
+            ISNULL(mov.[salida_acumulada], 0) AS salida_acumulada,
+            ISNULL(s.[nu_actual] + mov.[net_mov_to_current], 0) AS stock_inicial
+        FROM [forDrink].[dbo].[vw_articulos_stock_fason] s
+        LEFT JOIN [forDrink].[dbo].[fc_articulos] a 
+            ON s.id_articulo = a.id_articulo
+        LEFT JOIN (
+            -- Salidas acumuladas del mes para el depósito 27
+            -- net_mov_to_current se usa para calcular el stock inicial (Stock Actual - Net Movimientos desde el inicio del mes)
+            -- Como nu_cantidad es positivo para ingresos y negativo para egresos:
+            -- Stock Inicial = Stock Actual - Sum(Movimientos del mes)
+            SELECT 
+                id_articulo, 
+                SUM(CASE WHEN nu_cantidad < 0 THEN ABS(nu_cantidad) ELSE 0 END) as salida_acumulada,
+                SUM(nu_cantidad) * -1 as net_mov_to_current
+            FROM [forDrink].[dbo].[st_movimientos]
+            WHERE fe_movimiento >= @startOfMonth
+              AND id_deposito = 27
+            GROUP BY id_articulo
+        ) mov ON a.[id_articulo] = mov.[id_articulo]
+        WHERE s.id_deposito = 27
+          AND a.id_familia NOT IN (13, 17, 136, 137, 141, 142, 155, 244, 246)
+      `;
+
+      const result = await pool.request()
+        .input('startOfMonth', sql.VarChar, startOfMonthDate)
+        .query(query);
+
+      res.json({
+        success: true,
+        data: result.recordset,
+        message: "Datos de stock obtenidos correctamente."
+      });
+    } catch (err) {
+      console.error("SQL Stock Error:", err);
+      res.status(500).json({ error: "Error al consultar stock en SQL" });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

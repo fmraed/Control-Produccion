@@ -1,14 +1,13 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { collection, query, orderBy, limit, getDocs, startAfter, doc, deleteDoc, QueryDocumentSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { ProductionReport } from '../types';
-import { FileText, Calendar, Clock, Activity, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, Trash2, Settings2, Info, Printer } from 'lucide-react';
-import { format, parseISO, isAfter, subHours } from 'date-fns';
+import { FileText, Calendar, Clock, Activity, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, Trash2, Settings2, Info, Printer, RefreshCw } from 'lucide-react';
+import { format, parseISO, isAfter, subHours, subMonths, startOfMonth } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { getLogicalDate } from '../utils';
 import { printProductionReport } from '../utils/printReport';
 import { useAppConfig } from '../hooks/useAppConfig';
-import { doc, deleteDoc } from 'firebase/firestore';
 
 interface DashboardProps {
   onNewReport: () => void;
@@ -24,8 +23,13 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin }: DashboardProps
   } = useAppConfig();
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | null>(null);
+  const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const PAGE_SIZE = 25;
   const [expandedReport, setExpandedReport] = useState<string | null>(null);
+  const [reportToDelete, setReportToDelete] = useState<string | null>(null);
 
   // Filters state
   const [selectedMonth, setSelectedMonth] = useState<string>('');
@@ -34,37 +38,58 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin }: DashboardProps
   const [selectedTamano, setSelectedTamano] = useState<string>('');
   const [selectedSabor, setSelectedSabor] = useState<string>('');
 
-  useEffect(() => {
-    const q = query(collection(db, 'production_reports'), orderBy('createdAt', 'desc'));
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const reportsData: ProductionReport[] = [];
-      snapshot.forEach((doc) => {
-        reportsData.push({ id: doc.id, ...doc.data() } as ProductionReport);
-      });
-      setReports(reportsData);
-      setLoading(false);
-    }, (err) => {
-      console.error("Error fetching reports:", err);
-      setError("No se pudieron cargar los partes de producción. Verifica tu conexión o permisos.");
-      setLoading(false);
-    });
+  const fetchReports = useCallback(async (isNextPage = false) => {
+    if (isNextPage) setLoadingMore(true);
+    else setLoading(true);
 
-    return () => unsubscribe();
+    try {
+      const reportsRef = collection(db, 'production_reports');
+      let q = query(reportsRef, orderBy('createdAt', 'desc'), limit(PAGE_SIZE));
+
+      if (isNextPage && lastDoc) {
+        q = query(reportsRef, orderBy('createdAt', 'desc'), startAfter(lastDoc), limit(PAGE_SIZE));
+      }
+
+      const snapshot = await getDocs(q);
+      
+      const newReports = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as ProductionReport));
+
+      if (isNextPage) {
+        setReports(prev => [...prev, ...newReports]);
+      } else {
+        setReports(newReports);
+      }
+
+      setLastDoc(snapshot.docs[snapshot.docs.length - 1] || null);
+      setHasMore(snapshot.docs.length === PAGE_SIZE);
+      setError(null);
+    } catch (err) {
+      console.error("Error fetching reports:", err);
+      setError("No se pudieron cargar los partes de producción.");
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }, [lastDoc]);
+
+  useEffect(() => {
+    fetchReports();
   }, []);
 
   // Filter options
   const months = useMemo(() => {
-    const uniqueMonths = new Set<string>();
-    reports.forEach(r => {
-      const logicalDate = getLogicalDate(r);
-      if (logicalDate) {
-        const date = parseISO(logicalDate);
-        uniqueMonths.add(format(date, 'yyyy-MM'));
-      }
-    });
-    return Array.from(uniqueMonths).sort().reverse();
-  }, [reports]);
+    const monthsList = [];
+    const now = new Date();
+    // Generate last 24 months for the filter
+    for (let i = 0; i < 24; i++) {
+      const date = subMonths(startOfMonth(now), i);
+      monthsList.push(format(date, 'yyyy-MM'));
+    }
+    return monthsList;
+  }, []);
 
   const lineas = availableLines;
   const supervisores = availableSupervisors;
@@ -84,13 +109,14 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin }: DashboardProps
     });
   }, [reports, selectedMonth, selectedLinea, selectedSupervisor, selectedTamano, selectedSabor]);
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('¿Estás seguro de que deseas eliminar este reporte de producción?')) return;
+  const handleDelete = async () => {
+    if (!reportToDelete) return;
     try {
-      await deleteDoc(doc(db, 'production_reports', id));
+      await deleteDoc(doc(db, 'production_reports', reportToDelete));
+      setReportToDelete(null);
     } catch (err) {
       console.error("Error deleting report:", err);
-      alert("Error al eliminar el reporte.");
+      setError("Error al eliminar el reporte. Por favor, intenta de nuevo.");
     }
   };
 
@@ -352,7 +378,7 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin }: DashboardProps
                       </button>
                     )}
                     <button
-                      onClick={() => report.id && handleDelete(report.id)}
+                      onClick={() => report.id && setReportToDelete(report.id)}
                       className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 p-2 rounded-md transition-colors"
                       title="Eliminar parte"
                     >
@@ -378,29 +404,27 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin }: DashboardProps
                                 <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">Hora</th>
                                 <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">Marcador</th>
                                 <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">Producción</th>
-                                <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">Velocidad</th>
-                                <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">Observaciones</th>
+                                <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">Minutos Prod.</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200">
-                              {report.hourlyProduction?.filter(h => (h.marcador || 0) > 0 || h.observaciones).map((hour, idx) => {
+                              {report.hourlyProduction?.filter(h => (h.marcador || 0) > 0).map((hour, idx) => {
                                 const prevMarcador = getPrevMarcador(report.hourlyProduction || [], idx, report.contInicial || 0);
                                 const produccion = hour.botMin || (hour.marcador > 0 ? Math.max(0, hour.marcador - prevMarcador) : 0);
-                                const velocidad = report.velocidad || 0;
+                                const minProd = hour.minProd || (report.velocidad ? Math.round((produccion / report.velocidad) * 60) : 0);
                                 
                                 return (
                                   <tr key={idx} className="text-xs hover:bg-gray-50">
                                     <td className="px-4 py-2 font-bold text-blue-700">{hour.hora}hs</td>
                                     <td className="px-4 py-2 font-mono">{hour.marcador?.toLocaleString()}</td>
                                     <td className="px-4 py-2 font-bold">{produccion.toLocaleString()}</td>
-                                    <td className="px-4 py-2 text-gray-500">{velocidad} b/m</td>
-                                    <td className="px-4 py-2 text-gray-500 italic">{hour.observaciones || '-'}</td>
+                                    <td className="px-4 py-2 text-gray-500">{minProd} min</td>
                                   </tr>
                                 );
                               })}
                               {(!report.hourlyProduction || report.hourlyProduction.length === 0) && (
                                 <tr>
-                                  <td colSpan={5} className="px-4 py-4 text-center text-gray-400 italic">No hay datos horarios registrados</td>
+                                  <td colSpan={4} className="px-4 py-4 text-center text-gray-400 italic">No hay datos horarios registrados</td>
                                 </tr>
                               )}
                             </tbody>
@@ -500,7 +524,59 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin }: DashboardProps
           </tbody>
         </table>
       </div>
+
+      {hasMore && (
+        <div className="flex justify-center pt-4">
+          <button
+            onClick={() => fetchReports(true)}
+            disabled={loadingMore}
+            className="flex items-center gap-2 px-6 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl text-sm font-bold hover:bg-gray-50 transition-all shadow-sm disabled:opacity-50"
+          >
+            {loadingMore ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin text-blue-600" />
+                Cargando...
+              </>
+            ) : (
+              'Cargar más reportes'
+            )}
+          </button>
+        </div>
+      )}
     </div>
+
+    {/* Confirmation Modal */}
+    {reportToDelete && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <div className="bg-white rounded-2xl shadow-xl border border-gray-200 w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+          <div className="p-6">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="bg-red-100 p-3 rounded-full">
+                <Trash2 className="w-6 h-6 text-red-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">¿Eliminar este parte?</h3>
+                <p className="text-sm text-gray-500">Esta acción no se puede deshacer. El reporte se borrará permanentemente de la base de datos.</p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-gray-50 px-6 py-4 flex flex-col sm:flex-row-reverse gap-3">
+            <button
+              onClick={handleDelete}
+              className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-6 rounded-xl transition-all shadow-sm active:scale-95"
+            >
+              Sí, eliminar permanentemente
+            </button>
+            <button
+              onClick={() => setReportToDelete(null)}
+              className="w-full sm:w-auto bg-white hover:bg-gray-100 text-gray-700 font-bold py-2.5 px-6 rounded-xl border border-gray-200 transition-all active:scale-95"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     </div>
   );
 }

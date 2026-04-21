@@ -113,12 +113,109 @@ export interface ElaboracionReport {
   authorName?: string;
 }
 
+export type UserRole = 'admin' | 'produccion' | 'calidad' | 'jefe_produccion';
+
+export interface RolePermissions {
+  viewReports: boolean;
+  editReports: boolean;
+  viewElaboracion: boolean;
+  editElaboracion: boolean;
+  viewScheduler: boolean;
+  editScheduler: boolean;
+  viewPersonnel: boolean;
+  editPersonnel: boolean;
+  viewLiveMonitor: boolean;
+  viewAnalytics: boolean;
+  viewAdmin: boolean;
+}
+
 export interface UserProfile {
   uid: string;
   email: string;
   displayName: string;
-  role: 'admin' | 'user';
+  role: UserRole;
+  sector?: string;
   photoURL?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Employee {
+  id?: string;
+  name: string;
+  legajo: string;
+  position: string;
+  active: boolean;
+  type?: 'Efectivo' | 'Temporario';
+  sector?: string;
+  hireDate?: string;
+  terminationDate?: string;
+  vacationAdjustment?: number;
+  compensationAdjustment?: number;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface AttendanceRecord {
+  id?: string;
+  employeeId: string;
+  employeeName: string;
+  employeeLegajo: string;
+  date: string; // ISO Date YYYY-MM-DD
+  shift: string;
+  line: string;
+  status: 'Presente' | 'Ausente' | 'Tarde' | 'Licencia' | 'Vacaciones' | 'Feriado' | 'Compensado';
+  overtimeHours: number;
+  observations?: string;
+  createdAt: string;
+  updatedAt?: string;
+  authorId: string;
+}
+
+export interface ShiftAssignment {
+  id?: string;
+  employeeId: string;
+  date: string; // ISO Date YYYY-MM-DD
+  shift: string;
+  line: string;
+  createdAt: string;
+  authorId: string;
+}
+
+export interface ProductionPlan {
+  id?: string;
+  date: string; // YYYY-MM-DD
+  shift: 'Mañana' | 'Tarde' | 'Noche';
+  linea: string;
+  marca: string;
+  sabor: string;
+  tamano: number;
+  plannedPacks: number;
+  duration?: number; // 0.5, 1, etc.
+  status: 'Draft' | 'Published';
+  notes?: string;
+  createdAt: string;
+  authorId: string;
+}
+
+export interface MonthlyGoal {
+  id?: string;
+  month: string; // YYYY-MM
+  marca: string;
+  sabor: string;
+  tamano: number;
+  quantity: number; // In packages
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MonthlySnapshot {
+  id?: string;
+  month: string;
+  year: number;
+  stats: any;
+  configAtTime: any;
+  isClosed: boolean;
   createdAt: string;
   updatedAt: string;
 }

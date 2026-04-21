@@ -110,8 +110,8 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
       lote: '',
       linea: availableLines[0] || '',
       marca: availableBrands[0] || '',
-      sabor: availableFlavors[0] || '',
       tamano: availableLines.length > 0 ? (getFilteredSizes(availableLines[0])[0] || 500) : 500,
+      sabor: availableBrands.length > 0 ? (getFilteredFlavors(availableBrands[0], availableLines.length > 0 ? (getFilteredSizes(availableLines[0])[0] || 500) : 500)[0] || '') : '',
       horaInicio: '',
       horaFin: '',
       contInicial: undefined,
@@ -260,7 +260,7 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
     // Sync immediately once on mount/load
     syncToLive();
 
-    const intervalId = setInterval(syncToLive, 180000); // 3 minutes interval
+    const intervalId = setInterval(syncToLive, 60000); // 1 minute interval
     return () => clearInterval(intervalId);
   }, [initialData, isDraftLoaded]);
   
@@ -550,20 +550,20 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
                 </select>
               </div>
               <div>
+                <label className="block text-sm font-medium text-gray-700">Calibre (cc)</label>
+                <select {...register(`reports.${reportIndex}.tamano`, { valueAsNumber: true })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
+                  {getFilteredSizes(watchedReports[reportIndex].linea).map(t => <option key={t} value={t}>{t} cc</option>)}
+                </select>
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700">Sabor</label>
                 <select {...register(`reports.${reportIndex}.sabor`)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
-                  {getFilteredFlavors(watchedReports[reportIndex].marca).map(s => <option key={s} value={s}>{s}</option>)}
+                  {getFilteredFlavors(watchedReports[reportIndex].marca, watchedReports[reportIndex].tamano).map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">Lote Envasado</label>
                 <input type="text" {...register(`reports.${reportIndex}.lote`)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Calibre (cc)</label>
-                <select {...register(`reports.${reportIndex}.tamano`, { valueAsNumber: true })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
-                  {getFilteredSizes(watchedReports[reportIndex].linea).map(t => <option key={t} value={t}>{t} cc</option>)}
-                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">Planilla N°</label>
