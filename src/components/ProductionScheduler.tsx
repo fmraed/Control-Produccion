@@ -430,11 +430,11 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
                 <table className="w-full border-collapse table-fixed" style={{ width: `${128 + weekDays.length * 3 * 240}px` }}>
                   <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
-                <th rowSpan={2} className="sticky left-0 bg-gray-50 z-20 w-32 px-4 py-4 text-center border-r border-gray-200 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
+                <th rowSpan={2} className="sticky left-0 bg-gray-50 z-20 w-32 px-4 py-2 text-center border-r border-gray-200 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
                   <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Línea / Día</span>
                 </th>
                 {weekDays.map((day, i) => (
-                  <th key={i} colSpan={3} className={`px-2 py-4 border-r border-gray-200 min-w-[720px] ${isToday(day) ? 'bg-indigo-50/50' : ''}`}>
+                  <th key={i} colSpan={3} className={`px-2 py-2 border-r border-gray-200 min-w-[720px] ${isToday(day) ? 'bg-indigo-50/50' : ''}`}>
                     <div className="flex flex-col items-center">
                       <span className="text-[10px] font-black text-gray-400 uppercase tracking-tighter truncate w-full text-center">
                         {format(day, 'EEEE', { locale: es })}
@@ -465,7 +465,7 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
             <tbody className="divide-y divide-gray-200">
               {availableLines.map(linea => (
                 <tr key={linea} className="group">
-                  <td className="sticky left-0 bg-white z-20 px-4 py-16 border-r border-gray-300 shadow-[2px_0_5px_rgba(0,0,0,0.05)] font-black text-indigo-700 uppercase text-lg text-center">
+                  <td className="sticky left-0 bg-white z-20 px-3 py-4 border-r border-gray-300 shadow-[2px_0_5px_rgba(0,0,0,0.05)] font-black text-indigo-700 uppercase text-sm text-center">
                     {linea}
                   </td>
                   {weekDays.map((day, i) => {
@@ -476,15 +476,15 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
                       return (
                         <td 
                           key={`${dateStr}-${shift}`} 
-                          className={`p-1.5 border-r border-gray-100 align-top min-h-[160px] relative hover:bg-gray-50/30 transition-colors ${isToday(day) ? 'bg-indigo-50/10' : ''}`}
+                          className={`p-0.5 border-r border-gray-100 align-top min-h-[40px] relative hover:bg-gray-50/30 transition-colors ${isToday(day) ? 'bg-indigo-50/10' : ''}`}
                         >
-                          <div className="space-y-1.5">
+                          <div className="space-y-1">
                             {isAdmin && (
                               <button
                                 onClick={() => handleAddPlan(dateStr, shift, linea)}
-                                className="w-full py-1.5 border border-dashed border-gray-200 rounded-lg text-gray-300 flex flex-col items-center justify-center gap-1 hover:border-indigo-300 hover:text-indigo-400 hover:bg-indigo-50/50 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                                className="w-full py-0.5 border border-dashed border-gray-200 rounded text-gray-300 flex items-center justify-center hover:border-indigo-300 hover:text-indigo-400 hover:bg-indigo-50/50 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
                               >
-                                <Plus className="w-3.5 h-3.5" />
+                                <Plus className="w-3 h-3" />
                               </button>
                             )}
 
@@ -500,15 +500,15 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
                                   key={plan.id}
                                   style={{ 
                                     backgroundColor: bgColor,
-                                    height: plan.duration === 0.5 ? '120px' : 'auto'
+                                    height: plan.duration === 0.5 ? '80px' : 'auto'
                                   }}
-                                  className={`group/item relative rounded-2xl border p-3 transition-all shadow-sm hover:shadow-md ${
+                                  className={`group/item relative rounded-xl border p-2 transition-all shadow-sm hover:shadow-md ${
                                     isDraft 
                                       ? 'border-amber-400 border-2' 
                                       : 'border-transparent'
                                   }`}
                                 >
-                                  <div className="space-y-2">
+                                  <div className="space-y-1">
                                     <div className="flex items-start justify-between">
                                       <div className="flex-1 min-w-0">
                                         {isAdmin ? (
@@ -582,18 +582,18 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
                                       )}
                                     </div>
 
-                                    <div className={`pt-2 border-t flex items-center justify-between ${isLight ? 'border-black/5' : 'border-white/10'}`}>
+                                    <div className={`pt-1.5 border-t flex items-center justify-between ${isLight ? 'border-black/5' : 'border-white/10'}`}>
                                       <div className="flex flex-col">
-                                        <span className={`text-[8px] font-black uppercase tracking-widest ${isLight ? 'text-gray-400' : 'text-white/60'}`}>Packs Previstos</span>
+                                        <span className={`text-[7px] font-black uppercase tracking-widest ${isLight ? 'text-gray-400' : 'text-white/60'}`}>Packs Previstos</span>
                                         {isAdmin ? (
                                           <input
                                             type="number"
                                             value={plan.plannedPacks || ''}
                                             onChange={(e) => handleUpdatePlan(plan.id!, { plannedPacks: Number(e.target.value) })}
-                                            className={`text-lg font-black w-full p-0 border-none bg-transparent focus:ring-0 placeholder:opacity-50 ${isLight ? 'text-gray-900' : 'text-white'}`}
+                                            className={`text-sm font-black w-full p-0 border-none bg-transparent focus:ring-0 placeholder:opacity-50 ${isLight ? 'text-gray-900' : 'text-white'}`}
                                           />
                                         ) : (
-                                          <div className={`text-lg font-black ${isLight ? 'text-gray-900' : 'text-white'}`}>
+                                          <div className={`text-sm font-black ${isLight ? 'text-gray-900' : 'text-white'}`}>
                                             {plan.plannedPacks?.toLocaleString() || '0'}
                                           </div>
                                         )}
@@ -612,9 +612,9 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
                             {isAdmin && (
                               <button
                                 onClick={() => handleAddPlan(dateStr, shift, linea)}
-                                className="w-full py-1.5 border border-dashed border-gray-200 rounded-lg text-gray-300 flex flex-col items-center justify-center gap-1 hover:border-indigo-300 hover:text-indigo-400 hover:bg-indigo-50/50 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                                className="w-full py-0.5 border border-dashed border-gray-200 rounded text-gray-300 flex items-center justify-center hover:border-indigo-300 hover:text-indigo-400 hover:bg-indigo-50/50 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
                               >
-                                <Plus className="w-3.5 h-3.5" />
+                                <Plus className="w-3 h-3" />
                               </button>
                             )}
                           </div>

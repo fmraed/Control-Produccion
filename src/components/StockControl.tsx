@@ -315,8 +315,8 @@ export function StockControl() {
                 <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200 bg-blue-50/50">Stock {format(new Date(), 'dd/MM/yyyy')}</th>
                 <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Prod. Mensual</th>
                 <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Promedio Salida Diaria</th>
-                <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Días Cover.</th>
-                <th className="px-4 py-3 text-[10px] font-black text-white uppercase tracking-widest bg-blue-600 border-r border-blue-500">% Objet. Mes</th>
+                <th className="px-6 py-3 text-xs font-black text-blue-900 uppercase tracking-widest border-r border-gray-300 bg-blue-50">Días Cover.</th>
+                <th className="px-3 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest border-r border-gray-200 bg-gray-50">% Objet. Mes</th>
                 <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Stock Inicial</th>
                 <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest">Salida Acumulada</th>
               </tr>
@@ -341,21 +341,26 @@ export function StockControl() {
                       <td className="px-4 py-3 text-xs font-bold text-gray-600 border-r border-gray-100">
                         {p.avgDailyExit.toLocaleString('es-AR', { maximumFractionDigits: 0 })}
                       </td>
-                      <td className="px-4 py-3 border-r border-gray-100">
-                        <span className={`px-2 py-1 rounded text-[10px] font-black ${
-                          p.coverageDays < 5 ? 'bg-red-100 text-red-700' :
-                          p.coverageDays < 10 ? 'bg-yellow-100 text-yellow-700' :
-                          'bg-green-100 text-green-700'
-                        }`}>
-                          {p.coverageDays} DÍAS
-                        </span>
-                      </td>
-                      <td className={`px-4 py-3 text-xs font-black border-r border-blue-100 text-white ${
-                        p.fulfillment >= 100 ? 'bg-green-600' : 
-                        p.fulfillment >= 80 ? 'bg-blue-500' : 
-                        p.fulfillment >= 50 ? 'bg-orange-500' : 'bg-red-500'
+                      <td className={`px-6 py-3 border-r border-gray-200 text-center ${
+                        p.coverageDays < 5 ? 'bg-red-500 shadow-inner' :
+                        p.coverageDays < 10 ? 'bg-yellow-400 shadow-inner' :
+                        'bg-green-500 shadow-inner'
                       }`}>
-                        {p.fulfillment.toFixed(1)}%
+                        <div className="flex flex-col items-center">
+                          <span className="text-lg font-black text-white drop-shadow-sm leading-none">
+                            {p.coverageDays}
+                          </span>
+                          <span className="text-[8px] font-black text-white/90 uppercase tracking-tighter">
+                            Días
+                          </span>
+                        </div>
+                      </td>
+                      <td className={`px-3 py-3 text-xs font-bold border-r border-gray-100 text-center ${
+                        p.fulfillment >= 100 ? 'text-green-700 bg-green-50/30' : 
+                        p.fulfillment >= 80 ? 'text-blue-700 bg-blue-50/30' : 
+                        p.fulfillment >= 50 ? 'text-orange-700 bg-orange-50/30' : 'text-red-700 bg-red-50/30'
+                      }`}>
+                        {p.fulfillment.toFixed(0)}%
                       </td>
                       <td className="px-4 py-3 text-xs font-bold text-gray-500 border-r border-gray-100 italic">
                         {p.initialStock.toLocaleString('es-AR')}
@@ -372,8 +377,10 @@ export function StockControl() {
                     <td className="px-4 py-2 text-sm">{group.stock.toLocaleString('es-AR')}</td>
                     <td className="px-4 py-2 text-sm">{group.products.reduce((sum, p) => sum + p.totalProducedMonth, 0).toLocaleString('es-AR')}</td>
                     <td className="px-4 py-2 text-sm">{group.avgExit.toLocaleString('es-AR', { maximumFractionDigits: 0 })}</td>
-                    <td className="px-4 py-2 border-r border-cyan-400"></td>
-                    <td className="px-4 py-2 text-sm bg-cyan-600 border-r border-cyan-700">{group.fulfillment.toFixed(1)}%</td>
+                    <td className="px-4 py-2 border-r border-cyan-400 bg-cyan-600 text-center">
+                      {/* Subtotal coverage can be an average or just blank, we'll keep it simple */}
+                    </td>
+                    <td className="px-4 py-2 text-sm text-cyan-100 border-r border-cyan-400 text-center">{group.fulfillment.toFixed(0)}%</td>
                     <td className="px-4 py-2 text-sm italic opacity-80 border-r border-cyan-400">{group.initialStock.toLocaleString('es-AR')}</td>
                     <td className="px-4 py-2 text-sm bg-gray-800/20">{group.accumulatedExit.toLocaleString('es-AR')}</td>
                   </tr>
@@ -396,12 +403,12 @@ export function StockControl() {
                 <td className="px-4 py-4 text-base">
                   {groupValues.reduce((sum, g) => sum + g.avgExit, 0).toLocaleString('es-AR', { maximumFractionDigits: 0 })}
                 </td>
-                <td className="px-4 py-4"></td>
-                <td className="px-4 py-4 text-base bg-blue-950">
+                <td className="px-6 py-4 bg-blue-800"></td>
+                <td className="px-4 py-4 text-base bg-blue-950 text-center text-blue-200">
                   {(() => {
                     const totalOrdered = groupValues.reduce((sum, g) => sum + g.ordered, 0);
                     const totalExit = groupValues.reduce((sum, g) => sum + g.accumulatedExit, 0);
-                    return totalOrdered > 0 ? ((totalExit / totalOrdered) * 100).toFixed(1) : '0.0';
+                    return totalOrdered > 0 ? ((totalExit / totalOrdered) * 100).toFixed(0) : '0';
                   })()}%
                 </td>
                 <td className="px-4 py-4 text-base italic opacity-80 border-l border-blue-950">
