@@ -18,23 +18,33 @@ export function SQLIntegration() {
   const [firestoreTotals, setFirestoreTotals] = useState<Record<string, { packs: number, bottles: number }>>({});
   const [sqlMappings, setSqlMappings] = useState<Record<string, string>>(SQL_PRODUCT_MAPPING);
   const [sqlSyrupMappings, setSqlSyrupMappings] = useState<Record<string, string>>({});
+  const [syrupInitials, setSyrupInitials] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
 
   const fetchMappings = async () => {
     try {
       const mappingRef = doc(db, 'config', 'sql_mappings');
       const syrupMappingRef = doc(db, 'config', 'sql_syrup_mappings');
+      let initialsRef = null;
+      if (productType === 'syrups' && periodType === 'monthly') {
+        initialsRef = doc(db, 'config', `syrup_initials_${month}`);
+      }
       
-      const [docSnap, syrupSnap] = await Promise.all([
-        getDoc(mappingRef),
-        getDoc(syrupMappingRef)
-      ]);
+      const docPromises = [getDoc(mappingRef), getDoc(syrupMappingRef)];
+      if (initialsRef) docPromises.push(getDoc(initialsRef));
+
+      const [docSnap, syrupSnap, initialsSnap] = await Promise.all(docPromises);
       
       if (docSnap.exists()) {
         setSqlMappings(docSnap.data() as Record<string, string>);
       }
       if (syrupSnap.exists()) {
         setSqlSyrupMappings(syrupSnap.data() as Record<string, string>);
+      }
+      if (initialsSnap && initialsSnap.exists()) {
+        setSyrupInitials(initialsSnap.data() as Record<string, number>);
+      } else {
+        setSyrupInitials({});
       }
     } catch (err) {
       console.error("Error fetching mappings:", err);
@@ -49,10 +59,18 @@ export function SQLIntegration() {
       let allDocs: any[] = [];
       
       if (periodType === 'monthly') {
+        // Query un poco más amplio (hasta el día 2 del mes siguiente) para asegurar 
+        // traer los partes del último día del mes cursados a la madrugada
+        const startOfMonth = `${month}-01`;
+        const nextMonthObj = new Date(`${month}-01T12:00:00Z`);
+        nextMonthObj.setUTCMonth(nextMonthObj.getUTCMonth() + 1);
+        const nextMonthStr = nextMonthObj.toISOString().split('T')[0].substring(0, 7);
+        const endDateInclusive = `${nextMonthStr}-02`;
+
         const qMonth = query(
           reportsRef, 
-          where('fecha', '>=', `${month}-01`),
-          where('fecha', '<=', `${month}-31`)
+          where('fecha', '>=', startOfMonth),
+          where('fecha', '<=', endDateInclusive)
         );
         const snap = await getDocs(qMonth);
         allDocs = snap.docs;
@@ -136,6 +154,20 @@ export function SQLIntegration() {
     const [key] = entry;
     const size = parseInt(key.split('-')[1]);
     return size;
+  };
+
+  const handleUpdateInitial = async (sqlCode: string, value: string) => {
+    const numValue = parseFloat(value) || 0;
+    const newInitials = { ...syrupInitials, [sqlCode]: numValue };
+    setSyrupInitials(newInitials);
+    
+    // Throttle to avoid too many writes if typing fast? Or simply save directly on blur/change.
+    // Actually, saving on change is fine for small apps, but let's just do it directly.
+    try {
+      await setDoc(doc(db, 'config', `syrup_initials_${month}`), { [sqlCode]: numValue }, { merge: true });
+    } catch(e) {
+      console.error('Error saving initial stock', e);
+    }
   };
 
   const handleCheck = async () => {
@@ -318,6 +350,9 @@ export function SQLIntegration() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Orden</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Código</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Artículo</th>
+                  {productType === 'syrups' && periodType === 'monthly' && (
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock Inicial</th>
+                  )}
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cant. SQL</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cant. App</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Diferencia</th>
@@ -364,6 +399,11 @@ export function SQLIntegration() {
                   return Object.values(groupedSql).map((row: any, i) => {
                     const sqlPacks = row.nu_cantFabri || 0;
                     
+                    let initialValue = 0;
+                    if (productType === 'syrups' && periodType === 'monthly') {
+                      initialValue = typeof syrupInitials[row.codigo_abreviado] === 'number' ? syrupInitials[row.codigo_abreviado] : 0;
+                    }
+                    
                     let appPacks = 0;
                     let appBottles = 0;
 
@@ -385,8 +425,16 @@ export function SQLIntegration() {
                       appBottles = appData.bottles;
                     }
 
-                    const diffPacks = appPacks - sqlPacks;
-                    const hasError = Math.abs(diffPacks) > 0;
+                    // Para productos terminados: Diferencia = Producción App - Producción SQL
+                    // Para jarabes mensuales: Stock Final Teórico = Inicial + Producción SQL - Consumo App
+                    let diffPacks = 0;
+                    if (productType === 'syrups' && periodType === 'monthly') {
+                      diffPacks = initialValue + sqlPacks - appPacks;
+                    } else {
+                      diffPacks = appPacks - sqlPacks;
+                    }
+                    
+                    const hasError = productType === 'syrups' && periodType === 'monthly' ? diffPacks < 0 : Math.abs(diffPacks) > 0;
 
                     return (
                       <tr key={i} className={`hover:bg-gray-50 transition-colors ${hasError ? 'bg-red-50/50' : ''}`}>
@@ -397,26 +445,38 @@ export function SQLIntegration() {
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-500">{row.isFlavorGroup ? 'MULTIPLE' : row.codigo_abreviado}</td>
                         <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 font-medium">{row.descripcion_articulo}</td>
+                        {productType === 'syrups' && periodType === 'monthly' && (
+                          <td className="px-2 py-2 whitespace-nowrap">
+                            <input 
+                              type="number"
+                              className="w-24 rounded border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm px-2 py-1"
+                              value={initialValue || ''}
+                              placeholder="0"
+                              onChange={(e) => handleUpdateInitial(row.codigo_abreviado, e.target.value)}
+                            />
+                          </td>
+                        )}
                         <td className="px-4 py-3 whitespace-nowrap text-sm">
                           <div className="font-mono font-bold text-blue-700">{sqlPacks.toLocaleString()} {productType === 'products' ? 'packs' : 'L'}</div>
-                          <div className="text-[10px] text-gray-400 uppercase tracking-wider">SQL Server (Total)</div>
+                          {productType === 'syrups' && periodType === 'monthly' ? <div className="text-[10px] text-gray-400 uppercase tracking-wider">Prod. Nueva Total</div> : <div className="text-[10px] text-gray-400 uppercase tracking-wider">SQL Server (Total)</div>}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-sm">
                           <div className="font-mono font-bold text-purple-700">{appPacks.toLocaleString()} {productType === 'products' ? 'packs' : 'L'}</div>
-                          <div className="text-[10px] text-gray-400 uppercase tracking-wider">App (Total {periodType === 'monthly' ? 'Mes' : shift === 'TODOS' ? 'Día' : 'Turno'})</div>
+                          <div className="text-[10px] text-gray-400 uppercase tracking-wider">App ({productType === 'syrups' ? 'Consumo' : `Total ${periodType === 'monthly' ? 'Mes' : shift === 'TODOS' ? 'Día' : 'Turno'}`})</div>
                           {productType === 'products' && <div className="text-[10px] text-purple-400 italic mt-0.5">{appBottles.toLocaleString()} botellas</div>}
                         </td>
-                        <td className={`px-4 py-3 whitespace-nowrap text-sm font-mono font-bold ${diffPacks === 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {diffPacks > 0 ? `+${diffPacks.toLocaleString()}` : diffPacks.toLocaleString()}
+                        <td className={`px-4 py-3 whitespace-nowrap text-sm font-mono font-bold ${hasError ? 'text-red-600' : 'text-green-600'}`}>
+                          {diffPacks > 0 ? '+' : ''}{diffPacks.toLocaleString()} {productType === 'products' ? 'packs' : 'L'}
+                          {productType === 'syrups' && periodType === 'monthly' && <div className="text-[10px] text-gray-500 uppercase tracking-wider mt-0.5 font-normal">Stock Final Teórico</div>}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-sm">
-                          {diffPacks === 0 ? (
-                            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-green-100 text-green-700 text-xs font-bold uppercase tracking-tight">
-                              <CheckCircle2 className="w-3 h-3" /> OK
+                          {hasError ? (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold uppercase tracking-tight">
+                              <AlertTriangle className="w-3 h-3" /> {productType === 'syrups' && periodType === 'monthly' ? 'Deficit' : 'Desvío'}
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold uppercase tracking-tight">
-                              <AlertTriangle className="w-3 h-3" /> Desvío
+                            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-green-100 text-green-700 text-xs font-bold uppercase tracking-tight">
+                              <CheckCircle2 className="w-3 h-3" /> {productType === 'syrups' && periodType === 'monthly' ? 'OK (Sobrante)' : 'OK'}
                             </span>
                           )}
                         </td>

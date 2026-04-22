@@ -68,11 +68,11 @@ async function startServer() {
       let endDate: string;
 
       if (periodType === 'monthly') {
-        startDate = `${month}-01 00:00:00`;
+        startDate = `${month}-01 06:00:00`;
         const nextMonthObj = new Date(`${month}-01T00:00:00Z`);
         nextMonthObj.setUTCMonth(nextMonthObj.getUTCMonth() + 1);
         const nextMonthFormated = nextMonthObj.toISOString().split('T')[0];
-        endDate = `${nextMonthFormated} 00:00:00`;
+        endDate = `${nextMonthFormated} 06:00:00`;
       } else {
         const dateObj = new Date(date + 'T12:00:00');
         const isSaturday = dateObj.getDay() === 6;

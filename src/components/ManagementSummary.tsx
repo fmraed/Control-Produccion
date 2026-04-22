@@ -16,6 +16,7 @@ export function ManagementSummary() {
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
   const [snapshot, setSnapshot] = useState<MonthlySnapshot | null>(null);
   const [isSnapshotLoading, setIsSnapshotLoading] = useState(false);
+  const [isSavingSnapshot, setIsSavingSnapshot] = useState(false);
 
   const isAdmin = auth.currentUser?.email === 'fraed.fordrinks@gmail.com';
 
@@ -114,8 +115,15 @@ export function ManagementSummary() {
 
   const filteredAttendance = useMemo(() => {
     return attendance.filter(a => {
-      // Assuming attendance records date format is YYYY-MM-DD
-      return a.date && a.date.startsWith(selectedMonth);
+      let logicalDate = a.date;
+      if (a.shift === 'Noche' && a.date) {
+         try {
+           logicalDate = format(subDays(parseISO(a.date), 1), 'yyyy-MM-dd');
+         } catch(e) {
+           logicalDate = a.date;
+         }
+      }
+      return logicalDate && logicalDate.startsWith(selectedMonth);
     });
   }, [attendance, selectedMonth]);
 
@@ -276,6 +284,7 @@ export function ManagementSummary() {
       shift: string;
       activeLines: Set<string>;
       presentOperators: number;
+      reports: any[];
     }> = {};
 
     let totalLiters = 0;
@@ -304,10 +313,12 @@ export function ManagementSummary() {
           date: logicalDate,
           shift: r.turno,
           activeLines: new Set<string>(),
-          presentOperators: 0
+          presentOperators: 0,
+          reports: []
         };
       }
       shiftCrossoverMap[crossoverKey].activeLines.add(r.linea);
+      shiftCrossoverMap[crossoverKey].reports.push(r);
       
       // Use specific shift duration for this day/shift if available
       const dayPlan = shiftConfig.weeklyPlan[dayKey] || {};
@@ -452,13 +463,20 @@ export function ManagementSummary() {
     // Process attendance to count present operators per shift
     filteredAttendance.forEach(a => {
       if (a.status === 'Presente') {
-        const crossoverKey = `${a.date}_${a.shift}`;
+        let logicalDate = a.date;
+        if (a.shift === 'Noche' && a.date) {
+            try {
+              logicalDate = format(subDays(parseISO(a.date), 1), 'yyyy-MM-dd');
+            } catch(e) {}
+        }
+        const crossoverKey = `${logicalDate}_${a.shift}`;
         if (!shiftCrossoverMap[crossoverKey]) {
            shiftCrossoverMap[crossoverKey] = {
-             date: a.date,
+             date: logicalDate,
              shift: a.shift,
              activeLines: new Set<string>(),
-             presentOperators: 0
+             presentOperators: 0,
+             reports: []
            };
         }
         shiftCrossoverMap[crossoverKey].presentOperators += 1;
@@ -466,18 +484,72 @@ export function ManagementSummary() {
     });
 
     const shiftCrossoverArray = Object.values(shiftCrossoverMap).map(cross => {
-      const activeArr = Array.from(cross.activeLines).sort();
+      let maxSimultaneousLines = 0;
+      let maxRequiredOperators = 0;
+      let activeLinesAtMax = new Set<string>();
+      
+      const events: { time: number, type: 'start' | 'end', line: string, req: number }[] = [];
+      
+      cross.reports.forEach(r => {
+        const entra = r.entraTurno?.split(':') || ['0', '0'];
+        const sale = r.saleTurno?.split(':') || ['0', '0'];
+        let start = parseInt(entra[0]) * 60 + parseInt(entra[1]);
+        let end = parseInt(sale[0]) * 60 + parseInt(sale[1]);
+        
+        if (isNaN(start)) start = 0;
+        if (isNaN(end)) end = 0;
+
+        if (end < start) end += 1440; // Next day
+        
+        const req = config?.lineOperators?.[r.linea] || 0;
+        events.push({ time: start, type: 'start', line: r.linea, req });
+        events.push({ time: end, type: 'end', line: r.linea, req });
+      });
+      
+      // Sort: if times are equal, processes ends before starts to not over-count
+      events.sort((a, b) => {
+         if (a.time === b.time) return a.type === 'end' ? -1 : 1;
+         return a.time - b.time;
+      });
+
+      let lineCounts: Record<string, number> = {};
+      
+      events.forEach(ev => {
+         if (ev.type === 'start') {
+            lineCounts[ev.line] = (lineCounts[ev.line] || 0) + 1;
+         } else {
+            lineCounts[ev.line] = Math.max(0, (lineCounts[ev.line] || 0) - 1);
+         }
+         
+         const currentLineArray = Object.keys(lineCounts).filter(l => lineCounts[l] > 0);
+         const currentLineCount = currentLineArray.length;
+         const currentReq = currentLineArray.reduce((sum, l) => sum + (config?.lineOperators?.[l] || 0), 0);
+         
+         if (currentReq > maxRequiredOperators || (currentReq === maxRequiredOperators && currentLineCount > maxSimultaneousLines)) {
+            maxRequiredOperators = currentReq;
+            maxSimultaneousLines = currentLineCount;
+            activeLinesAtMax = new Set(currentLineArray);
+         }
+      });
+      
+      // If no configurations were present but lines ran, activeLinesAtMax might be empty. Fallback to all.
+      if (activeLinesAtMax.size === 0 && cross.activeLines.size > 0 && events.length === 0) {
+         // This is a rare edge case where a report was added without times, or similar.
+         // Or there just wasn't overlapping data but we want to show something.
+         // activeLinesAtMax will just remain empty, or we can use cross.activeLines as fallback.
+      }
+      
+      const activeArr = Array.from(activeLinesAtMax.size > 0 ? activeLinesAtMax : cross.activeLines).sort();
       const inactiveArr = (config?.lines || [])
         .filter(l => config?.enabledLines?.[l] !== false && !cross.activeLines.has(l))
         .sort();
-      const requiredOperators = activeArr.reduce((sum, line) => sum + (config?.lineOperators?.[line] || 0), 0);
       
       return {
         date: cross.date,
         shift: cross.shift,
         activeLines: activeArr,
         inactiveLines: inactiveArr,
-        required: requiredOperators,
+        required: maxRequiredOperators,
         present: cross.presentOperators
       };
     }).sort((a, b) => b.date.localeCompare(a.date) || a.shift.localeCompare(b.shift));
@@ -568,8 +640,9 @@ export function ManagementSummary() {
   // Automatic snapshot saving for past months
   useEffect(() => {
     const currentMonth = format(new Date(), 'yyyy-MM');
-    if (selectedMonth < currentMonth && !snapshot && !loading && !isSnapshotLoading && stats && Object.keys(stats).length > 0) {
+    if (selectedMonth < currentMonth && !snapshot && !loading && !isSnapshotLoading && !isSavingSnapshot && stats && Object.keys(stats).length > 0) {
       const saveSnapshot = async () => {
+        setIsSavingSnapshot(true);
         try {
           const [year, month] = selectedMonth.split('-');
           const newSnapshot: Omit<MonthlySnapshot, 'id'> = {
@@ -586,11 +659,13 @@ export function ManagementSummary() {
           console.log("Automatic snapshot saved for", selectedMonth);
         } catch (error) {
           console.error("Error saving automatic snapshot:", error);
+        } finally {
+          setIsSavingSnapshot(false);
         }
       };
       saveSnapshot();
     }
-  }, [selectedMonth, snapshot, stats, loading, isSnapshotLoading, config]);
+  }, [selectedMonth, snapshot, stats, loading, isSnapshotLoading, isSavingSnapshot, config]);
 
   const handleRefreshSnapshot = async () => {
     if (!isAdmin) return;
