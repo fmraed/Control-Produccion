@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { collection, query, orderBy, onSnapshot, doc, setDoc, getDoc, addDoc, where, getDocs } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { ProductionReport, MonthlySnapshot } from '../types';
+import { ProductionReport, MonthlySnapshot, AttendanceRecord } from '../types';
 import { BarChart3, Calendar, Users, Package, Droplets, Info, Edit2, Save, X, UserCircle2, Milk as BottleIcon, Clock, Lock, Unlock, RefreshCw } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addDays } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -11,6 +11,7 @@ import { useAppConfig } from '../hooks/useAppConfig';
 export function ManagementSummary() {
   const { config, availableBrands, availableSizes, availableLines } = useAppConfig();
   const [reports, setReports] = useState<ProductionReport[]>([]);
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
   const [snapshot, setSnapshot] = useState<MonthlySnapshot | null>(null);
@@ -45,21 +46,50 @@ export function ManagementSummary() {
   }, [selectedMonth]);
 
   useEffect(() => {
-    const q = query(collection(db, 'production_reports'), orderBy('fecha', 'desc'));
+    const qReports = query(collection(db, 'production_reports'), orderBy('fecha', 'desc'));
+    const qAttendance = query(collection(db, 'attendance_records'), orderBy('date', 'desc'));
     
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    let reportsLoaded = false;
+    let attendanceLoaded = false;
+
+    const checkLoading = () => {
+      if (reportsLoaded && attendanceLoaded) {
+        setLoading(false);
+      }
+    };
+
+    const unsubscribeReports = onSnapshot(qReports, (snapshot) => {
       const reportsData: ProductionReport[] = [];
       snapshot.forEach((doc) => {
         reportsData.push({ id: doc.id, ...doc.data() } as ProductionReport);
       });
       setReports(reportsData);
-      setLoading(false);
+      reportsLoaded = true;
+      checkLoading();
     }, (err) => {
       console.error("Error fetching reports:", err);
-      setLoading(false);
+      reportsLoaded = true;
+      checkLoading();
     });
 
-    return () => unsubscribe();
+    const unsubscribeAttendance = onSnapshot(qAttendance, (snapshot) => {
+      const attendanceData: AttendanceRecord[] = [];
+      snapshot.forEach((doc) => {
+        attendanceData.push({ id: doc.id, ...doc.data() } as AttendanceRecord);
+      });
+      setAttendance(attendanceData);
+      attendanceLoaded = true;
+      checkLoading();
+    }, (err) => {
+      console.error("Error fetching attendance:", err);
+      attendanceLoaded = true;
+      checkLoading();
+    });
+
+    return () => {
+      unsubscribeReports();
+      unsubscribeAttendance();
+    };
   }, []);
 
   const months = useMemo(() => {
@@ -81,6 +111,13 @@ export function ManagementSummary() {
       return logicalDate && logicalDate.startsWith(selectedMonth);
     });
   }, [reports, selectedMonth]);
+
+  const filteredAttendance = useMemo(() => {
+    return attendance.filter(a => {
+      // Assuming attendance records date format is YYYY-MM-DD
+      return a.date && a.date.startsWith(selectedMonth);
+    });
+  }, [attendance, selectedMonth]);
 
   const stats = useMemo(() => {
     // If we have a snapshot, use its stats instead of recalculating
@@ -234,6 +271,13 @@ export function ManagementSummary() {
     const packsPorLinea: Record<string, number> = {};
     config?.lines.forEach(l => packsPorLinea[l] = 0);
 
+    const shiftCrossoverMap: Record<string, {
+      date: string;
+      shift: string;
+      activeLines: Set<string>;
+      presentOperators: number;
+    }> = {};
+
     let totalLiters = 0;
     let totalBottles = 0;
     let totalPacks = 0;
@@ -253,6 +297,17 @@ export function ManagementSummary() {
       // For Saturday, we check the calendar hour. 
       // If logical date is Saturday, and it's after 13:00 calendar time, it's extra.
       const isWeekendExtra = (lDayOfWeek === 0) || (lDayOfWeek === 6 && hour >= 13);
+      
+      const crossoverKey = `${logicalDate}_${r.turno}`;
+      if (!shiftCrossoverMap[crossoverKey]) {
+        shiftCrossoverMap[crossoverKey] = {
+          date: logicalDate,
+          shift: r.turno,
+          activeLines: new Set<string>(),
+          presentOperators: 0
+        };
+      }
+      shiftCrossoverMap[crossoverKey].activeLines.add(r.linea);
       
       // Use specific shift duration for this day/shift if available
       const dayPlan = shiftConfig.weeklyPlan[dayKey] || {};
@@ -394,6 +449,39 @@ export function ManagementSummary() {
     const projectedPendingPacks = pendingPlannedShifts * avgPacksPerShift;
     const projectedTotalPacks = totalPacks + projectedPendingPacks;
     
+    // Process attendance to count present operators per shift
+    filteredAttendance.forEach(a => {
+      if (a.status === 'Presente') {
+        const crossoverKey = `${a.date}_${a.shift}`;
+        if (!shiftCrossoverMap[crossoverKey]) {
+           shiftCrossoverMap[crossoverKey] = {
+             date: a.date,
+             shift: a.shift,
+             activeLines: new Set<string>(),
+             presentOperators: 0
+           };
+        }
+        shiftCrossoverMap[crossoverKey].presentOperators += 1;
+      }
+    });
+
+    const shiftCrossoverArray = Object.values(shiftCrossoverMap).map(cross => {
+      const activeArr = Array.from(cross.activeLines).sort();
+      const inactiveArr = (config?.lines || [])
+        .filter(l => config?.enabledLines?.[l] !== false && !cross.activeLines.has(l))
+        .sort();
+      const requiredOperators = activeArr.reduce((sum, line) => sum + (config?.lineOperators?.[line] || 0), 0);
+      
+      return {
+        date: cross.date,
+        shift: cross.shift,
+        activeLines: activeArr,
+        inactiveLines: inactiveArr,
+        required: requiredOperators,
+        present: cross.presentOperators
+      };
+    }).sort((a, b) => b.date.localeCompare(a.date) || a.shift.localeCompare(b.shift));
+    
     const cajasUnitarias = totalLiters / 5.67;
     const relacionLitrosBotellas = totalBottles > 0 ? totalLiters / totalBottles : 0;
     
@@ -454,6 +542,7 @@ export function ManagementSummary() {
       producedProducts: Array.from(producedProducts),
       totalActiveProducts: totalActiveProducts || 1,
       cajasUnitariasFisicasRatio: totalPacks > 0 ? cajasUnitarias / totalPacks : 0,
+      operatorsCrossOver: shiftCrossoverArray,
       breakdown: {
         extraShiftsDebug,
         daysInMonth: daysInMonth.length,
@@ -669,6 +758,51 @@ export function ManagementSummary() {
               <div>
                 <span className="block text-[9px] font-bold text-orange-400 uppercase tracking-tighter">Excedentes Comunes</span>
                 <span className="text-lg font-black text-orange-700">{stats.weekdayExtraHours.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} <span className="text-xs">hs</span></span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="bg-gray-50 p-4 border-b border-gray-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Users className="w-5 h-5 text-indigo-600" />
+                <h3 className="font-bold text-gray-700 uppercase text-xs tracking-wider">Cruce: Operarios vs Líneas Activas</h3>
+              </div>
+            </div>
+            <div className="p-4 max-h-80 overflow-y-auto">
+              <div className="space-y-3">
+                {stats.operatorsCrossOver.map((cross: any, idx: number) => {
+                  const isUnderstaffed = cross.present < cross.required;
+                  const isOverstaffed = cross.present > cross.required;
+                  return (
+                    <div key={idx} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 rounded-xl border border-gray-100 bg-gray-50 gap-2">
+                      <div className="flex flex-col">
+                         <span className="text-xs font-black text-gray-800 uppercase">{format(parseISO(cross.date), 'dd/MM/yyyy')} - {cross.shift}</span>
+                         <span className="text-[10px] text-emerald-600 font-bold mt-1">Líneas Activas: {cross.activeLines.length > 0 ? cross.activeLines.join(', ') : 'Ninguna'}</span>
+                         {cross.inactiveLines.length > 0 && (
+                            <span className="text-[10px] text-gray-400 font-medium">Líneas Abajo: {cross.inactiveLines.join(', ')}</span>
+                         )}
+                      </div>
+                      <div className="flex gap-4 items-center">
+                        <div className="flex flex-col items-end">
+                           <span className="text-[10px] font-bold text-gray-400 uppercase">Presentes</span>
+                           <span className={`text-xl font-black ${isUnderstaffed ? 'text-red-600' : isOverstaffed ? 'text-yellow-600' : 'text-green-600'}`}>
+                             {cross.present}
+                           </span>
+                        </div>
+                        <div className="flex flex-col items-end">
+                           <span className="text-[10px] font-bold text-gray-400 uppercase">Requeridos (Máx)</span>
+                           <span className="text-xl font-black text-gray-800">
+                             {cross.required}
+                           </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {stats.operatorsCrossOver.length === 0 && (
+                   <div className="text-center text-sm text-gray-500 py-4 italic">No hay datos de cruce para el mes seleccionado.</div>
+                )}
               </div>
             </div>
           </div>

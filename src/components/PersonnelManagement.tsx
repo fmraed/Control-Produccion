@@ -34,6 +34,13 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
   // Permissions
   const isAdmin = userProfile?.role === 'admin' || userProfile?.role === 'jefe_produccion';
 
+  const isDateRestricted = (dateStr: string) => {
+    if (isAdmin) return false;
+    const currentWeekStart = startOfDay(startOfWeek(new Date(), { weekStartsOn: 1 }));
+    const targetDate = startOfDay(parseISO(dateStr));
+    return targetDate < currentWeekStart;
+  };
+
   // Form states
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
@@ -140,6 +147,8 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
   // Attendance states
   const [attendanceDate, setAttendanceDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [attendanceShift, setAttendanceShift] = useState('Mañana');
+
+  const isAttendanceLocked = useMemo(() => isDateRestricted(attendanceDate), [attendanceDate, isAdmin]);
 
   useEffect(() => {
     const employeesQuery = query(collection(db, 'employees'), orderBy('name', 'asc'));
@@ -266,6 +275,10 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
   const [showCopyConfirm, setShowCopyConfirm] = useState(false);
 
   const handleCopyPreviousWeek = async () => {
+    if (isDateRestricted(format(selectedWeek, 'yyyy-MM-dd'))) {
+      alert("No tiene permisos para modificar la planificación de semanas anteriores.");
+      return;
+    }
     // First click: show confirmation state
     if (!showCopyConfirm) {
       setShowCopyConfirm(true);
@@ -356,6 +369,10 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
   };
 
   const handleAssignFullWeek = async (employeeId: string, shift: string) => {
+    if (isDateRestricted(format(selectedWeek, 'yyyy-MM-dd'))) {
+      alert("No tiene permisos para modificar la planificación de semanas anteriores.");
+      return;
+    }
     // Get all assignments for this employee, this shift, in the current week
     const currentWeekAssignments = assignments.filter(a => 
       a.employeeId === employeeId && 
@@ -407,6 +424,10 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
   };
 
   const handleToggleAssignment = async (employeeId: string, date: string, shift: string) => {
+    if (isDateRestricted(date)) {
+      alert("No tiene permisos para modificar la planificación de semanas anteriores.");
+      return;
+    }
     const existing = assignments.find(a => a.employeeId === employeeId && a.date === date && a.shift === shift);
     
     try {
@@ -428,6 +449,10 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
   };
 
   const handleDeleteAttendance = async (id: string) => {
+    if (isAttendanceLocked) {
+      alert("No tiene permisos para modificar la asistencia de semanas anteriores.");
+      return;
+    }
     try {
       await deleteDoc(doc(db, 'attendance_records', id));
       setConfirmDeleteAttendanceId(null);
@@ -438,6 +463,10 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
   };
 
   const handleSaveAttendance = async (employee: Employee, status: AttendanceRecord['status'], overtime: number = 0) => {
+    if (isAttendanceLocked) {
+      alert("No tiene permisos para modificar la asistencia de semanas anteriores.");
+      return;
+    }
     const existing = attendance.find(a => a.employeeId === employee.id && a.date === attendanceDate && a.shift === attendanceShift);
     
     try {
@@ -476,6 +505,11 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
   const handleSaveVacationRange = async () => {
     if (!showVacationRangeModal) return;
     
+    if (isDateRestricted(rangeStart)) {
+      alert("No tiene permisos para cargar licencias o vacaciones en fechas anteriores a la semana actual.");
+      return;
+    }
+
     setIsProcessingRange(true);
     try {
       const start = parseISO(rangeStart);
@@ -534,6 +568,10 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
   };
 
   const handleSetGeneralHoliday = async () => {
+    if (isAttendanceLocked) {
+      alert("No tiene permisos para modificar la asistencia de semanas anteriores.");
+      return;
+    }
     const batch = writeBatch(db);
     try {
       // Get all employees that should be in this shift/date
@@ -586,6 +624,11 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
   const handleSaveLeaveRange = async () => {
     if (!showLeaveRangeModal) return;
     
+    if (isDateRestricted(rangeStart)) {
+      alert("No tiene permisos para cargar licencias o vacaciones en fechas anteriores a la semana actual.");
+      return;
+    }
+
     setIsProcessingRange(true);
     try {
       const start = parseISO(rangeStart);
@@ -656,8 +699,9 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
       // Find all employees that should have been present but the day was a holiday
       // We'll iterate through all holidays and all employees
       holidays.forEach((holidayDate: string) => {
-        // Only sync holidays that are in the "current" view or relevant
-        // For simplicity, we just sync ALL configured holidays if not already marked
+        // Restriction: Non-admins cannot sync past holidays
+        if (isDateRestricted(holidayDate)) return;
+
         employees.filter(e => e.active).forEach(emp => {
           const existing = attendance.find(a => a.employeeId === emp.id && a.date === holidayDate);
           if (!existing || existing.status !== 'Feriado') {
@@ -1041,15 +1085,18 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                             weekDays.some(day => a.date === format(day, 'yyyy-MM-dd'))
                           ).length >= 6;
                           
+                          const isLocked = isDateRestricted(format(selectedWeek, 'yyyy-MM-dd'));
+
                           return (
                             <button
                               key={shift}
                               onClick={() => handleAssignFullWeek(emp.id!, shift)}
+                              disabled={isLocked}
                               className={`w-10 py-0.5 rounded text-[8px] font-black uppercase transition-all border ${
                                 isAssignedFull 
                                   ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
                                   : 'bg-blue-50 text-blue-600 border-blue-100 hover:bg-blue-200'
-                              }`}
+                              } ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
                               title={isAssignedFull ? `Quitar ${shift} toda la semana` : `Asignar ${shift} toda la semana`}
                             >
                               {shift === 'Mañana' ? 'M' : shift === 'Tarde' ? 'T' : 'N'}+
@@ -1061,6 +1108,7 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                     {weekDays.map((day, i) => {
                       const dateStr = format(day, 'yyyy-MM-dd');
                       const dayAssignments = assignments.filter(a => a.employeeId === emp.id && a.date === dateStr);
+                      const isLocked = isDateRestricted(dateStr);
                       
                       return (
                         <td key={i} className="px-1 py-3">
@@ -1072,11 +1120,12 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                                 <button
                                   key={shift}
                                   onClick={() => handleToggleAssignment(emp.id!, dateStr, shift)}
+                                  disabled={isLocked}
                                   className={`w-6 h-6 rounded text-[9px] font-black transition-all border ${
                                     isAssigned 
                                       ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
                                       : 'bg-white text-gray-300 border-gray-100 hover:border-gray-300 hover:text-gray-500'
-                                  }`}
+                                  } ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
                                   title={shift}
                                 >
                                   {shortName}
@@ -1146,15 +1195,18 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                             weekDays.some(day => a.date === format(day, 'yyyy-MM-dd'))
                           ).length >= 6;
 
+                          const isLocked = isDateRestricted(format(selectedWeek, 'yyyy-MM-dd'));
+
                           return (
                             <button
                               key={shift}
                               onClick={() => handleAssignFullWeek(emp.id!, shift)}
+                              disabled={isLocked}
                               className={`w-10 py-0.5 rounded text-[8px] font-black uppercase transition-all border ${
                                 isAssignedFull 
                                   ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
                                   : 'bg-blue-50 text-blue-600 border-blue-100 hover:bg-blue-200'
-                              }`}
+                              } ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
                               title={isAssignedFull ? `Quitar ${shift} toda la semana` : `Asignar ${shift} toda la semana`}
                             >
                               {shift === 'Mañana' ? 'M' : shift === 'Tarde' ? 'T' : 'N'}+
@@ -1166,6 +1218,7 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                     {weekDays.map((day, i) => {
                       const dateStr = format(day, 'yyyy-MM-dd');
                       const dayAssignments = assignments.filter(a => a.employeeId === emp.id && a.date === dateStr);
+                      const isLocked = isDateRestricted(dateStr);
                       
                       return (
                         <td key={i} className="px-1 py-3">
@@ -1177,11 +1230,12 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                                 <button
                                   key={shift}
                                   onClick={() => handleToggleAssignment(emp.id!, dateStr, shift)}
+                                  disabled={isLocked}
                                   className={`w-6 h-6 rounded text-[9px] font-black transition-all border ${
                                     isAssigned 
                                       ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
                                       : 'bg-white text-gray-300 border-gray-100 hover:border-gray-300 hover:text-gray-500'
-                                  }`}
+                                  } ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
                                   title={shift}
                                 >
                                   {shortName}
@@ -1205,12 +1259,17 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               <Calendar className="w-5 h-5 text-blue-600" />
-              <input
-                type="date"
-                value={attendanceDate}
-                onChange={(e) => setAttendanceDate(e.target.value)}
-                className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              <div className="flex flex-col">
+                <input
+                  type="date"
+                  value={attendanceDate}
+                  onChange={(e) => setAttendanceDate(e.target.value)}
+                  className={`bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500 ${isAttendanceLocked ? 'border-amber-300 ring-2 ring-amber-50' : ''}`}
+                />
+                {isAttendanceLocked && (
+                  <span className="text-[9px] text-amber-600 font-bold uppercase mt-1">Semanas anteriores bloqueadas</span>
+                )}
+              </div>
               {appConfig?.shiftConfig?.holidays?.includes(attendanceDate) && (
                 <div className="flex items-center gap-2 bg-red-50 text-red-700 px-3 py-2 rounded-xl border border-red-100 animate-pulse">
                   <AlertCircle className="w-4 h-4" />
@@ -1236,7 +1295,10 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
             <div className="flex items-center gap-2">
               <button
                 onClick={handleSyncHolidays}
-                className="bg-blue-50 text-blue-700 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-100 transition-all shadow-sm flex items-center gap-2 border border-blue-100"
+                disabled={isAttendanceLocked}
+                className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm flex items-center gap-2 border ${
+                  isAttendanceLocked ? 'bg-gray-50 text-gray-400 border-gray-100 cursor-not-allowed' : 'bg-blue-50 text-blue-700 border-blue-100 hover:bg-blue-100'
+                }`}
                 title="Sincroniza los feriados configurados en el calendario general del sistema"
               >
                 <Calendar className="w-3 h-3" />
@@ -1244,21 +1306,27 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
               </button>
               <button
                 onClick={handleSetGeneralHoliday}
-                className="bg-gray-800 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-gray-900 transition-all shadow-sm flex items-center gap-2"
+                disabled={isAttendanceLocked}
+                className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm flex items-center gap-2 ${
+                  isAttendanceLocked ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-800 text-white hover:bg-gray-900'
+                }`}
                 title="Marca este día y turno como feriado para todos los operarios planificados"
               >
                 <Calendar className="w-3 h-3" />
                 Feriado General
               </button>
               <select 
-                className="bg-white border border-gray-200 rounded-xl px-4 py-2 text-sm font-bold outline-none shadow-sm focus:ring-2 focus:ring-blue-500"
+                disabled={isAttendanceLocked}
+                className={`bg-white border rounded-xl px-4 py-2 text-sm font-bold outline-none shadow-sm focus:ring-2 focus:ring-blue-500 ${
+                  isAttendanceLocked ? 'border-gray-100 text-gray-400 cursor-not-allowed' : 'border-gray-200'
+                }`}
                 onChange={(e) => {
                   const emp = employees.find(emp => emp.id === e.target.value);
                   if (emp) handleSaveAttendance(emp, 'Presente');
                   e.target.value = '';
                 }}
               >
-                <option value="">+ Agregar Operario Extra</option>
+                <option value="">+ {isAttendanceLocked ? 'Bloqueado' : 'Agregar Operario Extra'}</option>
                 {employees
                   .filter(e => e.active && !assignments.some(a => a.employeeId === e.id && a.date === attendanceDate && a.shift === attendanceShift))
                   .map(e => (
@@ -1366,6 +1434,7 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                         <button
                           key={status}
                           onClick={() => handleSaveAttendance(emp, status as any)}
+                          disabled={isAttendanceLocked}
                           className={`flex-1 min-w-[80px] py-2 rounded-xl text-[9px] font-black uppercase transition-all ${
                             record?.status === status 
                               ? (status === 'Presente' ? 'bg-green-600' : 
@@ -1374,7 +1443,7 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                                  status === 'Compensado' ? 'bg-purple-600' :
                                  status === 'Feriado' ? 'bg-gray-800' :
                                  'bg-orange-600') + ' text-white shadow-lg shadow-blue-100' 
-                              : 'bg-gray-50 text-gray-500 hover:bg-blue-50 hover:text-blue-600'
+                              : (isAttendanceLocked ? 'bg-gray-100 text-gray-300 opacity-50 cursor-not-allowed' : 'bg-gray-50 text-gray-500 hover:bg-blue-50 hover:text-blue-600')
                           }`}
                         >
                           {status}

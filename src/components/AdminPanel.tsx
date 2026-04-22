@@ -26,6 +26,7 @@ interface AppConfig {
   velocidadMatrix: Record<string, Record<number, number>>;
   packsPorPaleta: Record<number, number>;
   botellasPorPack: Record<number, number>;
+  lineOperators?: Record<string, number>; // Line -> Required Operators
   shiftConfig?: {
     standardShiftDuration: number;
     shiftDurations: {
@@ -159,6 +160,7 @@ export function AdminPanel() {
           velocidadMatrix: data.velocidadMatrix || VELOCIDAD_MATRIX,
           packsPorPaleta: data.packsPorPaleta || PACKS_POR_PALETA,
           botellasPorPack: data.botellasPorPack || BOTELLAS_POR_PACK,
+          lineOperators: data.lineOperators || {},
           shiftConfig: shiftConfig
         };
         setConfig(mergedConfig);
@@ -210,6 +212,7 @@ export function AdminPanel() {
           velocidadMatrix: VELOCIDAD_MATRIX,
           packsPorPaleta: PACKS_POR_PALETA,
           botellasPorPack: BOTELLAS_POR_PACK,
+          lineOperators: {},
           shiftConfig: {
             standardShiftDuration: 480,
             shiftDurations: { Mañana: 480, Tarde: 480, Noche: 480 },
@@ -1203,7 +1206,7 @@ export function AdminPanel() {
 
           {/* Líneas */}
           <section className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Líneas</h3>
+            <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Líneas y Personal Requerido</h3>
             <div className="flex gap-2 mb-4">
               <input 
                 type="text" 
@@ -1219,42 +1222,66 @@ export function AdminPanel() {
                 <Plus className="w-4 h-4" />
               </button>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2">
               {Array.isArray(config.lines) && config.lines.length > 0 ? (
                 config.lines.map(line => (
-                  <div key={line} className="flex gap-1">
-                    <button
-                      onClick={() => handleToggleLine(line)}
-                      className={`flex-1 flex items-center justify-between p-3 rounded-lg border transition-all ${
-                        config.enabledLines?.[line] !== false
-                          ? 'bg-white border-blue-200 text-blue-700 shadow-sm' 
-                          : 'bg-gray-100 border-gray-200 text-gray-400 opacity-60'
-                      }`}
-                    >
-                      <span className="font-medium">Línea {line}</span>
-                      {config.enabledLines?.[line] !== false ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
-                    </button>
-
-                    {deleteConfirm?.type === 'line' && deleteConfirm.id === line ? (
+                  <div key={line} className="flex flex-col gap-2 p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+                    <div className="flex items-center justify-between">
                       <button
-                        onClick={() => {
-                          if (deleteConfirm.step === 1) setDeleteConfirm({ ...deleteConfirm, step: 2 });
-                          else handleDeleteLine(line);
-                        }}
-                        onMouseLeave={() => setDeleteConfirm(null)}
-                        className={`px-3 rounded-lg text-xs font-bold transition-colors ${
-                          deleteConfirm.step === 1 ? 'bg-orange-100 text-orange-600 border border-orange-200' : 'bg-red-600 text-white'
+                        onClick={() => handleToggleLine(line)}
+                        className={`flex items-center gap-2 transition-all ${
+                          config.enabledLines?.[line] !== false
+                            ? 'text-blue-700' 
+                            : 'text-gray-400 opacity-60'
                         }`}
                       >
-                        {deleteConfirm.step === 1 ? '¿Borrar?' : '¡CONFIRMAR!'}
+                        {config.enabledLines?.[line] !== false ? <CheckCircle2 className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
+                        <span className="font-medium text-base">Línea {line}</span>
                       </button>
-                    ) : (
-                      <button
-                        onClick={() => setDeleteConfirm({ type: 'line', id: line, step: 1 })}
-                        className="p-3 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+
+                      {deleteConfirm?.type === 'line' && deleteConfirm.id === line ? (
+                        <button
+                          onClick={() => {
+                            if (deleteConfirm.step === 1) setDeleteConfirm({ ...deleteConfirm, step: 2 });
+                            else handleDeleteLine(line);
+                          }}
+                          onMouseLeave={() => setDeleteConfirm(null)}
+                          className={`px-3 py-1 rounded-lg text-xs font-bold transition-colors ${
+                            deleteConfirm.step === 1 ? 'bg-orange-100 text-orange-600 border border-orange-200' : 'bg-red-600 text-white'
+                          }`}
+                        >
+                          {deleteConfirm.step === 1 ? '¿Borrar?' : '¡CONFIRMAR!'}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setDeleteConfirm({ type: 'line', id: line, step: 1 })}
+                          className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                    
+                    {config.enabledLines?.[line] !== false && (
+                      <div className="flex items-center justify-between border-t border-gray-100 pt-2 mt-1">
+                        <span className="text-xs text-gray-600 font-medium">Operarios requeridos:</span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={config.lineOperators?.[line] || 0}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value) || 0;
+                            setConfig({
+                              ...config,
+                              lineOperators: {
+                                ...(config.lineOperators || {}),
+                                [line]: val
+                              }
+                            });
+                          }}
+                          className="w-20 text-sm border border-gray-300 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 text-center"
+                        />
+                      </div>
                     )}
                   </div>
                 ))

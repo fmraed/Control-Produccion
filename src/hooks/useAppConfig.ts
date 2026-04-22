@@ -22,6 +22,7 @@ interface AppConfig {
   velocidadMatrix: Record<string, Record<number, number>>;
   packsPorPaleta: Record<number, number>;
   botellasPorPack: Record<number, number>;
+  lineOperators?: Record<string, number>;
   schedulerDefaults?: Record<string, { marca: string, tamano: number, plannedPacks: number }>; // Key is Line ID
   calibreDefaults?: Record<number, number>; // Key is Size (tamano), Value is plannedPacks
   shiftConfig?: {
@@ -67,6 +68,7 @@ export function useAppConfig() {
           velocidadMatrix: data.velocidadMatrix || VELOCIDAD_MATRIX,
           packsPorPaleta: data.packsPorPaleta || PACKS_POR_PALETA,
           botellasPorPack: data.botellasPorPack || BOTELLAS_POR_PACK,
+          lineOperators: data.lineOperators || {},
           schedulerDefaults: data.schedulerDefaults || {},
           calibreDefaults: data.calibreDefaults || {},
           shiftConfig: data.shiftConfig
@@ -119,7 +121,8 @@ export function useAppConfig() {
           activeProducts: {},
           velocidadMatrix: VELOCIDAD_MATRIX,
           packsPorPaleta: PACKS_POR_PALETA,
-          botellasPorPack: BOTELLAS_POR_PACK
+          botellasPorPack: BOTELLAS_POR_PACK,
+          lineOperators: {}
         });
       }
       setLoading(false);
