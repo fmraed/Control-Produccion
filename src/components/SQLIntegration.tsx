@@ -9,7 +9,9 @@ import { getLogicalDate } from '../utils';
 export function SQLIntegration() {
   const [loading, setLoading] = useState(false);
   const [productType, setProductType] = useState<'products' | 'syrups'>('products');
+  const [periodType, setPeriodType] = useState<'daily' | 'monthly'>('daily');
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
   const [line, setLine] = useState('TODAS');
   const [shift, setShift] = useState('TODOS');
   const [results, setResults] = useState<any[] | null>(null);
@@ -44,22 +46,28 @@ export function SQLIntegration() {
       await fetchMappings();
       const collectionName = productType === 'products' ? 'production_reports' : 'elaboracion_reports';
       const reportsRef = collection(db, collectionName);
+      let allDocs: any[] = [];
       
-      // Para ser consistentes con la lógica de "Día Operativo" (06:00 a 06:00),
-      // debemos traer los partes de la fecha seleccionada Y del día siguiente,
-      // y luego filtrar por la "Fecha Lógica" (getLogicalDate).
-      const nextDay = format(addDays(new Date(date + 'T12:00:00'), 1), 'yyyy-MM-dd');
-      
-      const qCurrent = query(reportsRef, where('fecha', '==', date));
-      const qNext = query(reportsRef, where('fecha', '==', nextDay));
-      
-      const [snapCurrent, snapNext] = await Promise.all([
-        getDocs(qCurrent),
-        getDocs(qNext)
-      ]);
+      if (periodType === 'monthly') {
+        const qMonth = query(
+          reportsRef, 
+          where('fecha', '>=', `${month}-01`),
+          where('fecha', '<=', `${month}-31`)
+        );
+        const snap = await getDocs(qMonth);
+        allDocs = snap.docs;
+      } else {
+        const nextDay = format(addDays(new Date(date + 'T12:00:00'), 1), 'yyyy-MM-dd');
+        const qCurrent = query(reportsRef, where('fecha', '==', date));
+        const qNext = query(reportsRef, where('fecha', '==', nextDay));
+        const [snapCurrent, snapNext] = await Promise.all([
+          getDocs(qCurrent),
+          getDocs(qNext)
+        ]);
+        allDocs = [...snapCurrent.docs, ...snapNext.docs];
+      }
 
       // Combinar resultados y filtrar por fecha lógica y línea/turno
-      const allDocs = [...snapCurrent.docs, ...snapNext.docs];
       const totals: Record<string, { packs: number, bottles: number }> = {};
       
       const lineNum = line !== 'TODAS' ? line.match(/\d+/)?.[0] : null;
@@ -68,8 +76,17 @@ export function SQLIntegration() {
         const data = doc.data() as any;
         const logicalDate = getLogicalDate(data);
         
-        // Filtrar por fecha lógica
-        if (logicalDate !== date) return;
+        if (periodType === 'daily') {
+          // Filtrar por fecha lógica
+          if (logicalDate !== date) return;
+          // Filtrar por turno si no es TODOS
+          if (shift !== 'TODOS') {
+            if (data.turno !== shift) return;
+          }
+        } else {
+          // Para visualización mensual, validamos que pertenezca al mes
+          if (!logicalDate.startsWith(month)) return;
+        }
 
         // Filtrar por línea si no es TODAS
         if (line !== 'TODAS') {
@@ -78,7 +95,7 @@ export function SQLIntegration() {
         }
 
         // Filtrar por turno si no es TODOS
-        if (shift !== 'TODOS') {
+        if (periodType === 'daily' && shift !== 'TODOS') {
           if (data.turno !== shift) return;
         }
 
@@ -133,7 +150,7 @@ export function SQLIntegration() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ date, line, shift }),
+        body: JSON.stringify({ date, line, shift, periodType, month, productType }),
       });
 
       const data = await response.json();
@@ -173,7 +190,7 @@ export function SQLIntegration() {
             Productos Terminados
           </button>
           <button
-            onClick={() => { setProductType('syrups'); setResults(null); }}
+            onClick={() => { setProductType('syrups'); setResults(null); setPeriodType('monthly'); }}
             className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
               productType === 'syrups' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             }`}
@@ -182,22 +199,57 @@ export function SQLIntegration() {
           </button>
         </div>
 
+        <div className="flex gap-4 mb-6">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input 
+              type="radio" 
+              name="periodType" 
+              value="daily" 
+              checked={periodType === 'daily'} 
+              onChange={() => { setPeriodType('daily'); setResults(null); }} 
+              className="text-blue-600 focus:ring-blue-500"
+            />
+            <span className="font-medium text-gray-700">Por Día Operativo</span>
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input 
+              type="radio" 
+              name="periodType" 
+              value="monthly" 
+              checked={periodType === 'monthly'} 
+              onChange={() => { setPeriodType('monthly'); setResults(null); }} 
+              className="text-blue-600 focus:ring-blue-500"
+            />
+            <span className="font-medium text-gray-700">Por Mes</span>
+          </label>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Fecha a Consultar</label>
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2"
-            />
+            <label className="block text-sm font-medium text-gray-700 mb-1">{periodType === 'monthly' ? 'Mes a Consultar' : 'Fecha a Consultar'}</label>
+            {periodType === 'monthly' ? (
+              <input
+                type="month"
+                value={month}
+                onChange={(e) => setMonth(e.target.value)}
+                className="w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2"
+              />
+            ) : (
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2"
+              />
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Línea</label>
             <select
               value={line}
               onChange={(e) => setLine(e.target.value)}
-              className="w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2"
+              disabled={periodType === 'monthly' && productType === 'syrups'}
+              className="w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2 disabled:bg-gray-100 disabled:text-gray-400"
             >
               <option value="TODAS">Todas las Líneas</option>
               <option value="LINEA TUCUMAN 1">Línea Tucumán 1</option>
@@ -210,7 +262,8 @@ export function SQLIntegration() {
             <select
               value={shift}
               onChange={(e) => setShift(e.target.value)}
-              className="w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2"
+              disabled={periodType === 'monthly'}
+              className="w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2 disabled:bg-gray-100 disabled:text-gray-400"
             >
               <option value="TODOS">Día Completo (06-06)</option>
               <option value="Mañana">Mañana (06-14)</option>
@@ -319,7 +372,7 @@ export function SQLIntegration() {
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-sm">
                           <div className="font-mono font-bold text-purple-700">{appPacks.toLocaleString()} {productType === 'products' ? 'packs' : 'L'}</div>
-                          <div className="text-[10px] text-gray-400 uppercase tracking-wider">App (Total {shift === 'TODOS' ? 'Día' : 'Turno'})</div>
+                          <div className="text-[10px] text-gray-400 uppercase tracking-wider">App (Total {periodType === 'monthly' ? 'Mes' : shift === 'TODOS' ? 'Día' : 'Turno'})</div>
                           {productType === 'products' && <div className="text-[10px] text-purple-400 italic mt-0.5">{appBottles.toLocaleString()} botellas</div>}
                         </td>
                         <td className={`px-4 py-3 whitespace-nowrap text-sm font-mono font-bold ${diffPacks === 0 ? 'text-green-600' : 'text-red-600'}`}>

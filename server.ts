@@ -36,10 +36,16 @@ async function startServer() {
 
   // API Route for SQL Cross-Check
   app.post("/api/sql/check-production", async (req, res) => {
-    const { date, line, shift } = req.body;
+    const { date, line, shift, periodType, month, productType } = req.body;
 
-    if (!date || !line) {
-      return res.status(400).json({ error: "Fecha y Línea son requeridas" });
+    if (periodType === 'monthly') {
+      if (!month) {
+        return res.status(400).json({ error: "El mes es requerido para consultas mensuales" });
+      }
+    } else {
+      if (!date || !line) {
+        return res.status(400).json({ error: "Fecha y Línea son requeridas" });
+      }
     }
 
     if (!process.env.SQL_SERVER_SERVER || !process.env.SQL_SERVER_USER || !process.env.SQL_SERVER_PASSWORD) {
@@ -61,32 +67,40 @@ async function startServer() {
       let startDate: string;
       let endDate: string;
 
-      const dateObj = new Date(date + 'T12:00:00');
-      const isSaturday = dateObj.getDay() === 6;
+      if (periodType === 'monthly') {
+        startDate = `${month}-01 00:00:00`;
+        const nextMonthObj = new Date(`${month}-01T00:00:00Z`);
+        nextMonthObj.setUTCMonth(nextMonthObj.getUTCMonth() + 1);
+        const nextMonthFormated = nextMonthObj.toISOString().split('T')[0];
+        endDate = `${nextMonthFormated} 00:00:00`;
+      } else {
+        const dateObj = new Date(date + 'T12:00:00');
+        const isSaturday = dateObj.getDay() === 6;
 
-      if (shift && shift !== 'TODOS') {
-        // Lógica por turno específico
-        if (shift === 'Mañana') {
+        if (shift && shift !== 'TODOS') {
+          // Lógica por turno específico
+          if (shift === 'Mañana') {
+            startDate = isSaturday ? `${date} 05:00:00` : `${date} 06:00:00`;
+            endDate = `${date} 14:00:00`;
+          } else if (shift === 'Tarde') {
+            startDate = `${date} 14:00:00`;
+            endDate = `${date} 22:00:00`;
+          } else { // Noche
+            startDate = `${date} 22:00:00`;
+            const nextDayObj = new Date(dateObj);
+            nextDayObj.setDate(nextDayObj.getDate() + 1);
+            const nextDay = nextDayObj.toISOString().split('T')[0];
+            // Sábado noche corta a las 05:00
+            endDate = isSaturday ? `${nextDay} 05:00:00` : `${nextDay} 06:00:00`;
+          }
+        } else {
+          // Día operativo completo (06:00 a 06:00, o 05:00 en sábados)
           startDate = isSaturday ? `${date} 05:00:00` : `${date} 06:00:00`;
-          endDate = `${date} 14:00:00`;
-        } else if (shift === 'Tarde') {
-          startDate = `${date} 14:00:00`;
-          endDate = `${date} 22:00:00`;
-        } else { // Noche
-          startDate = `${date} 22:00:00`;
           const nextDayObj = new Date(dateObj);
           nextDayObj.setDate(nextDayObj.getDate() + 1);
           const nextDay = nextDayObj.toISOString().split('T')[0];
-          // Sábado noche corta a las 05:00
           endDate = isSaturday ? `${nextDay} 05:00:00` : `${nextDay} 06:00:00`;
         }
-      } else {
-        // Día operativo completo (06:00 a 06:00, o 05:00 en sábados)
-        startDate = isSaturday ? `${date} 05:00:00` : `${date} 06:00:00`;
-        const nextDayObj = new Date(dateObj);
-        nextDayObj.setDate(nextDayObj.getDate() + 1);
-        const nextDay = nextDayObj.toISOString().split('T')[0];
-        endDate = isSaturday ? `${nextDay} 05:00:00` : `${nextDay} 06:00:00`;
       }
 
       const query = `
@@ -106,7 +120,7 @@ async function startServer() {
             ON op.[id_equipo] = maq.[id_maquinaria]  
         WHERE op.[id_sucursal] = 2
             AND op.[id_estado] = 50
-            AND art.[id_categoria] = 1
+            ${productType === 'syrups' ? '' : 'AND art.[id_categoria] = 1'}
             AND (
                 (op.[fe_inicio] >= @start AND op.[fe_inicio] < @end)
                 OR 
@@ -114,14 +128,14 @@ async function startServer() {
                 OR
                 (op.[fe_inicio] < @start AND op.[fe_finReal] > @end)
             )
-            ${line === 'TODAS' ? '' : 'AND maq.[no_descripcion] LIKE @lineFilter'}
+            ${line === 'TODAS' || periodType === 'monthly' && productType === 'syrups' ? '' : 'AND maq.[no_descripcion] LIKE @lineFilter'}
       `;
 
       const request = pool.request()
         .input('start', sql.VarChar, startDate)
         .input('end', sql.VarChar, endDate);
       
-      if (line !== 'TODAS') {
+      if (line !== 'TODAS' && !(periodType === 'monthly' && productType === 'syrups')) {
         request.input('lineFilter', sql.VarChar, `%${line}%`);
       }
 
