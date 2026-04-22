@@ -326,7 +326,7 @@ export function SQLIntegration() {
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {(() => {
-                  // Agrupar resultados de SQL por código de producto para comparar totales
+                  // Agrupar resultados de SQL para comparar totales
                   const groupedSql: Record<string, any> = {};
                   const activeMappingVals = productType === 'products' ? Object.values(sqlMappings) : Object.values(sqlSyrupMappings);
 
@@ -334,25 +334,56 @@ export function SQLIntegration() {
                     const code = row.codigo_abreviado;
                     // Only process rows that correspond to our current mapping
                     if (!activeMappingVals.includes(code)) return;
+                    
+                    let groupKey = code;
+                    let displayDesc = row.descripcion_articulo;
+                    
+                    if (periodType === 'monthly' && productType === 'products') {
+                      const mappingEntry = Object.entries(sqlMappings).find(([k, v]) => v === code);
+                      if (mappingEntry) {
+                        const flavor = mappingEntry[0].split('-')[0];
+                        groupKey = `FLAVOR_${flavor}`;
+                        displayDesc = `TOTAL SABOR ${flavor.toUpperCase()}`;
+                      }
+                    }
 
-                    if (!groupedSql[code]) {
-                      groupedSql[code] = {
+                    if (!groupedSql[groupKey]) {
+                      groupedSql[groupKey] = {
                         ...row,
+                        codigo_abreviado: groupKey,
+                        descripcion_articulo: displayDesc,
                         nu_cantFabri: 0,
-                        ordenes: []
+                        ordenes: [],
+                        isFlavorGroup: periodType === 'monthly' && productType === 'products'
                       };
                     }
-                    groupedSql[code].nu_cantFabri += row.nu_cantFabri || 0;
-                    groupedSql[code].ordenes.push(row.nu_ordenProduccion);
+                    groupedSql[groupKey].nu_cantFabri += row.nu_cantFabri || 0;
+                    groupedSql[groupKey].ordenes.push(row.nu_ordenProduccion);
                   });
 
                   return Object.values(groupedSql).map((row: any, i) => {
-                    const sqlCode = row.codigo_abreviado;
                     const sqlPacks = row.nu_cantFabri || 0;
                     
-                    const appData = firestoreTotals[sqlCode] || { packs: 0, bottles: 0 };
-                    const appPacks = appData.packs;
-                    const appBottles = appData.bottles;
+                    let appPacks = 0;
+                    let appBottles = 0;
+
+                    if (row.isFlavorGroup) {
+                      const flavorName = row.codigo_abreviado.replace('FLAVOR_', '');
+                      // Sum everything from firestore results that match this flavor
+                      Object.entries(sqlMappings).forEach(([key, sqlCodeVal]) => {
+                        if (key.startsWith(`${flavorName}-`)) {
+                          const data = firestoreTotals[sqlCodeVal];
+                          if (data) {
+                            appPacks += data.packs;
+                            appBottles += data.bottles;
+                          }
+                        }
+                      });
+                    } else {
+                      const appData = firestoreTotals[row.codigo_abreviado] || { packs: 0, bottles: 0 };
+                      appPacks = appData.packs;
+                      appBottles = appData.bottles;
+                    }
 
                     const diffPacks = appPacks - sqlPacks;
                     const hasError = Math.abs(diffPacks) > 0;
@@ -361,10 +392,10 @@ export function SQLIntegration() {
                       <tr key={i} className={`hover:bg-gray-50 transition-colors ${hasError ? 'bg-red-50/50' : ''}`}>
                         <td className="px-4 py-3 text-sm font-mono text-gray-600">
                           <div className="max-w-[150px] overflow-hidden text-ellipsis" title={row.ordenes.join(', ')}>
-                            {row.ordenes.join(', ')}
+                            {row.isFlavorGroup ? 'Multiples (Resumen Mensual)' : row.ordenes.join(', ')}
                           </div>
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-500">{sqlCode}</td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-500">{row.isFlavorGroup ? 'MULTIPLE' : row.codigo_abreviado}</td>
                         <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 font-medium">{row.descripcion_articulo}</td>
                         <td className="px-4 py-3 whitespace-nowrap text-sm">
                           <div className="font-mono font-bold text-blue-700">{sqlPacks.toLocaleString()} {productType === 'products' ? 'packs' : 'L'}</div>
