@@ -126,6 +126,15 @@ export interface RolePermissions {
   editPersonnel: boolean;
   viewLiveMonitor: boolean;
   viewAnalytics: boolean;
+  viewManagementSummary?: boolean;
+  viewConsolidated?: boolean;
+  viewWaste?: boolean;
+  viewSyrup?: boolean;
+  viewGoalFulfillment?: boolean;
+  viewStockControl?: boolean;
+  viewDowntime?: boolean;
+  viewEfficiency?: boolean;
+  viewGantt?: boolean;
   viewAdmin: boolean;
 }
 

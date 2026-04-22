@@ -1,34 +1,66 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
-import { SQL_PRODUCT_MAPPING } from '../constants';
-import { Save, RefreshCw, CheckCircle2, AlertCircle, Search } from 'lucide-react';
+import { SQL_PRODUCT_MAPPING, SABORES, SABORES_SIN_JARABE, MARCAS } from '../constants';
+import { Save, RefreshCw, CheckCircle2, AlertCircle, Search, Package, Droplet } from 'lucide-react';
+import { useAppConfig } from '../hooks/useAppConfig';
 
 export function SQLMappingEditor() {
-  const [mappings, setMappings] = useState<Record<string, string>>({});
+  const { availableBrands, availableFlavors, getFilteredFlavors } = useAppConfig();
+  const [productMappings, setProductMappings] = useState<Record<string, string>>({});
+  const [syrupMappings, setSyrupMappings] = useState<Record<string, string>>({});
+  const [activeTab, setActiveTab] = useState<'products' | 'syrups'>('products');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    const mappingRef = doc(db, 'config', 'sql_mappings');
+    const productMappingRef = doc(db, 'config', 'sql_mappings');
+    const syrupMappingRef = doc(db, 'config', 'sql_syrup_mappings');
     
-    const unsubscribe = onSnapshot(mappingRef, (docSnap) => {
+    let isProductReady = false;
+    let isSyrupReady = false;
+
+    const checkReady = () => {
+      if (isProductReady && isSyrupReady) setLoading(false);
+    };
+
+    const unsubscribeProducts = onSnapshot(productMappingRef, (docSnap) => {
       if (docSnap.exists()) {
-        setMappings(docSnap.data() as Record<string, string>);
+        setProductMappings(docSnap.data() as Record<string, string>);
       } else {
-        // Initialize with default mappings from constants
-        setMappings(SQL_PRODUCT_MAPPING);
+        setProductMappings(SQL_PRODUCT_MAPPING);
       }
-      setLoading(false);
+      isProductReady = true;
+      checkReady();
     });
 
-    return () => unsubscribe();
+    const unsubscribeSyrups = onSnapshot(syrupMappingRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setSyrupMappings(docSnap.data() as Record<string, string>);
+      } else {
+        setSyrupMappings({});
+      }
+      isSyrupReady = true;
+      checkReady();
+    });
+
+    return () => {
+      unsubscribeProducts();
+      unsubscribeSyrups();
+    }
   }, []);
 
-  const handleUpdateMapping = (key: string, value: string) => {
-    setMappings(prev => ({
+  const handleUpdateProductMapping = (key: string, value: string) => {
+    setProductMappings(prev => ({
+      ...prev,
+      [key]: value
+    }));
+  };
+
+  const handleUpdateSyrupMapping = (key: string, value: string) => {
+    setSyrupMappings(prev => ({
       ...prev,
       [key]: value
     }));
@@ -38,8 +70,12 @@ export function SQLMappingEditor() {
     setSaving(true);
     setMessage(null);
     try {
-      await setDoc(doc(db, 'config', 'sql_mappings'), mappings);
-      setMessage({ type: 'success', text: 'Mapeos guardados correctamente' });
+      if (activeTab === 'products') {
+        await setDoc(doc(db, 'config', 'sql_mappings'), productMappings);
+      } else {
+        await setDoc(doc(db, 'config', 'sql_syrup_mappings'), syrupMappings);
+      }
+      setMessage({ type: 'success', text: `Mapeos de ${activeTab === 'products' ? 'productos' : 'jarabes'} guardados.` });
       setTimeout(() => setMessage(null), 3000);
     } catch (error) {
       console.error("Error saving mappings:", error);
@@ -49,6 +85,19 @@ export function SQLMappingEditor() {
     }
   };
 
+  const generatedSyrupKeys = useMemo(() => {
+    const keys: string[] = [];
+    availableBrands.forEach(brand => {
+      const allowedFlavors = getFilteredFlavors(brand);
+      allowedFlavors.forEach(flavor => {
+        if (!SABORES_SIN_JARABE.includes(flavor)) {
+          keys.push(`${brand}-${flavor}`);
+        }
+      });
+    });
+    return keys;
+  }, [availableBrands, getFilteredFlavors]);
+
   if (loading) {
     return (
       <div className="flex justify-center py-8">
@@ -57,17 +106,20 @@ export function SQLMappingEditor() {
     );
   }
 
-  const filteredKeys = Object.keys(mappings).filter(key => 
+  const activeMappings = activeTab === 'products' ? productMappings : syrupMappings;
+  const sourceKeys = activeTab === 'products' ? Object.keys(activeMappings) : generatedSyrupKeys;
+
+  const filteredKeys = sourceKeys.filter(key => 
     key.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    mappings[key].includes(searchTerm)
+    (activeMappings[key] || '').includes(searchTerm)
   ).sort();
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h3 className="text-lg font-bold text-gray-900">Mapeo de Códigos SQL</h3>
-          <p className="text-sm text-gray-500">Asocie cada producto de la app con su código correspondiente en SQL Server.</p>
+          <p className="text-sm text-gray-500">Asocie productos y jarabes con sus códigos correspondientes en SQL Server.</p>
         </div>
         <button
           onClick={saveMappings}
@@ -76,6 +128,31 @@ export function SQLMappingEditor() {
         >
           {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           Guardar Mapeos
+        </button>
+      </div>
+
+      <div className="flex border-b border-gray-200">
+        <button
+          onClick={() => { setActiveTab('products'); setSearchTerm(''); }}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors border-b-2 ${
+            activeTab === 'products' 
+              ? 'border-blue-600 text-blue-600 bg-blue-50/50' 
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+          }`}
+        >
+          <Package className="w-4 h-4" />
+          Productos Terminados
+        </button>
+        <button
+          onClick={() => { setActiveTab('syrups'); setSearchTerm(''); }}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors border-b-2 ${
+            activeTab === 'syrups' 
+              ? 'border-blue-600 text-blue-600 bg-blue-50/50' 
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+          }`}
+        >
+          <Droplet className="w-4 h-4" />
+          Jarabes
         </button>
       </div>
 
@@ -99,12 +176,12 @@ export function SQLMappingEditor() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredKeys.map((key) => (
-          <div key={key} className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{key}</label>
+          <div key={key} className="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm hover:border-blue-200 transition-colors">
+            <label className="block text-xs font-bold text-gray-600 uppercase mb-2">{key}</label>
             <input
               type="text"
-              value={mappings[key]}
-              onChange={(e) => handleUpdateMapping(key, e.target.value)}
+              value={activeMappings[key] || ''}
+              onChange={(e) => activeTab === 'products' ? handleUpdateProductMapping(key, e.target.value) : handleUpdateSyrupMapping(key, e.target.value)}
               className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono"
               placeholder="Código SQL..."
             />

@@ -290,26 +290,37 @@ export function AdminPanel() {
           setRolePermissions(snap.data() as Record<UserRole, RolePermissions>);
         } else {
           // Initialize with defaults if empty
+          const analyticsDefaultsTrue = {
+            viewManagementSummary: true, viewConsolidated: true, viewWaste: true,
+            viewSyrup: true, viewGoalFulfillment: true, viewStockControl: true,
+            viewDowntime: true, viewEfficiency: true, viewGantt: true
+          };
+          const analyticsDefaultsFalse = {
+            viewManagementSummary: false, viewConsolidated: false, viewWaste: false,
+            viewSyrup: false, viewGoalFulfillment: false, viewStockControl: false,
+            viewDowntime: false, viewEfficiency: false, viewGantt: false
+          };
+          
           const defaults: Record<UserRole, RolePermissions> = {
             admin: {
               viewReports: true, editReports: true, viewElaboracion: true, editElaboracion: true,
               viewScheduler: true, editScheduler: true, viewPersonnel: true, editPersonnel: true,
-              viewLiveMonitor: true, viewAnalytics: true, viewAdmin: true
+              viewLiveMonitor: true, viewAnalytics: true, ...analyticsDefaultsTrue, viewAdmin: true
             },
             jefe_produccion: {
               viewReports: true, editReports: true, viewElaboracion: true, editElaboracion: true,
               viewScheduler: true, editScheduler: true, viewPersonnel: true, editPersonnel: true,
-              viewLiveMonitor: true, viewAnalytics: true, viewAdmin: false
+              viewLiveMonitor: true, viewAnalytics: true, ...analyticsDefaultsTrue, viewAdmin: false
             },
             produccion: {
               viewReports: true, editReports: true, viewElaboracion: true, editElaboracion: true,
               viewScheduler: true, editScheduler: false, viewPersonnel: true, editPersonnel: true,
-              viewLiveMonitor: true, viewAnalytics: false, viewAdmin: false
+              viewLiveMonitor: true, viewAnalytics: false, ...analyticsDefaultsFalse, viewAdmin: false
             },
             calidad: {
               viewReports: true, editReports: false, viewElaboracion: true, editElaboracion: true,
               viewScheduler: true, editScheduler: false, viewPersonnel: true, editPersonnel: true,
-              viewLiveMonitor: true, viewAnalytics: false, viewAdmin: false
+              viewLiveMonitor: true, viewAnalytics: false, ...analyticsDefaultsFalse, viewAdmin: false
             }
           };
           setRolePermissions(defaults);
@@ -2081,10 +2092,34 @@ export function AdminPanel() {
                 </div>
 
                 <div className="space-y-3 flex-1">
-                  {Object.entries(rolePermissions[role]).map(([perm, value]) => (
+                  {Object.entries(rolePermissions[role]).map(([perm, value]) => {
+                    const labelMap: Record<string, string> = {
+                      viewReports: 'Ver Partes',
+                      editReports: 'Cargar Partes',
+                      viewElaboracion: 'Ver Elab.',
+                      editElaboracion: 'Cargar Elab.',
+                      viewScheduler: 'Ver Planificación',
+                      editScheduler: 'Editar Planificación',
+                      viewPersonnel: 'Ver Personal',
+                      editPersonnel: 'Editar Personal',
+                      viewLiveMonitor: 'Ver Monitor',
+                      viewAnalytics: 'Ver Informes (Menú)',
+                      viewManagementSummary: 'Reporte: Resumen',
+                      viewConsolidated: 'Reporte: Consolidado',
+                      viewWaste: 'Reporte: Desperdicio',
+                      viewSyrup: 'Reporte: Jarabe',
+                      viewGoalFulfillment: 'Reporte: Objetivos',
+                      viewStockControl: 'Reporte: Stock',
+                      viewDowntime: 'Reporte: Paradas',
+                      viewEfficiency: 'Reporte: Eficiencia',
+                      viewGantt: 'Reporte: Gantt',
+                      viewAdmin: 'Acceso Admin Panel'
+                    };
+                    const label = labelMap[perm] || perm.replace(/([A-Z])/g, ' $1').trim();
+                    return (
                     <label key={perm} className="flex items-center justify-between p-2 hover:bg-white rounded-lg transition-colors cursor-pointer group">
-                      <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest group-hover:text-blue-600 transition-colors">
-                        {perm.replace(/([A-Z])/g, ' $1').trim()}
+                      <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest group-hover:text-blue-600 transition-colors" title={perm}>
+                        {label}
                       </span>
                       <input
                         type="checkbox"
@@ -2096,7 +2131,7 @@ export function AdminPanel() {
                         className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
                       />
                     </label>
-                  ))}
+                  )})}
                 </div>
               </div>
             ))}

@@ -3,6 +3,30 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { RolePermissions, UserRole } from '../types';
 
+const analyticsDefaultsTrue = {
+  viewManagementSummary: true,
+  viewConsolidated: true,
+  viewWaste: true,
+  viewSyrup: true,
+  viewGoalFulfillment: true,
+  viewStockControl: true,
+  viewDowntime: true,
+  viewEfficiency: true,
+  viewGantt: true,
+};
+
+const analyticsDefaultsFalse = {
+  viewManagementSummary: false,
+  viewConsolidated: false,
+  viewWaste: false,
+  viewSyrup: false,
+  viewGoalFulfillment: false,
+  viewStockControl: false,
+  viewDowntime: false,
+  viewEfficiency: false,
+  viewGantt: false,
+};
+
 const DEFAULT_PERMISSIONS: Record<UserRole, RolePermissions> = {
   admin: {
     viewReports: true,
@@ -15,6 +39,7 @@ const DEFAULT_PERMISSIONS: Record<UserRole, RolePermissions> = {
     editPersonnel: true,
     viewLiveMonitor: true,
     viewAnalytics: true,
+    ...analyticsDefaultsTrue,
     viewAdmin: true,
   },
   jefe_produccion: {
@@ -28,6 +53,7 @@ const DEFAULT_PERMISSIONS: Record<UserRole, RolePermissions> = {
     editPersonnel: true,
     viewLiveMonitor: true,
     viewAnalytics: true,
+    ...analyticsDefaultsTrue,
     viewAdmin: false,
   },
   produccion: {
@@ -41,6 +67,7 @@ const DEFAULT_PERMISSIONS: Record<UserRole, RolePermissions> = {
     editPersonnel: true,
     viewLiveMonitor: true,
     viewAnalytics: false,
+    ...analyticsDefaultsFalse,
     viewAdmin: false,
   },
   calidad: {
@@ -54,6 +81,7 @@ const DEFAULT_PERMISSIONS: Record<UserRole, RolePermissions> = {
     editPersonnel: true,
     viewLiveMonitor: true,
     viewAnalytics: false,
+    ...analyticsDefaultsFalse,
     viewAdmin: false,
   },
 };
@@ -70,7 +98,7 @@ export function useRolePermissions(role: UserRole | undefined) {
       if (snap.exists()) {
         const remoteData = snap.data();
         if (role && remoteData[role]) {
-          setPermissions(remoteData[role]);
+          setPermissions({ ...DEFAULT_PERMISSIONS[role], ...remoteData[role] });
         } else if (role && DEFAULT_PERMISSIONS[role]) {
           setPermissions(DEFAULT_PERMISSIONS[role]);
         } else {

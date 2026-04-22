@@ -8,20 +8,31 @@ import { getLogicalDate } from '../utils';
 
 export function SQLIntegration() {
   const [loading, setLoading] = useState(false);
+  const [productType, setProductType] = useState<'products' | 'syrups'>('products');
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [line, setLine] = useState('TODAS');
   const [shift, setShift] = useState('TODOS');
   const [results, setResults] = useState<any[] | null>(null);
   const [firestoreTotals, setFirestoreTotals] = useState<Record<string, { packs: number, bottles: number }>>({});
   const [sqlMappings, setSqlMappings] = useState<Record<string, string>>(SQL_PRODUCT_MAPPING);
+  const [sqlSyrupMappings, setSqlSyrupMappings] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
 
   const fetchMappings = async () => {
     try {
       const mappingRef = doc(db, 'config', 'sql_mappings');
-      const docSnap = await getDoc(mappingRef);
+      const syrupMappingRef = doc(db, 'config', 'sql_syrup_mappings');
+      
+      const [docSnap, syrupSnap] = await Promise.all([
+        getDoc(mappingRef),
+        getDoc(syrupMappingRef)
+      ]);
+      
       if (docSnap.exists()) {
         setSqlMappings(docSnap.data() as Record<string, string>);
+      }
+      if (syrupSnap.exists()) {
+        setSqlSyrupMappings(syrupSnap.data() as Record<string, string>);
       }
     } catch (err) {
       console.error("Error fetching mappings:", err);
@@ -31,7 +42,8 @@ export function SQLIntegration() {
   const fetchFirestoreData = async () => {
     try {
       await fetchMappings();
-      const reportsRef = collection(db, 'production_reports');
+      const collectionName = productType === 'products' ? 'production_reports' : 'elaboracion_reports';
+      const reportsRef = collection(db, collectionName);
       
       // Para ser consistentes con la lógica de "Día Operativo" (06:00 a 06:00),
       // debemos traer los partes de la fecha seleccionada Y del día siguiente,
@@ -70,14 +82,28 @@ export function SQLIntegration() {
           if (data.turno !== shift) return;
         }
 
-        const key = `${data.sabor}-${data.tamano}`;
-        const sqlCode = sqlMappings[key];
-        if (sqlCode) {
-          if (!totals[sqlCode]) {
-            totals[sqlCode] = { packs: 0, bottles: 0 };
+        if (productType === 'products') {
+          const key = `${data.sabor}-${data.tamano}`;
+          const sqlCode = sqlMappings[key];
+          if (sqlCode) {
+            if (!totals[sqlCode]) {
+              totals[sqlCode] = { packs: 0, bottles: 0 };
+            }
+            totals[sqlCode].packs += Number(data.paquetes) || 0;
+            totals[sqlCode].bottles += Number(data.botellas) || 0;
           }
-          totals[sqlCode].packs += Number(data.paquetes) || 0;
-          totals[sqlCode].bottles += Number(data.botellas) || 0;
+        } else {
+          // Both `marca` and `sabor` should exist for this to work correctly
+          if (!data.marca || !data.sabor) return;
+          const key = `${data.marca}-${data.sabor}`;
+          const sqlCode = sqlSyrupMappings[key];
+          if (sqlCode) {
+            if (!totals[sqlCode]) {
+              totals[sqlCode] = { packs: 0, bottles: 0 };
+            }
+            // For syrups, we store liters in the "packs" property to reuse table rendering
+            totals[sqlCode].packs += Number(data.jarabeConsumido) || 0;
+          }
         }
       });
       
@@ -136,6 +162,25 @@ export function SQLIntegration() {
         <p className="text-sm text-gray-600 mb-6">
           Esta herramienta permite consultar la base de datos central (SQL Server) para verificar que los partes cargados en esta aplicación coincidan con los registros oficiales.
         </p>
+
+        <div className="flex border-b border-gray-200 mb-6">
+          <button
+            onClick={() => { setProductType('products'); setResults(null); }}
+            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
+              productType === 'products' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            Productos Terminados
+          </button>
+          <button
+            onClick={() => { setProductType('syrups'); setResults(null); }}
+            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
+              productType === 'syrups' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            Jarabes
+          </button>
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div>
@@ -230,8 +275,13 @@ export function SQLIntegration() {
                 {(() => {
                   // Agrupar resultados de SQL por código de producto para comparar totales
                   const groupedSql: Record<string, any> = {};
+                  const activeMappingVals = productType === 'products' ? Object.values(sqlMappings) : Object.values(sqlSyrupMappings);
+
                   results.forEach(row => {
                     const code = row.codigo_abreviado;
+                    // Only process rows that correspond to our current mapping
+                    if (!activeMappingVals.includes(code)) return;
+
                     if (!groupedSql[code]) {
                       groupedSql[code] = {
                         ...row,
@@ -264,13 +314,13 @@ export function SQLIntegration() {
                         <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-500">{sqlCode}</td>
                         <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 font-medium">{row.descripcion_articulo}</td>
                         <td className="px-4 py-3 whitespace-nowrap text-sm">
-                          <div className="font-mono font-bold text-blue-700">{sqlPacks.toLocaleString()} packs</div>
+                          <div className="font-mono font-bold text-blue-700">{sqlPacks.toLocaleString()} {productType === 'products' ? 'packs' : 'L'}</div>
                           <div className="text-[10px] text-gray-400 uppercase tracking-wider">SQL Server (Total)</div>
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-sm">
-                          <div className="font-mono font-bold text-purple-700">{appPacks.toLocaleString()} packs</div>
+                          <div className="font-mono font-bold text-purple-700">{appPacks.toLocaleString()} {productType === 'products' ? 'packs' : 'L'}</div>
                           <div className="text-[10px] text-gray-400 uppercase tracking-wider">App (Total {shift === 'TODOS' ? 'Día' : 'Turno'})</div>
-                          <div className="text-[10px] text-purple-400 italic mt-0.5">{appBottles.toLocaleString()} botellas</div>
+                          {productType === 'products' && <div className="text-[10px] text-purple-400 italic mt-0.5">{appBottles.toLocaleString()} botellas</div>}
                         </td>
                         <td className={`px-4 py-3 whitespace-nowrap text-sm font-mono font-bold ${diffPacks === 0 ? 'text-green-600' : 'text-red-600'}`}>
                           {diffPacks > 0 ? `+${diffPacks.toLocaleString()}` : diffPacks.toLocaleString()}

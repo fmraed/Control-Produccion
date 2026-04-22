@@ -373,87 +373,113 @@ export default function App() {
                       transition={{ duration: 0.15, ease: "easeOut" }}
                       className="absolute top-full left-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-30 overflow-hidden"
                     >
-                      <button
-                        onClick={() => { setCurrentView('management_summary'); setActiveMenu(null); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === 'management_summary' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        <PieChart className="w-4 h-4" />
-                        Resumen Gerencial
-                      </button>
-                      <button
-                        onClick={() => { setCurrentView('consolidated'); setActiveMenu(null); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === 'consolidated' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        <Activity className="w-4 h-4" />
-                        Consolidado
-                      </button>
-                      <button
-                        onClick={() => { setCurrentView('waste'); setActiveMenu(null); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === 'waste' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                        Desperdicio
-                      </button>
-                      <button
-                        onClick={() => { setCurrentView('syrup'); setActiveMenu(null); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === 'syrup' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        <Beaker className="w-4 h-4" />
-                        Balance Jarabe
-                      </button>
-                      <button
-                        onClick={() => { setCurrentView('goal_fulfillment'); setActiveMenu(null); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === 'goal_fulfillment' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        <TrendingUp className="w-4 h-4" />
-                        Cumplimiento Objetivos
-                      </button>
-                      <button
-                        onClick={() => { setCurrentView('stock_control'); setActiveMenu(null); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === 'stock_control' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        <Database className="w-4 h-4" />
-                        Control de Stock
-                      </button>
-                      <button
-                        onClick={() => { setCurrentView('downtime'); setActiveMenu(null); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === 'downtime' || currentView === 'pareto' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        <Clock className="w-4 h-4" />
-                        Paradas / Pareto
-                      </button>
-                      <button
-                        onClick={() => { setCurrentView('efficiency'); setActiveMenu(null); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === 'efficiency' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        <Activity className="w-4 h-4" />
-                        Eficiencias
-                      </button>
-                      <button
-                        onClick={() => { setCurrentView('gantt'); setActiveMenu(null); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === 'gantt' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        <CalendarDays className="w-4 h-4" />
-                        Gantt Prod.
-                      </button>
+                      {permissions.viewManagementSummary !== false && (
+                        <button
+                          onClick={() => { setCurrentView('management_summary'); setActiveMenu(null); }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                            currentView === 'management_summary' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          <PieChart className="w-4 h-4" />
+                          Resumen Gerencial
+                        </button>
+                      )}
+                      
+                      {permissions.viewConsolidated !== false && (
+                        <button
+                          onClick={() => { setCurrentView('consolidated'); setActiveMenu(null); }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                            currentView === 'consolidated' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          <Activity className="w-4 h-4" />
+                          Consolidado
+                        </button>
+                      )}
+
+                      {permissions.viewWaste !== false && (
+                        <button
+                          onClick={() => { setCurrentView('waste'); setActiveMenu(null); }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                            currentView === 'waste' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          Desperdicio
+                        </button>
+                      )}
+
+                      {permissions.viewSyrup !== false && (
+                        <button
+                          onClick={() => { setCurrentView('syrup'); setActiveMenu(null); }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                            currentView === 'syrup' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          <Beaker className="w-4 h-4" />
+                          Balance Jarabe
+                        </button>
+                      )}
+
+                      {permissions.viewGoalFulfillment !== false && (
+                        <button
+                          onClick={() => { setCurrentView('goal_fulfillment'); setActiveMenu(null); }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                            currentView === 'goal_fulfillment' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          <TrendingUp className="w-4 h-4" />
+                          Cumplimiento Objetivos
+                        </button>
+                      )}
+
+                      {permissions.viewStockControl !== false && (
+                        <button
+                          onClick={() => { setCurrentView('stock_control'); setActiveMenu(null); }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                            currentView === 'stock_control' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          <Database className="w-4 h-4" />
+                          Control de Stock
+                        </button>
+                      )}
+
+                      {permissions.viewDowntime !== false && (
+                        <button
+                          onClick={() => { setCurrentView('downtime'); setActiveMenu(null); }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                            currentView === 'downtime' || currentView === 'pareto' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          <Clock className="w-4 h-4" />
+                          Paradas / Pareto
+                        </button>
+                      )}
+
+                      {permissions.viewEfficiency !== false && (
+                        <button
+                          onClick={() => { setCurrentView('efficiency'); setActiveMenu(null); }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                            currentView === 'efficiency' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          <Activity className="w-4 h-4" />
+                          Eficiencias
+                        </button>
+                      )}
+
+                      {permissions.viewGantt !== false && (
+                        <button
+                          onClick={() => { setCurrentView('gantt'); setActiveMenu(null); }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                            currentView === 'gantt' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          <CalendarDays className="w-4 h-4" />
+                          Gantt Prod.
+                        </button>
+                      )}
                     </motion.div>
                   )}
                 </AnimatePresence>
