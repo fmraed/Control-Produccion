@@ -531,6 +531,20 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin }: DashboardProps
                                     <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-700">
                                       {Math.round(dt.totalMinutes || 0)} min
                                     </span>
+                                    {dt.minutes && dt.minutes.some(m => Number(m) > 0) && (
+                                      <div className="mt-1 flex flex-wrap gap-1">
+                                        {dt.minutes.map((m, mIdx) => {
+                                          const val = Number(m);
+                                          if (val <= 0) return null;
+                                          const hStr = report.hourlyProduction?.[mIdx]?.hora || '';
+                                          return (
+                                            <span key={mIdx} className="text-[9px] bg-gray-100 text-gray-500 px-1 rounded border border-gray-200">
+                                              {hStr}hs: {val}m
+                                            </span>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
                                   </td>
                                 </tr>
                               ))}

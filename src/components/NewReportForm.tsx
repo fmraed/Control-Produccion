@@ -803,15 +803,15 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
           let totalOtherDowntime = 0;
           let hasMarkers = false;
 
-          const hourlyDeficits = hourlyData.map((h, hIndex) => {
+          const gaps = hourlyData.map((h, hIndex) => {
             let currentMarcador = parseValue(h.marcador);
             // Si es la última hora y no hay marcador, intentar usar el marcador final
             if (currentMarcador === 0 && hIndex === hourlyData.length - 1 && contFinal > 0) {
               currentMarcador = contFinal;
             }
             
-            // Si no hay marcador en esta hora, no calculamos sin registrar aún
-            if (currentMarcador === 0) return 0;
+            // Si no hay marcador en esta hora, no calculamos para esta hora aún
+            if (currentMarcador === 0) return null;
             hasMarkers = true;
 
             const minProd = minProdArray[hIndex] || 0;
@@ -825,23 +825,39 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
               }
             });
             
-            totalAvailable += availableMinutes;
-            totalMinProd += minProd;
-            totalOtherDowntime += sumOtherDowntime;
-
             return availableMinutes - minProd - sumOtherDowntime;
           });
-          
-          let newSinRegistrarMinutes = new Array(hourlyData.length).fill('');
 
           if (hasMarkers) {
-            const totalSinRegistrar = Math.round(Math.max(0, totalAvailable - totalMinProd - totalOtherDowntime));
+            // Filtrar las horas que no tienen marcador para el cálculo de suma
+            const validGaps = gaps.filter((g): g is number => g !== null);
+            const totalSinRegistrar = Math.round(Math.max(0, validGaps.reduce((a, b) => a + b, 0)));
             
+            // Compensación: Distribuir el total neto solo entre las horas que tienen déficit (gap > 0)
+            const positiveGaps = gaps.map(g => (g !== null && g > 0) ? g : 0);
+            const posSum = positiveGaps.reduce((a, b) => a + b, 0);
+            
+            let newSinRegistrarMinutes = new Array(hourlyData.length).fill('');
+            
+            if (totalSinRegistrar > 0 && posSum > 0) {
+              const factor = totalSinRegistrar / posSum;
+              newSinRegistrarMinutes = positiveGaps.map(g => g > 0 ? (Math.round(g * factor * 10) / 10).toString() : '');
+            } else if (totalSinRegistrar > 0 && posSum === 0) {
+              // Caso borde raro: total > 0 pero no hay gaps positivos individuales (no debería pasar por el max(0, sum))
+              // Si pasara, lo ponemos todo en la primera hora con marcador
+              const firstMarkerIdx = gaps.findIndex(g => g !== null);
+              if (firstMarkerIdx !== -1) newSinRegistrarMinutes[firstMarkerIdx] = totalSinRegistrar.toString();
+            }
+
             const key = `sinRegistrarTotal-${index}`;
-            if (lastCalculated.current[key] !== totalSinRegistrar) {
+            const keyMinutes = `sinRegistrarMinutos-${index}`;
+            const minutesStr = JSON.stringify(newSinRegistrarMinutes);
+            
+            if (lastCalculated.current[key] !== totalSinRegistrar || lastCalculated.current[keyMinutes] !== minutesStr) {
               setValue(`reports.${index}.downtimes.${sinRegistrarIndex}.minutes`, newSinRegistrarMinutes);
               setValue(`reports.${index}.downtimes.${sinRegistrarIndex}.totalMinutes`, totalSinRegistrar);
               lastCalculated.current[key] = totalSinRegistrar;
+              lastCalculated.current[keyMinutes] = minutesStr;
             }
           }
         }
