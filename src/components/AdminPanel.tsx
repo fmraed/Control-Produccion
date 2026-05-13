@@ -41,6 +41,8 @@ interface AppConfig {
     showHistoricalGlobal: boolean;
     historicalStartDate?: string;
   };
+  saboresSinJarabe?: string[];
+  co2Volumes?: Record<string, Record<string, number>>;
 }
 
 export function AdminPanel() {

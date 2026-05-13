@@ -179,8 +179,8 @@ export function HistoricalReport() {
       .sort((a, b) => {
         let comparison = 0;
         if (sortField === 'fechaTurno') {
-           const dateA = a.fecha || '';
-           const dateB = b.fecha || '';
+           const dateA = getLogicalDate(a);
+           const dateB = getLogicalDate(b);
            if (dateA !== dateB) comparison = dateA.localeCompare(dateB);
            else {
               const turnoOrder = { 'Mañana': 1, 'Tarde': 2, 'Noche': 3 };

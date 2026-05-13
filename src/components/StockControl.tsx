@@ -163,8 +163,8 @@ export function StockControl() {
       // Salida calculada = Stock Inicial + Producción Mensual - Stock Actual
       const accumulatedExit = Math.max(0, sqlData.stock_inicial + totalProducedMonth - sqlData.stock_actual);
 
-      // Promedio salida diaria = Salida Acumulada / Días transcurridos
-      const avgDailyExit = accumulatedExit / (daysElapsed || 1);
+      // Promedio salida diaria = Total Pedido Mes / 21 (días hábiles típicos)
+      const avgDailyExit = goal / 21;
       
       // Días de cobertura = Stock Actual / Promedio salida diaria
       const coverageDays = avgDailyExit > 0 ? Math.floor(sqlData.stock_actual / avgDailyExit) : 0;
