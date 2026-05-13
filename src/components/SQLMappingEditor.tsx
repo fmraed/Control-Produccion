@@ -6,7 +6,7 @@ import { Save, RefreshCw, CheckCircle2, AlertCircle, Search, Package, Droplet } 
 import { useAppConfig } from '../hooks/useAppConfig';
 
 export function SQLMappingEditor() {
-  const { availableBrands, availableFlavors, getFilteredFlavors } = useAppConfig();
+  const { availableBrands, availableFlavors, availableSizes, getFilteredFlavors, config } = useAppConfig();
   const [productMappings, setProductMappings] = useState<Record<string, string>>({});
   const [syrupMappings, setSyrupMappings] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab] = useState<'products' | 'syrups'>('products');
@@ -85,12 +85,28 @@ export function SQLMappingEditor() {
     }
   };
 
+  const generatedProductKeys = useMemo(() => {
+    const keys: string[] = [];
+    availableBrands.forEach(brand => {
+      availableSizes.forEach(size => {
+        const sizeStr = size.toString();
+        const allowedFlavors = config?.activeProducts?.[brand]?.[sizeStr] || config?.brandFlavorCombinations[brand] || availableFlavors;
+        allowedFlavors.forEach(flavor => {
+          if (config?.enabledFlavors?.[flavor] !== false) {
+            keys.push(`${brand}-${flavor}-${size}`);
+          }
+        });
+      });
+    });
+    return keys;
+  }, [availableBrands, availableSizes, availableFlavors, config]);
+
   const generatedSyrupKeys = useMemo(() => {
     const keys: string[] = [];
     availableBrands.forEach(brand => {
       const allowedFlavors = getFilteredFlavors(brand);
       allowedFlavors.forEach(flavor => {
-        if (!SABORES_SIN_JARABE.includes(flavor)) {
+        if (!(config?.saboresSinJarabe || SABORES_SIN_JARABE).includes(flavor)) {
           keys.push(`${brand}-${flavor}`);
         }
       });
@@ -107,7 +123,11 @@ export function SQLMappingEditor() {
   }
 
   const activeMappings = activeTab === 'products' ? productMappings : syrupMappings;
-  const sourceKeys = activeTab === 'products' ? Object.keys(activeMappings) : generatedSyrupKeys;
+  
+  // Use generated keys but also include any keys that might be in the database but not in our generated list (migration/legacy)
+  const sourceKeysSet = new Set<string>(activeTab === 'products' ? generatedProductKeys : generatedSyrupKeys);
+  Object.keys(activeMappings).forEach(key => sourceKeysSet.add(key));
+  const sourceKeys = Array.from(sourceKeysSet);
 
   const filteredKeys = sourceKeys.filter(key => 
     key.toLowerCase().includes(searchTerm.toLowerCase()) || 

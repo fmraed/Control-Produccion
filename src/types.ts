@@ -48,6 +48,7 @@ export interface ProductionReport {
   createdAt: string;
   authorId: string;
   authorName?: string;
+  origin?: 'manual' | 'historical';
   hourlyProduction: HourlyProduction[];
   downtimes: Downtime[];
   // Desperdicios
@@ -204,6 +205,20 @@ export interface ProductionPlan {
   status: 'Draft' | 'Published';
   notes?: string;
   createdAt: string;
+  authorId: string;
+}
+
+export interface ScheduleAuditLog {
+  id?: string;
+  planId: string;
+  action: 'create' | 'update' | 'delete' | 'publish';
+  datePlan: string; // Date of the production being planned
+  timestamp: string; // ISO when the change happened
+  changes?: {
+    field: string;
+    oldValue: any;
+    newValue: any;
+  }[];
   authorId: string;
 }
 

@@ -1,19 +1,36 @@
 import { useState, useEffect, useMemo } from 'react';
-import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { ProductionReport, ElaboracionReport } from '../types';
-import { Beaker, Calendar, Filter, BarChart3, TrendingDown, TrendingUp, AlertTriangle } from 'lucide-react';
+import { Beaker, Calendar, BarChart3, TrendingDown, TrendingUp, AlertTriangle } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { SABORES, SABORES_SIN_JARABE, FLAVOR_COLORS } from '../constants';
 import { getLogicalDate } from '../utils';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
+import { useAppConfig } from '../hooks/useAppConfig';
 
 export function SyrupReport() {
+  const { config, shouldShowReport } = useAppConfig();
   const [productionReports, setProductionReports] = useState<ProductionReport[]>([]);
   const [elaboracionReports, setElaboracionReports] = useState<ElaboracionReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
+  const [initialStocks, setInitialStocks] = useState<Record<string, number>>({});
+  const [savingInitial, setSavingInitial] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Fetch initial stocks for the selected month
+    const docRef = doc(db, 'config', `syrup_initials_${selectedMonth}`);
+    const unsub = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setInitialStocks(docSnap.data() as Record<string, number>);
+      } else {
+        setInitialStocks({});
+      }
+    });
+    return () => unsub();
+  }, [selectedMonth]);
 
   useEffect(() => {
     const qProd = query(collection(db, 'production_reports'), orderBy('fecha', 'desc'));
@@ -45,6 +62,8 @@ export function SyrupReport() {
   const months = useMemo(() => {
     const uniqueMonths = new Set<string>();
     const addMonth = (r: ProductionReport | ElaboracionReport) => {
+      if ('origin' in r && !shouldShowReport(r as ProductionReport)) return;
+
       const logicalDate = getLogicalDate(r);
       if (logicalDate) {
         const date = parseISO(logicalDate);
@@ -55,14 +74,15 @@ export function SyrupReport() {
     elaboracionReports.forEach(addMonth);
     uniqueMonths.add(format(new Date(), 'yyyy-MM'));
     return Array.from(uniqueMonths).sort().reverse();
-  }, [productionReports, elaboracionReports]);
+  }, [productionReports, elaboracionReports, shouldShowReport]);
 
   const filteredProd = useMemo(() => {
     return productionReports.filter(r => {
+      if (!shouldShowReport(r)) return false;
       const logicalDate = getLogicalDate(r);
       return logicalDate && logicalDate.startsWith(selectedMonth);
     });
-  }, [productionReports, selectedMonth]);
+  }, [productionReports, selectedMonth, shouldShowReport]);
 
   const filteredElab = useMemo(() => {
     return elaboracionReports.filter(r => {
@@ -72,18 +92,19 @@ export function SyrupReport() {
   }, [elaboracionReports, selectedMonth]);
 
   const syrupStats = useMemo(() => {
-    const stats: Record<string, { sabor: string, real: number, teorico: number }> = {};
+    const stats: Record<string, { sabor: string, initial: number, real: number, teorico: number }> = {};
+    const saboresSinJarabeCfg = config?.saboresSinJarabe || SABORES_SIN_JARABE;
     
     // Initialize flavors that normally use syrup
-    SABORES.filter(s => !SABORES_SIN_JARABE.includes(s)).forEach(sabor => {
-      stats[sabor] = { sabor, real: 0, teorico: 0 };
+    SABORES.filter(s => !saboresSinJarabeCfg.includes(s)).forEach(sabor => {
+      stats[sabor] = { sabor, initial: initialStocks[sabor] || 0, real: 0, teorico: 0 };
     });
 
     // 1. Calculate REAL from Elaboration Reports
     filteredElab.forEach(r => {
-      if (SABORES_SIN_JARABE.includes(r.sabor)) return;
+      if (saboresSinJarabeCfg.includes(r.sabor)) return;
       if (!stats[r.sabor]) {
-        stats[r.sabor] = { sabor: r.sabor, real: 0, teorico: 0 };
+        stats[r.sabor] = { sabor: r.sabor, initial: initialStocks[r.sabor] || 0, real: 0, teorico: 0 };
       }
       stats[r.sabor].real += (r.jarabeConsumido || 0);
     });
@@ -91,34 +112,58 @@ export function SyrupReport() {
     // 2. Calculate THEORETICAL from Production Reports
     // Formula: (bottles * size) / 6000
     filteredProd.forEach(r => {
-      if (!r.sabor || SABORES_SIN_JARABE.includes(r.sabor)) return;
+      if (!r.sabor || saboresSinJarabeCfg.includes(r.sabor)) return;
       if (!stats[r.sabor]) {
-        stats[r.sabor] = { sabor: r.sabor, real: 0, teorico: 0 };
+        stats[r.sabor] = { sabor: r.sabor, initial: initialStocks[r.sabor] || 0, real: 0, teorico: 0 };
       }
       
       const botellas = r.botellas || 0;
       const tamano = r.tamano || 0;
-      const teorico = (botellas * tamano) / 6000;
-      stats[r.sabor].teorico += teorico;
+      const t = (botellas * tamano) / 6000;
+      stats[r.sabor].teorico += t;
     });
 
-    return Object.values(stats)
-      .map(s => {
-        const desperdicio = s.real - s.teorico;
-        const porcentaje = s.teorico > 0 ? (desperdicio / s.teorico) * 100 : 0;
-        return { ...s, desperdicio, porcentaje };
-      })
-      .filter(s => s.real > 0 || s.teorico > 0)
-      .sort((a, b) => b.real - a.real);
-  }, [filteredProd, filteredElab]);
+    return Object.values(stats).map(s => {
+      const available = s.initial + s.real;
+      const desperdicio = s.real - s.teorico; 
+      const stockFinal = available - s.teorico;
+      return {
+        ...s,
+        available,
+        desperdicio,
+        stockFinal,
+        porcentaje: s.teorico > 0 ? (desperdicio / s.teorico) * 100 : 0
+      };
+    })
+    .filter(s => s.real > 0 || s.teorico > 0 || s.initial > 0)
+    .sort((a, b) => b.real - a.real);
+  }, [filteredProd, filteredElab, initialStocks]);
 
   const totals = useMemo(() => {
-    const real = syrupStats.reduce((sum, s) => sum + s.real, 0);
-    const teorico = syrupStats.reduce((sum, s) => sum + s.teorico, 0);
-    const desperdicio = real - teorico;
-    const porcentaje = teorico > 0 ? (desperdicio / teorico) * 100 : 0;
-    return { real, teorico, desperdicio, porcentaje };
+    return syrupStats.reduce((acc, s) => ({
+      initial: acc.initial + s.initial,
+      real: acc.real + s.real,
+      teorico: acc.teorico + s.teorico,
+      available: acc.available + s.available,
+      stockFinal: acc.stockFinal + s.stockFinal,
+      desperdicio: acc.desperdicio + s.desperdicio
+    }), { initial: 0, real: 0, teorico: 0, available: 0, stockFinal: 0, desperdicio: 0 });
   }, [syrupStats]);
+
+  const totalPorcentaje = totals.teorico > 0 ? (totals.desperdicio / totals.teorico) * 100 : 0;
+
+  const handleUpdateInitial = async (sabor: string, value: string) => {
+    const numValue = parseFloat(value) || 0;
+    try {
+      setSavingInitial(sabor);
+      const docRef = doc(db, 'config', `syrup_initials_${selectedMonth}`);
+      await setDoc(docRef, { [sabor]: numValue }, { merge: true });
+    } catch (error) {
+      console.error("Error updating initial stock:", error);
+    } finally {
+      setSavingInitial(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -153,7 +198,15 @@ export function SyrupReport() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+          <p className="text-xs text-gray-500 font-bold uppercase mb-1">Arraste (Stock Inicial)</p>
+          <p className="text-2xl font-black text-gray-900">{totals.initial.toLocaleString('es-AR', { maximumFractionDigits: 1 })} L</p>
+          <div className="mt-2 flex items-center gap-1 text-[10px] text-gray-400">
+            <Calendar className="w-3 h-3" />
+            <span>Balance del mes anterior</span>
+          </div>
+        </div>
         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
           <p className="text-xs text-gray-500 font-bold uppercase mb-1">Consumo Real (Elab.)</p>
           <p className="text-2xl font-black text-indigo-900">{totals.real.toLocaleString('es-AR', { maximumFractionDigits: 1 })} L</p>
@@ -171,24 +224,24 @@ export function SyrupReport() {
           </div>
         </div>
         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-          <p className="text-xs text-gray-500 font-bold uppercase mb-1">Desperdicio Total</p>
+          <p className="text-xs text-gray-500 font-bold uppercase mb-1">Stock Final Teórico</p>
           <div className="flex items-baseline gap-2">
-            <p className={`text-2xl font-black ${totals.desperdicio > 0 ? 'text-red-600' : 'text-green-600'}`}>
-              {totals.desperdicio.toLocaleString('es-AR', { maximumFractionDigits: 1 })} L
+            <p className={`text-2xl font-black ${totals.stockFinal < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+              {totals.stockFinal.toLocaleString('es-AR', { maximumFractionDigits: 1 })} L
             </p>
-            {totals.desperdicio > 0 ? <TrendingUp className="w-4 h-4 text-red-500" /> : <TrendingDown className="w-4 h-4 text-green-500" />}
+            {totals.stockFinal < 0 ? <TrendingDown className="w-4 h-4 text-red-500" /> : <TrendingUp className="w-4 h-4 text-emerald-500" />}
           </div>
-          <p className="text-[10px] text-gray-400 mt-1">Diferencia neta del mes</p>
+          <p className="text-[10px] text-gray-400 mt-1">Estimado: Inicial + Real - Teórico</p>
         </div>
         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
           <p className="text-xs text-gray-500 font-bold uppercase mb-1">% Desperdicio Global</p>
-          <p className={`text-2xl font-black ${totals.porcentaje > 5 ? 'text-red-600' : 'text-indigo-600'}`}>
-            {totals.porcentaje.toFixed(2)}%
+          <p className={`text-2xl font-black ${totalPorcentaje > 5 ? 'text-red-600' : 'text-indigo-600'}`}>
+            {totalPorcentaje.toFixed(2)}%
           </p>
           <div className="mt-2 w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
             <div 
-              className={`h-full transition-all ${totals.porcentaje > 5 ? 'bg-red-500' : 'bg-indigo-500'}`} 
-              style={{ width: `${Math.min(100, Math.max(0, totals.porcentaje))}%` }}
+              className={`h-full transition-all ${totalPorcentaje > 5 ? 'bg-red-500' : 'bg-indigo-500'}`} 
+              style={{ width: `${Math.min(100, Math.max(0, totalPorcentaje))}%` }}
             />
           </div>
         </div>
@@ -265,17 +318,19 @@ export function SyrupReport() {
           <table className="w-full border-collapse">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase border-r border-gray-100">Sabor</th>
-                <th className="px-6 py-4 text-center text-xs font-bold text-gray-600 uppercase border-r border-gray-100">Jarabe Real (L)</th>
-                <th className="px-6 py-4 text-center text-xs font-bold text-gray-600 uppercase border-r border-gray-100">Jarabe Teórico (L)</th>
-                <th className="px-6 py-4 text-center text-xs font-bold text-gray-600 uppercase border-r border-gray-100">Diferencia (L)</th>
-                <th className="px-6 py-4 text-center text-xs font-bold text-gray-600 uppercase">% Desperdicio</th>
+                <th className="px-4 py-4 text-left text-xs font-bold text-gray-600 uppercase border-r border-gray-100">Sabor</th>
+                <th className="px-4 py-4 text-center text-xs font-bold text-gray-600 uppercase border-r border-gray-100">Arraste (Inicial L)</th>
+                <th className="px-4 py-4 text-center text-xs font-bold text-gray-600 uppercase border-r border-gray-100">Jarabe Real (L)</th>
+                <th className="px-4 py-4 text-center text-xs font-bold text-gray-600 uppercase border-r border-gray-100">Stock Disponible (L)</th>
+                <th className="px-4 py-4 text-center text-xs font-bold text-gray-600 uppercase border-r border-gray-100">Jarabe Teórico (L)</th>
+                <th className="px-4 py-4 text-center text-xs font-bold text-gray-600 uppercase border-r border-gray-100">Stock Final Teórico (L)</th>
+                <th className="px-4 py-4 text-center text-xs font-bold text-gray-600 uppercase">% Desp. Prod.</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {syrupStats.map((s, i) => (
                 <tr key={i} className="hover:bg-gray-50/50 transition-colors">
-                  <td className="px-6 py-4 border-r border-gray-100">
+                  <td className="px-4 py-4 border-r border-gray-100">
                     <div className="flex items-center gap-3">
                       <div 
                         className="w-2 h-6 rounded-full" 
@@ -284,16 +339,36 @@ export function SyrupReport() {
                       <span className="font-bold text-gray-900">{s.sabor}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-center border-r border-gray-100 font-medium">
+                  <td className="px-4 py-4 border-r border-gray-100 text-center">
+                    <div className="relative group">
+                      <input 
+                        type="number"
+                        className={`w-20 px-2 py-1 text-center rounded border ${savingInitial === s.sabor ? 'border-blue-400 bg-blue-50' : 'border-gray-200 group-hover:border-blue-300'} focus:ring-1 focus:ring-blue-500 focus:outline-none transition-all font-mono text-xs`}
+                        value={s.initial || ''}
+                        disabled={!!savingInitial}
+                        onChange={(e) => handleUpdateInitial(s.sabor, e.target.value)}
+                        placeholder="0"
+                      />
+                      {savingInitial === s.sabor && (
+                        <div className="absolute -top-1 -right-1">
+                          <div className="w-2 h-2 bg-blue-500 rounded-full animate-ping" />
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-4 text-center border-r border-gray-100 font-medium">
                     {s.real.toLocaleString('es-AR', { maximumFractionDigits: 1 })}
                   </td>
-                  <td className="px-6 py-4 text-center border-r border-gray-100 text-gray-600">
+                  <td className="px-4 py-4 text-center border-r border-gray-100 text-gray-900 font-bold bg-indigo-50/30">
+                    {s.available.toLocaleString('es-AR', { maximumFractionDigits: 1 })}
+                  </td>
+                  <td className="px-4 py-4 text-center border-r border-gray-100 text-gray-600">
                     {s.teorico.toLocaleString('es-AR', { maximumFractionDigits: 1 })}
                   </td>
-                  <td className={`px-6 py-4 text-center border-r border-gray-100 font-bold ${s.desperdicio > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                    {s.desperdicio >= 0 ? '+' : ''}{s.desperdicio.toLocaleString('es-AR', { maximumFractionDigits: 1 })}
+                  <td className={`px-4 py-4 text-center border-r border-gray-100 font-black ${s.stockFinal < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                    {s.stockFinal.toLocaleString('es-AR', { maximumFractionDigits: 1 })}
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-4 py-4">
                     <div className="flex items-center justify-center gap-2">
                        <span className={`text-sm font-black ${s.porcentaje > 5 ? 'text-red-700' : 'text-gray-900'}`}>
                          {s.porcentaje.toFixed(1)}%
@@ -306,18 +381,24 @@ export function SyrupReport() {
             </tbody>
             <tfoot className="bg-gray-100 font-black text-gray-900">
               <tr>
-                <td className="px-6 py-4 border-r border-gray-200">TOTAL MENSUAL</td>
-                <td className="px-6 py-4 text-center border-r border-gray-200 text-indigo-700">
+                <td className="px-4 py-4 border-r border-gray-200">TOTAL MENSUAL</td>
+                <td className="px-4 py-4 text-center border-r border-gray-200 bg-gray-50">
+                  {totals.initial.toLocaleString('es-AR', { maximumFractionDigits: 1 })}
+                </td>
+                <td className="px-4 py-4 text-center border-r border-gray-200 text-indigo-700">
                   {totals.real.toLocaleString('es-AR', { maximumFractionDigits: 1 })}
                 </td>
-                <td className="px-6 py-4 text-center border-r border-gray-200">
+                <td className="px-4 py-4 text-center border-r border-gray-200 font-black text-indigo-800">
+                  {totals.available.toLocaleString('es-AR', { maximumFractionDigits: 1 })}
+                </td>
+                <td className="px-4 py-4 text-center border-r border-gray-200">
                   {totals.teorico.toLocaleString('es-AR', { maximumFractionDigits: 1 })}
                 </td>
-                <td className={`px-6 py-4 text-center border-r border-gray-200 ${totals.desperdicio > 0 ? 'text-red-700' : 'text-green-700'}`}>
-                  {totals.desperdicio.toLocaleString('es-AR', { maximumFractionDigits: 1 })}
+                <td className={`px-4 py-4 text-center border-r border-gray-200 ${totals.stockFinal < 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                  {totals.stockFinal.toLocaleString('es-AR', { maximumFractionDigits: 1 })}
                 </td>
-                <td className="px-6 py-4 text-center bg-gray-200">
-                  {totals.porcentaje.toFixed(2)}%
+                <td className="px-4 py-4 text-center bg-gray-200">
+                  {totalPorcentaje.toFixed(2)}%
                 </td>
               </tr>
             </tfoot>

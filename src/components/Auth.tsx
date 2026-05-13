@@ -37,15 +37,8 @@ export const Auth: React.FC<AuthProps> = ({ onSuccess }) => {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         await updateProfile(userCredential.user, { displayName });
         
-        // Crear perfil en Firestore
-        await setDoc(doc(db, 'users', userCredential.user.uid), {
-          uid: userCredential.user.uid,
-          email: userCredential.user.email,
-          displayName: displayName,
-          role: 'user',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        });
+        // No crear perfil automáticamente aquí. 
+        // El perfil se creará en App.tsx solo si el usuario está en la whitelist.
       }
       onSuccess();
     } catch (err: any) {
@@ -71,19 +64,8 @@ export const Auth: React.FC<AuthProps> = ({ onSuccess }) => {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
       
-      // Verificar si el perfil ya existe
-      const userDoc = await getDoc(doc(db, 'users', user.uid));
-      if (!userDoc.exists()) {
-        await setDoc(doc(db, 'users', user.uid), {
-          uid: user.uid,
-          email: user.email,
-          displayName: user.displayName || 'Usuario Google',
-          role: 'user',
-          photoURL: user.photoURL,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        });
-      }
+      // No crear perfil automáticamente aquí.
+      // El perfil se creará en App.tsx solo si el usuario está en la whitelist.
       onSuccess();
     } catch (err: any) {
       console.error("Google Auth error:", err);

@@ -1,3 +1,21 @@
+export const CO2_VOLUMES: Record<string, Record<string, number>> = {
+  'Torasso': {
+    'Cola': 4.2,
+    'Citrus': 2.5,
+    'Lima Limon': 4.0,
+    'Limonada': 4.0,
+    'Manzana': 3.4,
+    'Naranja': 3.2,
+    'Pomelo': 3.5,
+    'Pomelo Blanco': 3.5,
+    'Granadina': 3.4,
+    'Agua Tónica': 3.9,
+    'Soda Sifon': 5.1,
+    'Soda': 4.5,
+    'Agua': 0
+  }
+};
+
 export const SUPERVISORES = ['Sosa', 'Camaño', 'Medina', 'Gianfrancisco'];
 export const TURNOS = ['Mañana', 'Tarde', 'Noche'];
 export const LINEAS = ['1', '2', '3'];

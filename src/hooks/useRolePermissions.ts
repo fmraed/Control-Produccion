@@ -86,29 +86,44 @@ const DEFAULT_PERMISSIONS: Record<UserRole, RolePermissions> = {
   },
 };
 
+const GUEST_PERMISSIONS: RolePermissions = {
+  viewReports: false,
+  editReports: false,
+  viewElaboracion: false,
+  editElaboracion: false,
+  viewScheduler: false,
+  editScheduler: false,
+  viewPersonnel: false,
+  editPersonnel: false,
+  viewLiveMonitor: false,
+  viewAnalytics: false,
+  ...analyticsDefaultsFalse,
+  viewAdmin: false,
+};
+
 export function useRolePermissions(role: UserRole | undefined) {
   const [permissions, setPermissions] = useState<RolePermissions>(
-    role && DEFAULT_PERMISSIONS[role] ? DEFAULT_PERMISSIONS[role] : DEFAULT_PERMISSIONS.produccion
+    role && DEFAULT_PERMISSIONS[role] ? DEFAULT_PERMISSIONS[role] : GUEST_PERMISSIONS
   );
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Listen to dynamic permissions from Firestore
+    if (!role) {
+      setPermissions(GUEST_PERMISSIONS);
+      setLoading(false);
+      return;
+    }
+
+    // Default to static while loading
+    setPermissions(DEFAULT_PERMISSIONS[role] || GUEST_PERMISSIONS);
+
     const unsub = onSnapshot(doc(db, 'config', 'permissions'), (snap) => {
       if (snap.exists()) {
         const remoteData = snap.data();
-        if (role && remoteData[role]) {
-          setPermissions({ ...DEFAULT_PERMISSIONS[role], ...remoteData[role] });
-        } else if (role && DEFAULT_PERMISSIONS[role]) {
-          setPermissions(DEFAULT_PERMISSIONS[role]);
+        if (remoteData[role]) {
+          setPermissions({ ...(DEFAULT_PERMISSIONS[role] || GUEST_PERMISSIONS), ...remoteData[role] });
         } else {
-          setPermissions(DEFAULT_PERMISSIONS.produccion);
-        }
-      } else {
-        if (role && DEFAULT_PERMISSIONS[role]) {
-          setPermissions(DEFAULT_PERMISSIONS[role]);
-        } else {
-          setPermissions(DEFAULT_PERMISSIONS.produccion);
+          setPermissions(DEFAULT_PERMISSIONS[role] || GUEST_PERMISSIONS);
         }
       }
       setLoading(false);
@@ -117,8 +132,5 @@ export function useRolePermissions(role: UserRole | undefined) {
     return () => unsub();
   }, [role]);
 
-  return { 
-    permissions: permissions || DEFAULT_PERMISSIONS.produccion, 
-    loading 
-  };
+  return { permissions, loading };
 }

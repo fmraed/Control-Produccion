@@ -177,9 +177,27 @@
         "authorId": { "type": "string" }
       },
       "required": ["date", "shift", "linea", "marca", "sabor", "tamano", "plannedPacks", "status", "createdAt", "authorId"]
+    },
+    "ScheduleAuditLog": {
+      "title": "Schedule Audit Log",
+      "description": "Log of actions performed on production plans",
+      "type": "object",
+      "properties": {
+        "planId": { "type": "string" },
+        "action": { "type": "string", "enum": ["update", "publish", "delete"] },
+        "datePlan": { "type": "string", "format": "date" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "authorId": { "type": "string" },
+        "changes": { "type": "array" }
+      },
+      "required": ["planId", "action", "datePlan", "timestamp", "authorId"]
     }
   },
   "firestore": {
+    "schedule_audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/ScheduleAuditLog" },
+      "description": "Stores logs of changes to production plans."
+    },
     "production_reports/{reportId}": {
       "schema": { "$ref": "#/entities/ProductionReport" },
       "description": "Stores all production reports."

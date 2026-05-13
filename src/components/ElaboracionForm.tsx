@@ -26,7 +26,8 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
     availableBrands, 
     availableLines, 
     availableChemists,
-    availableFlavors
+    availableFlavors,
+    config
   } = useAppConfig();
   const [activeTab, setActiveTab] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -160,7 +161,7 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
     defaultValues: {
       reports: initialData ? [{
         ...initialData,
-        hourlyData: initialData.hourlyData.map(row => ({
+        hourlyData: (initialData.hourlyData || []).map(row => ({
           ...row,
           phBebida: row.phBebida || (row as any).ph,
           acidezPatron: row.acidezPatron || (row as any).acidez,
@@ -281,7 +282,8 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
       const co2Final = parseValue(report.co2Final);
 
       const botellas = Math.max(0, contFinal - contInicial);
-      const usesSyrup = !SABORES_SIN_JARABE.includes(report.sabor || '');
+      const saboresSinJarabeCfg = config?.saboresSinJarabe || SABORES_SIN_JARABE;
+      const usesSyrup = !saboresSinJarabeCfg.includes(report.sabor || '');
       const teorico = usesSyrup ? Number(((botellas * (report.tamano || 0)) / 6000).toFixed(2)) : 0;
       const consumido = usesSyrup ? Number((jarabeInicial - jarabeFinal).toFixed(2)) : 0;
       const desperdicio = Number((consumido - teorico).toFixed(2));
@@ -389,7 +391,7 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
         co2Inicial: parseValue(currentReport.co2Inicial),
         co2Recarga: parseValue(currentReport.co2Recarga),
         co2Final: parseValue(currentReport.co2Final),
-        hourlyData: currentReport.hourlyData.map(row => ({
+        hourlyData: (currentReport.hourlyData || []).map(row => ({
           ...row,
           presion: parseValue(row.presion),
           temp: parseValue(row.temp),
@@ -405,7 +407,8 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
       };
 
       // Validación de Jarabe
-      const usaJarabe = !SABORES_SIN_JARABE.includes(sanitizedReport.sabor);
+      const saboresSinJarabeCfg = config?.saboresSinJarabe || SABORES_SIN_JARABE;
+      const usaJarabe = !saboresSinJarabeCfg.includes(sanitizedReport.sabor);
       if (usaJarabe) {
         if (sanitizedReport.jarabeInicial === 0 && sanitizedReport.jarabeFinal === 0) {
           setError(`El sabor ${sanitizedReport.sabor} requiere completar el control de jarabe.`);
@@ -715,7 +718,7 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {(watchedReports[reportIndex]?.hourlyData || field.hourlyData).map((row, hourIndex) => (
+                {((watchedReports[reportIndex]?.hourlyData || field.hourlyData) || []).map((row, hourIndex) => (
                   <tr key={hourIndex} className="hover:bg-gray-50">
                     <td className="px-3 py-2 whitespace-nowrap text-xs font-bold text-gray-700">{row.hora}hs</td>
                     <td className="px-2 py-2">

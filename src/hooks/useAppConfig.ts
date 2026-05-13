@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
-import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK } from '../constants';
+import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, SABORES_SIN_JARABE, CO2_VOLUMES } from '../constants';
 
 interface AppConfig {
   flavors: string[];
@@ -35,6 +35,12 @@ interface AppConfig {
     weeklyPlan: Record<string, Record<string, { count: number, duration: number }>>;
     holidays?: string[];
     holidayNightDuration?: number;
+  };
+  saboresSinJarabe?: string[];
+  co2Volumes?: Record<string, Record<string, number>>;
+  historicalSettings?: {
+    showHistoricalGlobal: boolean;
+    historicalStartDate?: string;
   };
 }
 
@@ -71,7 +77,18 @@ export function useAppConfig() {
           lineOperators: data.lineOperators || {},
           schedulerDefaults: data.schedulerDefaults || {},
           calibreDefaults: data.calibreDefaults || {},
-          shiftConfig: data.shiftConfig
+          shiftConfig: data.shiftConfig,
+          historicalSettings: data.historicalSettings || { showHistoricalGlobal: false },
+          saboresSinJarabe: data.saboresSinJarabe || SABORES_SIN_JARABE,
+          co2Volumes: (() => {
+            const defaultVols = { ...CO2_VOLUMES };
+            if (data.co2Volumes) {
+              for (const brand in data.co2Volumes) {
+                defaultVols[brand] = { ...(defaultVols[brand] || {}), ...data.co2Volumes[brand] };
+              }
+            }
+            return defaultVols;
+          })()
         };
         setConfig(mergedConfig);
       } else {
@@ -122,7 +139,10 @@ export function useAppConfig() {
           velocidadMatrix: VELOCIDAD_MATRIX,
           packsPorPaleta: PACKS_POR_PALETA,
           botellasPorPack: BOTELLAS_POR_PACK,
-          lineOperators: {}
+          lineOperators: {},
+          historicalSettings: { showHistoricalGlobal: false },
+          saboresSinJarabe: SABORES_SIN_JARABE,
+          co2Volumes: CO2_VOLUMES
         });
       }
       setLoading(false);
@@ -202,6 +222,29 @@ export function useAppConfig() {
     return filtered;
   };
 
+  const shouldShowReport = (report: any, forceShow?: boolean) => {
+    if (forceShow) return true;
+    if (!config?.historicalSettings) return true;
+    
+    // Determine origin
+    const isHistorical = report.origin === 'historical';
+    
+    // Always show manual/non-historical reports in common sections
+    if (!isHistorical) return true;
+    
+    const { showHistoricalGlobal, historicalStartDate } = config.historicalSettings;
+    
+    // If global toggle is ON, show historical everywhere
+    if (showHistoricalGlobal) return true;
+    
+    // If global is OFF, only show if it's within the allowed start date
+    if (historicalStartDate && report.fecha >= historicalStartDate) {
+      return true;
+    }
+    
+    return false;
+  };
+
   return { 
     config, 
     loading, 
@@ -212,6 +255,7 @@ export function useAppConfig() {
     availableSupervisors,
     availableChemists,
     getFilteredFlavors, 
-    getFilteredSizes 
+    getFilteredSizes,
+    shouldShowReport
   };
 }

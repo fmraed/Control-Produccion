@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Database, RefreshCw, AlertCircle, CheckCircle2, Search, AlertTriangle } from 'lucide-react';
 import { format, addDays } from 'date-fns';
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SQL_PRODUCT_MAPPING, BOTELLAS_POR_PACK } from '../constants';
 import { getLogicalDate } from '../utils';
@@ -118,7 +118,8 @@ export function SQLIntegration() {
         }
 
         if (productType === 'products') {
-          const key = `${data.sabor}-${data.tamano}`;
+          // Increase granularity to Marca-Sabor-Tamano as requested
+          const key = `${data.marca}-${data.sabor}-${data.tamano}`;
           const sqlCode = sqlMappings[key];
           if (sqlCode) {
             if (!totals[sqlCode]) {

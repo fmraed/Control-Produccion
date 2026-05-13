@@ -6,6 +6,7 @@ import { ArrowLeft, BarChart2 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { getLogicalDate } from '../utils';
+import { useAppConfig } from '../hooks/useAppConfig';
 import {
   ComposedChart,
   Line,
@@ -26,6 +27,7 @@ interface ParetoChartProps {
 }
 
 export function ParetoChart({ linea, month, onBack }: ParetoChartProps) {
+  const { shouldShowReport } = useAppConfig();
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedFormat, setSelectedFormat] = useState<string>('all');
@@ -51,10 +53,11 @@ export function ParetoChart({ linea, month, onBack }: ParetoChartProps) {
   // Filter reports by month and line first to get available formats
   const baseFilteredReports = useMemo(() => {
     return reports.filter(r => {
+      if (!shouldShowReport(r)) return false;
       const logicalDate = getLogicalDate(r);
       return logicalDate && logicalDate.startsWith(month) && r.linea === linea;
     });
-  }, [reports, month, linea]);
+  }, [reports, month, linea, shouldShowReport]);
 
   // Get unique formats available in the current selection
   const availableFormats = useMemo(() => {

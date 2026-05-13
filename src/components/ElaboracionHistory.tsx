@@ -34,6 +34,12 @@ export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: Elabo
   const [selectedLinea, setSelectedLinea] = useState<string>('');
   const [selectedMarca, setSelectedMarca] = useState<string>('');
   const [selectedSabor, setSelectedSabor] = useState<string>('');
+  const [reportToDelete, setReportToDelete] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Sort state
+  const [sortField, setSortField] = useState<'fechaTurno' | 'planilla' | 'marca' | 'sabor'>('fechaTurno');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
   const fetchReports = useCallback(async (isNextPage = false) => {
     if (isNextPage) setLoadingMore(true);
@@ -89,8 +95,8 @@ export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: Elabo
   }, []);
 
   // Apply filters
-  const filteredReports = useMemo(() => {
-    return reports.filter(r => {
+  const sortedReports = useMemo(() => {
+    const filtered = reports.filter(r => {
       const logicalDate = getLogicalDate(r);
       if (selectedMonth && logicalDate && !logicalDate.startsWith(selectedMonth)) return false;
       if (selectedLinea && r.linea !== selectedLinea) return false;
@@ -98,15 +104,41 @@ export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: Elabo
       if (selectedSabor && r.sabor !== selectedSabor) return false;
       return true;
     });
-  }, [reports, selectedMonth, selectedLinea, selectedMarca, selectedSabor]);
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('¿Estás seguro de que deseas eliminar este reporte?')) return;
+    return filtered.sort((a, b) => {
+      let comparison = 0;
+      if (sortField === 'fechaTurno') {
+         const dateA = a.fecha || '';
+         const dateB = b.fecha || '';
+         if (dateA !== dateB) comparison = dateA.localeCompare(dateB);
+         else {
+            const turnoOrder = { 'Mañana': 1, 'Tarde': 2, 'Noche': 3 };
+            const tA = turnoOrder[a.turno as keyof typeof turnoOrder] || 0;
+            const tB = turnoOrder[b.turno as keyof typeof turnoOrder] || 0;
+            comparison = tA - tB;
+         }
+      } else if (sortField === 'planilla') {
+         comparison = String(a.planilla || '').localeCompare(String(b.planilla || ''));
+      } else if (sortField === 'marca') {
+         comparison = String(a.marca || '').localeCompare(String(b.marca || ''));
+      } else if (sortField === 'sabor') {
+         comparison = String(a.sabor || '').localeCompare(String(b.sabor || ''));
+      }
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+  }, [reports, selectedMonth, selectedLinea, selectedMarca, selectedSabor, sortField, sortDirection]);
+
+  const handleDelete = async () => {
+    if (!reportToDelete) return;
+    setIsDeleting(true);
     try {
-      await deleteDoc(doc(db, 'elaboracion_reports', id));
-    } catch (err) {
+      await deleteDoc(doc(db, 'elaboracion_reports', reportToDelete));
+      setReportToDelete(null);
+    } catch (err: any) {
       console.error("Error deleting report:", err);
-      alert("Error al eliminar el reporte.");
+      setError(`Error al eliminar el reporte: ${err.message}`);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -149,7 +181,7 @@ export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: Elabo
           <Filter className="w-5 h-5" />
           <h2>Filtros de Elaboración</h2>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Mes</label>
             <select
@@ -198,6 +230,30 @@ export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: Elabo
               {availableFlavors.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Ordenar por</label>
+            <select
+              value={sortField}
+              onChange={(e) => setSortField(e.target.value as any)}
+              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+            >
+              <option value="fechaTurno">Fecha / Turno</option>
+              <option value="planilla">Planilla</option>
+              <option value="marca">Marca</option>
+              <option value="sabor">Sabor</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Orden</label>
+            <select
+              value={sortDirection}
+              onChange={(e) => setSortDirection(e.target.value as 'asc' | 'desc')}
+              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+            >
+              <option value="desc">Descendente</option>
+              <option value="asc">Ascendente</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -217,7 +273,7 @@ export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: Elabo
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {filteredReports.map((report) => {
+              {sortedReports.map((report) => {
                 const isEditable = (report.createdAt ? isAfter(parseISO(report.createdAt), subHours(new Date(), 24)) : false) || isAdmin;
                 const isExpanded = expandedReport === report.id;
                 const logicalDate = getLogicalDate(report);
@@ -302,7 +358,7 @@ export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: Elabo
                           </button>
                         )}
                         <button
-                          onClick={() => report.id && handleDelete(report.id)}
+                          onClick={() => report.id && setReportToDelete(report.id)}
                           className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 p-2 rounded-md transition-colors"
                           title="Eliminar"
                         >
@@ -391,6 +447,41 @@ export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: Elabo
               'Cargar más reportes'
             )}
           </button>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {reportToDelete && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl border border-gray-200 w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6">
+              <div className="flex items-center gap-4 mb-4">
+                <div className="bg-red-100 p-3 rounded-full">
+                  <Trash2 className="w-6 h-6 text-red-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">¿Eliminar este reporte?</h3>
+                  <p className="text-sm text-gray-500">Esta acción no se puede deshacer. El reporte se borrará permanentemente de la base de datos.</p>
+                </div>
+              </div>
+            </div>
+            <div className="bg-gray-50 px-6 py-4 flex flex-col sm:flex-row-reverse gap-3">
+              <button
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="w-full sm:w-auto bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold py-2.5 px-6 rounded-xl transition-all shadow-sm active:scale-95"
+              >
+                {isDeleting ? 'Eliminando...' : 'Sí, eliminar'}
+              </button>
+              <button
+                onClick={() => setReportToDelete(null)}
+                disabled={isDeleting}
+                className="w-full sm:w-auto bg-white hover:bg-gray-100 disabled:opacity-50 text-gray-700 font-bold py-2.5 px-6 rounded-xl border border-gray-200 transition-all active:scale-95"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

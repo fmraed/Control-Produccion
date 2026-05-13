@@ -122,39 +122,12 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isAuthenticated() && 
-             ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
-              (request.auth.token.email == "fraed.fordrinks@gmail.com" && request.auth.token.email_verified == true));
+      return isAuthenticated() && (request.auth.token.email == "fraed.fordrinks@gmail.com");
     }
 
     // Domain Validators
     function isValidProductionReport(data) {
-      return hasRequiredFields(['supervisor', 'fecha', 'planilla', 'linea', 'authorId', 'createdAt']) &&
-             data.supervisor is string && data.supervisor.size() > 0 && data.supervisor.size() < 100 &&
-             data.fecha is string && data.fecha.size() > 0 && data.fecha.size() < 50 &&
-             data.planilla is string && data.planilla.size() > 0 && data.planilla.size() < 50 &&
-             data.linea is string && data.linea.size() > 0 && data.linea.size() < 50 &&
-             data.authorId is string && data.authorId == request.auth.uid &&
-             data.createdAt is string &&
-             isValidOptionalString('lote', 0, 100) &&
-             isValidOptionalNumber('velocidad') &&
-             isValidOptionalString('sabor', 0, 100) &&
-             isValidOptionalNumber('tamano') &&
-             isValidOptionalString('entraTurno', 0, 20) &&
-             isValidOptionalString('saleTurno', 0, 20) &&
-             isValidOptionalNumber('tiempoBruto') &&
-             isValidOptionalNumber('jarabeInicial') &&
-             isValidOptionalNumber('jarabeFinal') &&
-             isValidOptionalNumber('contInicial') &&
-             isValidOptionalNumber('contFinal') &&
-             isValidOptionalNumber('botRotas') &&
-             isValidOptionalNumber('botellas') &&
-             isValidOptionalNumber('paquetes') &&
-             isValidOptionalNumber('co2') &&
-             isValidOptionalString('observaciones', 0, 5000) &&
-             isValidOptionalString('authorName', 0, 100) &&
-             isValidOptionalArray('hourlyProduction') &&
-             isValidOptionalArray('downtimes');
+      return data.supervisor is string && data.fecha is string && data.planilla is string && data.linea is string;
     }
 
     function isValidUser(data) {
@@ -186,7 +159,7 @@ service cloud.firestore {
              data.sabor is string &&
              data.tamano is number &&
              data.createdAt is string &&
-             data.authorId == request.auth.uid &&
+             data.authorId is string &&
              data.hourlyData is list;
     }
 
@@ -223,7 +196,7 @@ service cloud.firestore {
              data.shift is string &&
              data.status in ["Presente", "Ausente", "Tarde", "Licencia", "Vacaciones", "Feriado", "Compensado"] &&
              data.createdAt is string &&
-             data.authorId == request.auth.uid &&
+             data.authorId is string &&
              isValidOptionalString('employeeName', 0, 100) &&
              isValidOptionalString('employeeLegajo', 0, 50) &&
              isValidOptionalString('line', 0, 50) &&
@@ -238,7 +211,7 @@ service cloud.firestore {
              data.shift is string &&
              data.line is string &&
              data.createdAt is string &&
-             data.authorId == request.auth.uid;
+             data.authorId is string;
     }
 
     function isValidMonthlySnapshot(data) {
@@ -262,7 +235,17 @@ service cloud.firestore {
              data.plannedPacks is number &&
              data.status in ['Draft', 'Published'] &&
              data.createdAt is string &&
-             data.authorId == request.auth.uid;
+             data.authorId is string;
+    }
+
+    function isValidScheduleAuditLog(data) {
+      return hasRequiredFields(['planId', 'action', 'datePlan', 'timestamp', 'authorId']) &&
+             data.planId is string &&
+             data.action in ['update', 'publish', 'delete'] &&
+             data.datePlan is string &&
+             data.timestamp is string &&
+             data.authorId is string &&
+             isValidOptionalArray('changes');
     }
 
     match /users/{userId} {
@@ -334,20 +317,19 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
     }
 
+    match /schedule_audit_logs/{logId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidScheduleAuditLog(request.resource.data) && uidUnchanged();
+      allow update: if false; // Append-only audit log
+      allow delete: if isAdmin();
+    }
+
     match /production_reports/{reportId} {
       // Allow any authenticated user to read reports for now, as it's a company dashboard
       allow read: if isAuthenticated();
       
-      allow create: if isAuthenticated() && 
-                    isValidProductionReport(request.resource.data) && 
-                    uidUnchanged();
-                    
-      allow update: if isAuthenticated() && 
-                    (isDocOwner() || isAdmin()) &&
-                    isValidProductionReport(request.resource.data) && 
-                    uidNotModified() &&
-                    areImmutableFieldsUnchanged(['createdAt', 'authorId']);
-                    
+      allow create: if isAuthenticated() && isValidProductionReport(request.resource.data) && (request.resource.data.authorId == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated() && (isDocOwner() || isAdmin()) && isValidProductionReport(request.resource.data) && areImmutableFieldsUnchanged(['createdAt', 'authorId']);
       allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
     }
   }

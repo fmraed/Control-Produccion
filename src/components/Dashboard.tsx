@@ -2,12 +2,13 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { collection, query, orderBy, limit, getDocs, startAfter, doc, deleteDoc, QueryDocumentSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { ProductionReport } from '../types';
-import { FileText, Calendar, Clock, Activity, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, Trash2, Settings2, Info, Printer, RefreshCw } from 'lucide-react';
+import { FileText, Calendar, Clock, Activity, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, Trash2, Settings2, Info, Printer, RefreshCw, Droplets } from 'lucide-react';
 import { format, parseISO, isAfter, subHours, subMonths, startOfMonth } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { getLogicalDate } from '../utils';
-import { printProductionReport } from '../utils/printReport';
+import { printProductionReport, printInternalReport } from '../utils/printReport';
 import { useAppConfig } from '../hooks/useAppConfig';
+import { ClipboardCheck } from 'lucide-react';
 
 interface DashboardProps {
   onNewReport: () => void;
@@ -19,7 +20,9 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin }: DashboardProps
     availableFlavors, 
     availableSizes, 
     availableLines, 
-    availableSupervisors 
+    availableSupervisors,
+    availableBrands,
+    shouldShowReport
   } = useAppConfig();
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,7 +30,7 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin }: DashboardProps
   const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const PAGE_SIZE = 25;
+  const PAGE_SIZE = 100;
   const [expandedReport, setExpandedReport] = useState<string | null>(null);
   const [reportToDelete, setReportToDelete] = useState<string | null>(null);
 
@@ -37,6 +40,11 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin }: DashboardProps
   const [selectedSupervisor, setSelectedSupervisor] = useState<string>('');
   const [selectedTamano, setSelectedTamano] = useState<string>('');
   const [selectedSabor, setSelectedSabor] = useState<string>('');
+  const [selectedMarca, setSelectedMarca] = useState<string>('');
+
+  // Sort state
+  const [sortField, setSortField] = useState<'fechaTurno' | 'planilla' | 'marca' | 'sabor'>('fechaTurno');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
   const fetchReports = useCallback(async (isNextPage = false) => {
     if (isNextPage) setLoadingMore(true);
@@ -44,13 +52,14 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin }: DashboardProps
 
     try {
       const reportsRef = collection(db, 'production_reports');
-      let q = query(reportsRef, orderBy('createdAt', 'desc'), limit(PAGE_SIZE));
+      let q = query(reportsRef, orderBy('fecha', 'desc'), orderBy('createdAt', 'desc'), limit(PAGE_SIZE));
 
       if (isNextPage && lastDoc) {
-        q = query(reportsRef, orderBy('createdAt', 'desc'), startAfter(lastDoc), limit(PAGE_SIZE));
+        q = query(reportsRef, orderBy('fecha', 'desc'), orderBy('createdAt', 'desc'), startAfter(lastDoc), limit(PAGE_SIZE));
       }
 
       const snapshot = await getDocs(q);
+      console.log(`Fetched ${snapshot.docs.length} reports for Dashboard`);
       
       const newReports = snapshot.docs.map(doc => ({
         id: doc.id,
@@ -97,31 +106,53 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin }: DashboardProps
   const sabores = availableFlavors;
 
   // Apply filters
-  const filteredReports = useMemo(() => {
-    return reports.filter(r => {
+  const sortedReports = useMemo(() => {
+    const filtered = reports.filter(r => {
+      // First check historical visibility
+      if (!shouldShowReport(r)) return false;
+
       const logicalDate = getLogicalDate(r);
       if (selectedMonth && logicalDate && !logicalDate.startsWith(selectedMonth)) return false;
       if (selectedLinea && r.linea !== selectedLinea) return false;
       if (selectedSupervisor && r.supervisor !== selectedSupervisor) return false;
       if (selectedTamano && r.tamano?.toString() !== selectedTamano) return false;
       if (selectedSabor && r.sabor !== selectedSabor) return false;
+      if (selectedMarca && r.marca !== selectedMarca) return false;
       return true;
     });
-  }, [reports, selectedMonth, selectedLinea, selectedSupervisor, selectedTamano, selectedSabor]);
+
+    return filtered.sort((a, b) => {
+      let comparison = 0;
+      if (sortField === 'fechaTurno') {
+         const dateA = a.fecha || '';
+         const dateB = b.fecha || '';
+         if (dateA !== dateB) comparison = dateA.localeCompare(dateB);
+         else {
+            const turnoOrder = { 'Mañana': 1, 'Tarde': 2, 'Noche': 3 };
+            const tA = turnoOrder[a.turno as keyof typeof turnoOrder] || 0;
+            const tB = turnoOrder[b.turno as keyof typeof turnoOrder] || 0;
+            comparison = tA - tB;
+         }
+      } else if (sortField === 'planilla') {
+         comparison = String(a.planilla || '').localeCompare(String(b.planilla || ''));
+      } else if (sortField === 'marca') {
+         comparison = String(a.marca || '').localeCompare(String(b.marca || ''));
+      } else if (sortField === 'sabor') {
+         comparison = String(a.sabor || '').localeCompare(String(b.sabor || ''));
+      }
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+  }, [reports, selectedMonth, selectedLinea, selectedSupervisor, selectedTamano, selectedSabor, selectedMarca, sortField, sortDirection]);
 
   const handleDelete = async () => {
     if (!reportToDelete) return;
     try {
       await deleteDoc(doc(db, 'production_reports', reportToDelete));
       setReportToDelete(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error deleting report:", err);
-      setError("Error al eliminar el reporte. Por favor, intenta de nuevo.");
+      setError(`Error al eliminar el reporte: ${err.message}`);
     }
-  };
-
-  const handlePrint = (report: ProductionReport) => {
-    printProductionReport(report);
   };
 
   if (loading) {
@@ -171,7 +202,7 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin }: DashboardProps
           <Filter className="w-5 h-5" />
           <h2>Filtros</h2>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-4">
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Mes</label>
             <select
@@ -231,6 +262,41 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin }: DashboardProps
               {sabores.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Marca</label>
+            <select
+              value={selectedMarca}
+              onChange={(e) => setSelectedMarca(e.target.value)}
+              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+            >
+              <option value="">Todas</option>
+              {availableBrands.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Ordenar por</label>
+            <select
+              value={sortField}
+              onChange={(e) => setSortField(e.target.value as any)}
+              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+            >
+              <option value="fechaTurno">Fecha / Turno</option>
+              <option value="planilla">Planilla</option>
+              <option value="marca">Marca</option>
+              <option value="sabor">Sabor</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Orden</label>
+            <select
+              value={sortDirection}
+              onChange={(e) => setSortDirection(e.target.value as 'asc' | 'desc')}
+              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+            >
+              <option value="desc">Descendente</option>
+              <option value="asc">Ascendente</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -253,7 +319,7 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin }: DashboardProps
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {filteredReports.map((report) => {
+              {sortedReports.map((report) => {
                 const totalDowntime = report.downtimes?.reduce((sum, dt) => sum + (dt.totalMinutes || 0), 0) || 0;
                 const topDowntime = report.downtimes?.sort((a, b) => (b.totalMinutes || 0) - (a.totalMinutes || 0))[0];
                 
@@ -334,7 +400,7 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin }: DashboardProps
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-100">
                     <Activity className="w-3.5 h-3.5" />
-                    {report.eficBruta || 0}%
+                    {Math.round(report.eficBruta || 0)}%
                   </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
@@ -362,11 +428,18 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin }: DashboardProps
                       {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                     </button>
                     <button
-                      onClick={() => handlePrint(report)}
+                      onClick={() => printProductionReport(report)}
                       className="text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 p-2 rounded-md transition-colors"
-                      title="Imprimir para Expedición"
+                      title="Imprimir para Expedición (Resumido)"
                     >
                       <Printer className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => printInternalReport(report)}
+                      className="text-indigo-600 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 p-2 rounded-md transition-colors"
+                      title="Imprimir Parte Interno (Detallado)"
+                    >
+                      <ClipboardCheck className="w-4 h-4" />
                     </button>
                     {isEditable && (
                       <button
@@ -471,44 +544,90 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin }: DashboardProps
                         </div>
 
                         {/* Additional Stats */}
-                        <div className="grid grid-cols-2 gap-4 mt-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
                           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                            <div className="flex items-center gap-2 mb-2">
-                              <Settings2 className="w-4 h-4 text-gray-400" />
-                              <span className="text-xs font-bold text-gray-500 uppercase">Control de Insumos</span>
+                            <div className="flex items-center gap-2 mb-3">
+                              <Settings2 className="w-4 h-4 text-blue-500" />
+                              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Control de Insumos</span>
                             </div>
                             <div className="space-y-2">
-                              <div className="flex justify-between text-sm">
+                              <div className="flex justify-between text-sm py-1 border-b border-gray-50">
                                 <span className="text-gray-500">Contador Inicial:</span>
                                 <span className="font-mono font-bold">{report.contInicial?.toLocaleString()}</span>
                               </div>
-                              <div className="flex justify-between text-sm">
+                              <div className="flex justify-between text-sm py-1 border-b border-gray-50">
                                 <span className="text-gray-500">Contador Final:</span>
                                 <span className="font-mono font-bold">{report.contFinal?.toLocaleString()}</span>
                               </div>
-                              <div className="flex justify-between text-sm">
+                              <div className="flex justify-between text-sm py-1">
                                 <span className="text-gray-500">Botellas Rotas:</span>
-                                <span className="font-bold text-red-600">{report.botRotas?.toLocaleString()}</span>
+                                <span className="font-bold text-red-600">{report.botRotas?.toLocaleString()} u.</span>
                               </div>
                             </div>
                           </div>
+
                           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                            <div className="flex items-center gap-2 mb-2">
-                              <Info className="w-4 h-4 text-gray-400" />
-                              <span className="text-xs font-bold text-gray-500 uppercase">Resumen de Jarabe</span>
+                            <div className="flex items-center gap-2 mb-3">
+                              <Droplets className="w-4 h-4 text-indigo-500" />
+                              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Balance de Jarabe</span>
                             </div>
                             <div className="space-y-2">
-                              <div className="flex justify-between text-sm">
+                              <div className="flex justify-between text-sm py-1 border-b border-gray-50">
                                 <span className="text-gray-500">Jarabe Inicial:</span>
                                 <span className="font-bold">{report.jarabeInicial || 0} L</span>
                               </div>
-                              <div className="flex justify-between text-sm">
+                              <div className="flex justify-between text-sm py-1 border-b border-gray-50">
                                 <span className="text-gray-500">Jarabe Final:</span>
                                 <span className="font-bold">{report.jarabeFinal || 0} L</span>
                               </div>
-                              <div className="flex justify-between text-sm pt-1 border-t border-gray-100">
-                                <span className="text-gray-600 font-bold">Consumo Total:</span>
-                                <span className="font-bold text-blue-600">{report.jarabeConsumido || 0} L</span>
+                              <div className="flex justify-between text-sm pt-2 mt-1 border-t border-indigo-100 bg-indigo-50/30 px-2 -mx-2 rounded-b-lg">
+                                <span className="text-indigo-700 font-bold">Consumo Total:</span>
+                                <span className="font-bold text-indigo-900">{report.jarabeConsumido || 0} L</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                            <div className="flex items-center gap-2 mb-3">
+                              <Trash2 className="w-4 h-4 text-red-500" />
+                              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Desperdicio de Materiales</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                              <div className="text-[10px] space-y-1">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Soplado:</span>
+                                  <span className="font-bold text-gray-700">{report.scrapSoplado || 0} u.</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Etiquetado:</span>
+                                  <span className="font-bold text-gray-700">{report.scrapEtiquetado || 0} u.</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Llenado:</span>
+                                  <span className="font-bold text-gray-700">{report.scrapLlenado || 0} u.</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Horno:</span>
+                                  <span className="font-bold text-gray-700">{report.scrapHorno || 0} u.</span>
+                                </div>
+                              </div>
+                              <div className="text-[10px] space-y-1 border-l border-gray-100 pl-4">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Etiquetas:</span>
+                                  <span className="font-bold text-gray-700">{report.desperdicioEtiquetas || 0} kg</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Tapas:</span>
+                                  <span className="font-bold text-gray-700">{report.desperdicioTapas || 0} kg</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Film:</span>
+                                  <span className="font-bold text-gray-700">{report.desperdicioTermo || 0} kg</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Sifones:</span>
+                                  <span className="font-bold text-gray-700">{report.desperdicioSifones || 0} u.</span>
+                                </div>
                               </div>
                             </div>
                           </div>

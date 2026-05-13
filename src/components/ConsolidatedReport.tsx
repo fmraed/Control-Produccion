@@ -10,7 +10,7 @@ import { useAppConfig } from '../hooks/useAppConfig';
 import { getLogicalDate } from '../utils';
 
 export function ConsolidatedReport() {
-  const { config, getFilteredFlavors, getFilteredSizes, availableBrands } = useAppConfig();
+  const { config, getFilteredFlavors, getFilteredSizes, availableBrands, shouldShowReport } = useAppConfig();
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
@@ -36,24 +36,27 @@ export function ConsolidatedReport() {
   const months = useMemo(() => {
     const uniqueMonths = new Set<string>();
     reports.forEach(r => {
-      const logicalDate = getLogicalDate(r);
-      if (logicalDate) {
-        const date = parseISO(logicalDate);
-        uniqueMonths.add(format(date, 'yyyy-MM'));
+      if (shouldShowReport(r)) {
+        const logicalDate = getLogicalDate(r);
+        if (logicalDate) {
+          const date = parseISO(logicalDate);
+          uniqueMonths.add(format(date, 'yyyy-MM'));
+        }
       }
     });
     // Ensure current month is always there if not present
     uniqueMonths.add(format(new Date(), 'yyyy-MM'));
     return Array.from(uniqueMonths).sort().reverse();
-  }, [reports]);
+  }, [reports, shouldShowReport]);
 
   const filteredReports = useMemo(() => {
-    if (!selectedMonth) return reports;
+    if (!selectedMonth) return reports.filter(r => shouldShowReport(r));
     return reports.filter(r => {
+      if (!shouldShowReport(r)) return false;
       const logicalDate = getLogicalDate(r);
       return logicalDate && logicalDate.startsWith(selectedMonth);
     });
-  }, [reports, selectedMonth]);
+  }, [reports, selectedMonth, shouldShowReport]);
 
   // Consolidated data structure
   // { [marca|sabor]: { [tamano]: { packs: number, extraBot: number } } }
@@ -240,7 +243,7 @@ export function ConsolidatedReport() {
                               {cell.extraBot > 0 ? cell.extraBot : ''}
                             </span>
                             <span className={`py-2 text-[10px] ${percentage > 0 ? 'text-green-600 font-medium' : 'text-transparent'}`}>
-                              {percentage > 0 ? `${percentage.toFixed(1)}%` : ''}
+                              {percentage > 0 ? `${Math.round(percentage)}%` : ''}
                             </span>
                           </div>
                         </td>

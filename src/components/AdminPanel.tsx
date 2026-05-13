@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment } from 'react';
 import { collection, query, orderBy, onSnapshot, doc, getDoc, setDoc, addDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK } from '../constants';
+import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, CO2_VOLUMES, SABORES_SIN_JARABE } from '../constants';
 import { Settings, Save, CheckCircle2, XCircle, AlertCircle, Plus, Trash2, Users, Database, FlaskConical, Link2, Clock, Calendar, ShieldCheck, UserCog, Briefcase } from 'lucide-react';
 import { UserProfile, UserRole, RolePermissions } from '../types';
 import { SQLIntegration } from './SQLIntegration';
@@ -37,6 +37,10 @@ interface AppConfig {
     weeklyPlan: Record<string, Record<string, { count: number, duration: number }>>;
     holidays?: string[];
   };
+  historicalSettings?: {
+    showHistoricalGlobal: boolean;
+    historicalStartDate?: string;
+  };
 }
 
 export function AdminPanel() {
@@ -44,7 +48,7 @@ export function AdminPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
-  const [activeTab, setActiveTab] = useState<'config' | 'sql' | 'mappings' | 'shifts' | 'users' | 'permissions'>('config');
+  const [activeTab, setActiveTab] = useState<'config' | 'sql' | 'mappings' | 'shifts' | 'users' | 'permissions' | 'formulas'>('config');
 
   // User management states
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -161,7 +165,10 @@ export function AdminPanel() {
           packsPorPaleta: data.packsPorPaleta || PACKS_POR_PALETA,
           botellasPorPack: data.botellasPorPack || BOTELLAS_POR_PACK,
           lineOperators: data.lineOperators || {},
-          shiftConfig: shiftConfig
+          shiftConfig: shiftConfig,
+          historicalSettings: data.historicalSettings || { showHistoricalGlobal: false },
+          saboresSinJarabe: Array.isArray(data.saboresSinJarabe) ? data.saboresSinJarabe : SABORES_SIN_JARABE,
+          co2Volumes: data.co2Volumes || CO2_VOLUMES
         };
         setConfig(mergedConfig);
       } else {
@@ -254,7 +261,9 @@ export function AdminPanel() {
               }
             },
             holidays: []
-          }
+          },
+          saboresSinJarabe: SABORES_SIN_JARABE,
+          co2Volumes: CO2_VOLUMES
         };
         setConfig(defaultConfig);
       }
@@ -751,12 +760,12 @@ export function AdminPanel() {
     });
   };
 
-  const saveConfig = async () => {
+    const saveConfig = async () => {
     if (!config) return;
     setSaving(true);
     setMessage(null);
     try {
-      await setDoc(doc(db, 'config', 'production'), config);
+      await setDoc(doc(db, 'config', 'production'), config, { merge: true });
       setMessage({ type: 'success', text: 'Configuración guardada correctamente' });
       setTimeout(() => setMessage(null), 3000);
     } catch (error) {
@@ -834,6 +843,17 @@ export function AdminPanel() {
         >
           <UserCog className="w-4 h-4" />
           Usuarios y Roles
+        </button>
+        <button
+          onClick={() => setActiveTab('formulas')}
+          className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+            activeTab === 'formulas'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          }`}
+        >
+          <FlaskConical className="w-4 h-4" />
+          Formulaciones
         </button>
         <button
           onClick={() => setActiveTab('permissions')}
@@ -1127,7 +1147,7 @@ export function AdminPanel() {
             </section>
           </div>
         </div>
-      ) : (
+      ) : activeTab === 'config' ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-2">
@@ -1559,6 +1579,68 @@ export function AdminPanel() {
               )}
             </div>
           </section>
+
+          {/* Control de Datos Históricos */}
+          <section className="bg-indigo-50 p-6 rounded-xl border border-indigo-100 lg:col-span-2 shadow-sm">
+            <h3 className="text-lg font-bold text-indigo-900 mb-4 border-b border-indigo-200 pb-2 flex items-center gap-2">
+              <Database className="w-5 h-5 text-indigo-600" />
+              Gestión de Datos Históricos (Importados)
+            </h3>
+            <p className="text-sm text-indigo-700 mb-6 font-medium">
+              Define si los datos con origen "Historial" se incluyen en los cálculos globales de eficiencia y dashboards, o si se filtran por fecha.
+            </p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between p-4 bg-white rounded-xl border border-indigo-200 shadow-sm transition-all hover:border-indigo-400">
+                  <div className="pr-4">
+                    <span className="block font-black text-gray-900 text-sm tracking-tight">MOSTRAR HISTORIAL GLOBAL</span>
+                    <span className="text-[10px] text-gray-500 font-medium italic">Si se activa, el Dashboard ignorará la fecha de filtrado histórico y mostrará todo.</span>
+                  </div>
+                  <button
+                    onClick={() => setConfig({
+                      ...config,
+                      historicalSettings: {
+                        ...(config.historicalSettings || { showHistoricalGlobal: false }),
+                        showHistoricalGlobal: !config.historicalSettings?.showHistoricalGlobal
+                      }
+                    })}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
+                      config.historicalSettings?.showHistoricalGlobal ? 'bg-indigo-600' : 'bg-gray-200'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        config.historicalSettings?.showHistoricalGlobal ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="p-4 bg-white rounded-xl border border-indigo-200 shadow-sm transition-all hover:border-indigo-400">
+                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Fecha de Inicio de Visualización</label>
+                  <input
+                    type="date"
+                    value={config.historicalSettings?.historicalStartDate || ''}
+                    onChange={(e) => setConfig({
+                      ...config,
+                      historicalSettings: {
+                        ...(config.historicalSettings || { showHistoricalGlobal: false }),
+                        historicalStartDate: e.target.value
+                      }
+                    })}
+                    className="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm border p-2 bg-indigo-50/20 font-bold"
+                  />
+                  <p className="mt-3 text-[10px] text-indigo-500 font-medium bg-indigo-50 p-2 rounded border border-indigo-100 flex items-start gap-2">
+                    <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                    <span>Los reportes manuales (Parte Diario) se muestran siempre. Los históricos se ocultan si son anteriores a esta fecha <strong>Y</strong> el toggle de la izquierda está apagado.</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
 
         {/* Combinaciones Marca-Sabor */}
@@ -1899,7 +1981,7 @@ export function AdminPanel() {
           </div>
         </section>
       </div>
-      )}
+      ) : null}
 
       {activeTab === 'users' && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
@@ -2069,6 +2151,110 @@ export function AdminPanel() {
       </div>
     </div>
   )}
+
+      {activeTab === 'formulas' && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-2">
+              <FlaskConical className="w-6 h-6 text-blue-600" />
+              <h2 className="text-xl font-bold text-gray-900">Formulaciones</h2>
+            </div>
+            <button
+              onClick={saveConfig}
+              disabled={saving}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+            >
+              {saving ? <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" /> : <Save className="w-4 h-4" />}
+              Guardar Cambios
+            </button>
+          </div>
+          
+          {message && (
+            <div className={`mb-6 p-4 rounded-lg flex items-center gap-3 ${message.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+              {message.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
+              {message.text}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <section className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+               <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Uso de Jarabe</h3>
+               <p className="text-xs text-gray-500 mb-4">Seleccione qué sabores NO utilizan jarabe en su elaboración (ej. Agua, Soda).</p>
+               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {config.flavors.map(sabor => {
+                     const sinJarabe = (config.saboresSinJarabe || SABORES_SIN_JARABE).includes(sabor);
+                     return (
+                       <button
+                         key={sabor}
+                         onClick={() => {
+                            const list = config.saboresSinJarabe || [...SABORES_SIN_JARABE];
+                            if (sinJarabe) {
+                               setConfig({...config, saboresSinJarabe: list.filter(s => s !== sabor)});
+                            } else {
+                               setConfig({...config, saboresSinJarabe: [...list, sabor]});
+                            }
+                         }}
+                         className={`flex-1 flex items-center justify-between p-3 rounded-lg border transition-all ${
+                           sinJarabe
+                             ? 'bg-orange-50 border-orange-200 text-orange-700 shadow-sm'
+                             : 'bg-white border-gray-200 text-gray-500'
+                         }`}
+                       >
+                         <span className="font-medium">{sabor}</span>
+                         <span className="text-[10px]">{sinJarabe ? 'NO LLEVA' : 'USA JARABE'}</span>
+                       </button>
+                     );
+                  })}
+               </div>
+              </section>
+              
+              <section className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                 <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Volúmenes de CO2</h3>
+                 <p className="text-xs text-gray-500 mb-4">Ajuste el volumen de gas según Marca y Sabor. Deje en 0 para sabores como Agua que no llevan CO2.</p>
+                 <div className="space-y-6">
+                   {config.brands.map(brand => (
+                      <div key={brand} className="space-y-3">
+                         <h4 className="font-bold text-gray-700 flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500 shadow-sm ring-2 ring-blue-100"></div> {brand}</h4>
+                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                           {config.flavors.map(sabor => {
+                              const val = config.co2Volumes?.[brand]?.[sabor] !== undefined ? config.co2Volumes[brand][sabor] : 0;
+                              return (
+                                 <div key={sabor} className="flex justify-between items-center bg-white p-2 rounded border border-gray-200 text-sm">
+                                    <span className="truncate">{sabor}</span>
+                                    <input 
+                                      type="number"
+                                      step="0.1"
+                                      min="0"
+                                      value={val === 0 ? 0 : (val || '')}
+                                      placeholder="0"
+                                      onChange={(e) => {
+                                          const newVal = Number(e.target.value);
+                                          const currentVolumes = config.co2Volumes || {};
+                                          const brandObj = currentVolumes[brand] || {};
+                                          setConfig({
+                                              ...config,
+                                              co2Volumes: {
+                                                  ...currentVolumes,
+                                                  [brand]: {
+                                                      ...brandObj,
+                                                      [sabor]: newVal
+                                                  }
+                                              }
+                                          });
+                                      }}
+                                      className="w-20 text-right rounded border-gray-300 bg-gray-50 hover:bg-white transition-colors shadow-sm p-1 px-2 border focus:border-blue-500 focus:ring-blue-500"
+                                    />
+                                 </div>
+                              )
+                           })}
+                         </div>
+                      </div>
+                   ))}
+                 </div>
+              </section>
+          </div>
+        </div>
+      )}
 
       {activeTab === 'permissions' && rolePermissions && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">

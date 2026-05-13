@@ -7,6 +7,7 @@ import { format, startOfWeek, addDays, parseISO, isSameDay, startOfDay, endOfDay
 import { es } from 'date-fns/locale';
 import { useAppConfig } from '../hooks/useAppConfig';
 import { motion, AnimatePresence } from 'motion/react';
+import { getDefaultInputDate } from '../utils';
 
 type Tab = 'list' | 'planning' | 'attendance' | 'analysis' | 'benefits';
 
@@ -145,7 +146,7 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
   const [planningShiftTab, setPlanningShiftTab] = useState<'Todos' | 'Mañana' | 'Tarde' | 'Noche' | 'Sin Asignar'>('Todos');
 
   // Attendance states
-  const [attendanceDate, setAttendanceDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [attendanceDate, setAttendanceDate] = useState(getDefaultInputDate());
   const [attendanceShift, setAttendanceShift] = useState('Mañana');
 
   const isAttendanceLocked = useMemo(() => isDateRestricted(attendanceDate), [attendanceDate, isAdmin]);
@@ -470,8 +471,9 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
     const existing = attendance.find(a => a.employeeId === employee.id && a.date === attendanceDate && a.shift === attendanceShift);
     
     try {
-      // Toggle logic: If clicking the same status, delete the record (deactivate)
-      if (existing?.status === status) {
+      // Toggle logic: If clicking the same status AND same overtime, delete the record (deactivate)
+      // If overtime is different, we want to update, not toggle off.
+      if (existing?.status === status && overtime === (existing.overtimeHours || 0)) {
         await deleteDoc(doc(db, 'attendance_records', existing.id!));
         return;
       }

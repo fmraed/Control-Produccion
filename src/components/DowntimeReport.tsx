@@ -19,7 +19,7 @@ interface DowntimeReportProps {
 }
 
 export function DowntimeReport({ onViewPareto }: DowntimeReportProps) {
-  const { availableLines, getFilteredSizes } = useAppConfig();
+  const { availableLines, getFilteredSizes, shouldShowReport } = useAppConfig();
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
@@ -52,23 +52,26 @@ export function DowntimeReport({ onViewPareto }: DowntimeReportProps) {
   const months = useMemo(() => {
     const uniqueMonths = new Set<string>();
     reports.forEach(r => {
-      const logicalDate = getLogicalDate(r);
-      if (logicalDate) {
-        const date = parseISO(logicalDate);
-        uniqueMonths.add(format(date, 'yyyy-MM'));
+      if (shouldShowReport(r)) {
+        const logicalDate = getLogicalDate(r);
+        if (logicalDate) {
+          const date = parseISO(logicalDate);
+          uniqueMonths.add(format(date, 'yyyy-MM'));
+        }
       }
     });
     uniqueMonths.add(format(new Date(), 'yyyy-MM'));
     return Array.from(uniqueMonths).sort().reverse();
-  }, [reports]);
+  }, [reports, shouldShowReport]);
 
   const filteredReports = useMemo(() => {
-    if (!selectedMonth) return reports;
+    if (!selectedMonth) return reports.filter(r => shouldShowReport(r));
     return reports.filter(r => {
+      if (!shouldShowReport(r)) return false;
       const logicalDate = getLogicalDate(r);
       return logicalDate && logicalDate.startsWith(selectedMonth);
     });
-  }, [reports, selectedMonth]);
+  }, [reports, selectedMonth, shouldShowReport]);
 
   // Dynamically determine which formats (sizes) exist for each line in the filtered data
   // while ensuring the requested ones are present.

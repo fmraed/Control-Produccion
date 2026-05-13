@@ -21,7 +21,7 @@ const FLAVOR_PRIORITY: Record<string, number> = {
 };
 
 export function GoalFulfillment() {
-  const { config, availableBrands, availableSizes, availableFlavors } = useAppConfig();
+  const { config, availableBrands, availableSizes, availableFlavors, shouldShowReport } = useAppConfig();
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [goals, setGoals] = useState<MonthlyGoal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,31 +73,63 @@ export function GoalFulfillment() {
 
   const filteredReportsByMonth = useMemo(() => {
     return reports.filter(r => {
+      if (!shouldShowReport(r)) return false;
       const lDate = getLogicalDate(r);
       return lDate && lDate.startsWith(selectedMonth);
     });
-  }, [reports, selectedMonth]);
+  }, [reports, selectedMonth, shouldShowReport]);
 
   const activeProducts = useMemo(() => {
     if (!config) return [];
-    const products: { marca: string, sabor: string, tamano: number, key: string }[] = [];
+    
+    const productMap = new Map<string, { marca: string, sabor: string, tamano: number, key: string }>();
     
     availableBrands.forEach(brand => {
       availableSizes.forEach(size => {
         const allowedFlavors = config.activeProducts?.[brand]?.[size.toString()] || config.brandFlavorCombinations[brand] || [];
         allowedFlavors.forEach(flavor => {
           if (config.enabledFlavors?.[flavor] !== false) {
-            products.push({
+            const key = `${brand}|${flavor}|${size}`;
+            productMap.set(key, {
               marca: brand,
               sabor: flavor,
               tamano: Number(size),
-              key: `${brand}|${flavor}|${size}`
+              key
             });
           }
         });
       });
     });
-    return products.sort((a, b) => {
+
+    filteredReportsByMonth.forEach(r => {
+      if (r.marca && r.sabor && r.tamano) {
+        const key = `${r.marca}|${r.sabor}|${r.tamano}`;
+        if (!productMap.has(key)) {
+          productMap.set(key, {
+            marca: r.marca,
+            sabor: r.sabor,
+            tamano: r.tamano,
+            key
+          });
+        }
+      }
+    });
+
+    goals.filter(g => g.month === selectedMonth).forEach(g => {
+      if (g.marca && g.sabor && g.tamano) {
+        const key = `${g.marca}|${g.sabor}|${g.tamano}`;
+        if (!productMap.has(key)) {
+          productMap.set(key, {
+            marca: g.marca,
+            sabor: g.sabor,
+            tamano: g.tamano,
+            key
+          });
+        }
+      }
+    });
+
+    return Array.from(productMap.values()).sort((a, b) => {
       if (a.marca !== b.marca) return a.marca.localeCompare(b.marca);
       if (a.tamano !== b.tamano) return b.tamano - a.tamano;
       const priorityA = FLAVOR_PRIORITY[a.sabor] || 999;
@@ -105,7 +137,7 @@ export function GoalFulfillment() {
       if (priorityA !== priorityB) return priorityA - priorityB;
       return a.sabor.localeCompare(b.sabor);
     });
-  }, [config, availableBrands, availableSizes]);
+  }, [config, availableBrands, availableSizes, filteredReportsByMonth, goals, selectedMonth]);
 
   const dataByProduct = useMemo(() => {
     const productsMap: Record<string, any> = {};
@@ -517,12 +549,12 @@ export function GoalFulfillment() {
                       {item.actualAvg.toLocaleString('es-AR', { maximumFractionDigits: 0 })} paq
                     </td>
                     <td className="px-6 py-5 border-r border-gray-100 bg-blue-50/10">
-                      <span className={`text-xl font-black ${item.turnsNeededGoal > 0 ? 'text-blue-600' : 'text-green-600'}`}>
+                      <span className={`text-xl font-mono font-black tracking-tight ${item.turnsNeededGoal > 0 ? 'text-blue-600' : 'text-green-600'}`}>
                         {item.turnsNeededGoal > 0 ? item.turnsNeededGoal.toFixed(1) : '–'}
                       </span>
                     </td>
                     <td className="px-6 py-5 bg-orange-50/30">
-                      <span className={`text-xl font-black ${item.turnsNeededAvg > 0 ? 'text-orange-600' : 'text-green-600'}`}>
+                      <span className={`text-xl font-mono font-black tracking-tight ${item.turnsNeededAvg > 0 ? 'text-orange-600' : 'text-green-600'}`}>
                         {item.turnsNeededAvg > 0 ? item.turnsNeededAvg.toFixed(1) : '–'}
                       </span>
                     </td>
@@ -541,9 +573,9 @@ export function GoalFulfillment() {
                     <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">{calibreSummary.reduce((acc, i) => acc + i.ordered, 0).toLocaleString('es-AR')}</td>
                     <td className="px-6 py-4 text-sm text-gray-900 border-r border-gray-200">{calibreSummary.reduce((acc, i) => acc + i.produced, 0).toLocaleString('es-AR')}</td>
                     <td className="px-6 py-4 border-r border-gray-200" colSpan={2}></td>
-                    <td className="px-6 py-4 text-xl border-r border-gray-200 bg-blue-50/50">
+                    <td className="px-6 py-4 border-r border-gray-200 bg-blue-50/50">
                       <div className="flex flex-col">
-                        <span className="text-blue-700">{calibreSummary.reduce((acc, i) => acc + i.turnsNeededGoal, 0).toFixed(1)} <span className="text-xs uppercase">Turnos</span></span>
+                        <span className="text-xl font-mono font-black tracking-tight text-blue-700">{calibreSummary.reduce((acc, i) => acc + i.turnsNeededGoal, 0).toFixed(1)} <span className="text-xs font-sans uppercase">Turnos</span></span>
                         {pendingMonthlyShifts > 0 && calibreSummary.reduce((acc, i) => acc + i.turnsNeededGoal, 0) > pendingMonthlyShifts && (
                           <span className="text-[9px] text-red-500 flex items-center gap-1 font-bold mt-1">
                             <XCircle className="w-2.5 h-2.5" /> Supera capacidad restante
@@ -551,9 +583,9 @@ export function GoalFulfillment() {
                         )}
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-xl bg-orange-50/50">
+                    <td className="px-6 py-4 bg-orange-50/50">
                       <div className="flex flex-col">
-                        <span className="text-orange-700">{calibreSummary.reduce((acc, i) => acc + i.turnsNeededAvg, 0).toFixed(1)} <span className="text-xs uppercase">Turnos</span></span>
+                        <span className="text-xl font-mono font-black tracking-tight text-orange-700">{calibreSummary.reduce((acc, i) => acc + i.turnsNeededAvg, 0).toFixed(1)} <span className="text-xs font-sans uppercase">Turnos</span></span>
                         {pendingMonthlyShifts > 0 && calibreSummary.reduce((acc, i) => acc + i.turnsNeededAvg, 0) > pendingMonthlyShifts && (
                           <span className="text-[9px] text-red-500 flex items-center gap-1 font-bold mt-1">
                             <XCircle className="w-2.5 h-2.5" /> Supera capacidad restante
@@ -610,21 +642,21 @@ export function GoalFulfillment() {
                       <td className="px-6 py-4 text-sm font-black text-gray-600 border-r border-gray-100">{p.dailyAvg.toLocaleString('es-AR', { maximumFractionDigits: 0 })}</td>
                       <td className="px-6 py-4 border-r border-gray-100 bg-blue-50/10">
                         <div className="flex flex-col">
-                          <span className={`text-sm font-black ${p.turnsNeededGoal > 0 ? 'text-blue-600' : 'text-green-600'}`}>
+                          <span className={`text-xl font-mono font-black tracking-tight ${p.turnsNeededGoal > 0 ? 'text-blue-600' : 'text-green-600'}`}>
                             {p.turnsNeededGoal > 0 ? p.turnsNeededGoal.toFixed(1) : '–'}
                           </span>
                           {p.standardShiftGoal > 0 && (
-                            <span className="text-[9px] font-bold text-blue-400">Usa: {p.standardShiftGoal.toLocaleString('es-AR')} paq/t</span>
+                            <span className="text-[10px] font-bold text-blue-400 mt-0.5">Usa: {p.standardShiftGoal.toLocaleString('es-AR')} paq/t</span>
                           )}
                         </div>
                       </td>
                       <td className="px-6 py-4 border-r border-gray-100 bg-orange-50/10">
                         <div className="flex flex-col">
-                          <span className={`text-sm font-black ${p.turnsNeededAvg > 0 ? 'text-orange-600' : 'text-green-600'}`}>
+                          <span className={`text-xl font-mono font-black tracking-tight ${p.turnsNeededAvg > 0 ? 'text-orange-600' : 'text-green-600'}`}>
                             {p.turnsNeededAvg > 0 ? p.turnsNeededAvg.toFixed(1) : '–'}
                           </span>
                           {p.actualAvgPacksPerTurn > 0 && (
-                            <span className="text-[9px] font-bold text-orange-400">Usa: {p.actualAvgPacksPerTurn.toFixed(0)} paq/t</span>
+                            <span className="text-[10px] font-bold text-orange-400 mt-0.5">Usa: {p.actualAvgPacksPerTurn.toFixed(0)} paq/t</span>
                           )}
                         </div>
                       </td>

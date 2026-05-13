@@ -50,7 +50,27 @@ export function getDefaultInputDate(): string {
 export function getShiftHours(turno: string, fecha: string): string[] {
   if (!fecha || !turno) return [];
   
-  const [year, month, day] = fecha.split('-').map(Number);
+  // Extract date component
+  const dateStr = fecha.split('T')[0];
+  
+  let year, month, day;
+  if (dateStr.includes('/')) {
+    const parts = dateStr.split('/').map(Number);
+    if (parts[2] > 1000) { // DD/MM/YYYY
+      [day, month, year] = parts;
+    } else { // YYYY/MM/DD
+      [year, month, day] = parts;
+    }
+  } else {
+    // defaults to YYYY-MM-DD
+    const parts = dateStr.split('-').map(Number);
+    if (parts[0] > 1000) {
+      [year, month, day] = parts;
+    } else {
+      [day, month, year] = parts; // edge case: DD-MM-YYYY
+    }
+  }
+  
   const date = new Date(year, month - 1, day);
   const isSaturday = date.getDay() === 6;
   

@@ -12,7 +12,7 @@ import { useAppConfig } from '../hooks/useAppConfig';
 type Frequency = 'daily' | 'weekly' | 'monthly';
 
 export function EfficiencyReport() {
-  const { availableLines, getFilteredSizes } = useAppConfig();
+  const { availableLines, getFilteredSizes, shouldShowReport } = useAppConfig();
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
@@ -42,53 +42,58 @@ export function EfficiencyReport() {
   const months = useMemo(() => {
     const uniqueMonths = new Set<string>();
     reports.forEach(r => {
-      const logicalDate = getLogicalDate(r);
-      if (logicalDate) {
-        const date = parseISO(logicalDate);
-        uniqueMonths.add(format(date, 'yyyy-MM'));
+      if (shouldShowReport(r)) {
+        const logicalDate = getLogicalDate(r);
+        if (logicalDate) {
+          const date = parseISO(logicalDate);
+          uniqueMonths.add(format(date, 'yyyy-MM'));
+        }
       }
     });
     uniqueMonths.add(format(new Date(), 'yyyy-MM'));
     return Array.from(uniqueMonths).sort().reverse();
-  }, [reports]);
+  }, [reports, shouldShowReport]);
 
   const availableDates = useMemo(() => {
     const uniqueDates = new Set<string>();
     reports.forEach(r => {
-      const logicalDate = getLogicalDate(r);
-      if (logicalDate) {
-        uniqueDates.add(logicalDate);
+      if (shouldShowReport(r)) {
+        const logicalDate = getLogicalDate(r);
+        if (logicalDate) {
+          uniqueDates.add(logicalDate);
+        }
       }
     });
     uniqueDates.add(format(new Date(), 'yyyy-MM-dd'));
     return Array.from(uniqueDates).sort().reverse();
-  }, [reports]);
+  }, [reports, shouldShowReport]);
 
   // Set initial selectedDate to the most recent logical date with data
   useEffect(() => {
     if (availableDates.length > 0 && frequency === 'daily') {
       // Find the latest date that actually has reports
-      const latestWithData = reports.length > 0 ? getLogicalDate(reports[0]) : format(new Date(), 'yyyy-MM-dd');
+      const latestWithData = reports.length > 0 ? getLogicalDate(reports.find(r => shouldShowReport(r)) || reports[0]) : format(new Date(), 'yyyy-MM-dd');
       setSelectedDate(latestWithData);
     }
-  }, [availableDates.length, frequency, reports]);
+  }, [availableDates.length, frequency, reports, shouldShowReport]);
 
   const filteredReports = useMemo(() => {
     const now = new Date();
     if (frequency === 'daily') {
-      return reports.filter(r => getLogicalDate(r) === selectedDate);
+      return reports.filter(r => shouldShowReport(r) && getLogicalDate(r) === selectedDate);
     }
     if (frequency === 'weekly') {
       const monday = startOfWeek(now, { weekStartsOn: 1 });
       const mondayStr = format(monday, 'yyyy-MM-dd');
-      return reports.filter(r => getLogicalDate(r) >= mondayStr);
+      return reports.filter(r => shouldShowReport(r) && getLogicalDate(r) >= mondayStr);
     }
-    if (!selectedMonth) return reports;
+    if (!selectedMonth) return reports.filter(r => shouldShowReport(r));
     return reports.filter(r => {
+      if (!shouldShowReport(r)) return false;
       const logicalDate = getLogicalDate(r);
       return logicalDate && logicalDate.startsWith(selectedMonth);
     });
-  }, [reports, selectedMonth, selectedDate, frequency]);
+  }, [reports, selectedMonth, selectedDate, frequency, shouldShowReport]);
 
   const totalPossibleMinutes = useMemo(() => {
     const now = new Date();
@@ -167,13 +172,13 @@ export function EfficiencyReport() {
 
         report.downtimes?.forEach(dt => {
           const mins = dt.totalMinutes || 0;
-          if (dt.category === 'PARADAS DE LINEA' || dt.category === 'Paradas de Línea') {
+          if (dt.category === 'PARADAS DE LINEA' || dt.category === 'Paradas de Línea' || dt.category === 'Mecánica' || (dt.category === 'PARADAS LINEA')) {
             paradaMecanica += mins;
           }
           if (dt.reason === 'CAMBIO DE SABOR/ FORMATO' || dt.reason === 'CAMBIO DE SABOR' || dt.reason === 'CAMBIO DE FORMATO') {
             cambioFormato += mins;
           }
-          if (dt.category === 'PARADAS OPERATIVAS' || dt.category === 'Operativas' || dt.category === 'TIEMPO NO ASIGNADO') {
+          if (dt.category === 'PARADAS OPERATIVAS' || dt.category === 'Operativas' || dt.category === 'TIEMPO NO ASIGNADO' || dt.category === 'Operativa') {
             paradasOperativas += mins;
           }
         });

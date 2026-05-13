@@ -10,7 +10,7 @@ import { useAppConfig } from '../hooks/useAppConfig';
 import { getLogicalDate } from '../utils';
 
 export function WasteReport() {
-  const { getFilteredSizes, availableLines } = useAppConfig();
+  const { getFilteredSizes, availableLines, shouldShowReport } = useAppConfig();
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [elaboracionReports, setElaboracionReports] = useState<ElaboracionReport[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,6 +52,9 @@ export function WasteReport() {
   const months = useMemo(() => {
     const uniqueMonths = new Set<string>();
     const addMonth = (r: ProductionReport | ElaboracionReport) => {
+      // For ProductionReport, we check historical filter
+      if ('origin' in r && !shouldShowReport(r as ProductionReport)) return;
+      
       const logicalDate = getLogicalDate(r);
       if (logicalDate) {
         const date = parseISO(logicalDate);
@@ -62,15 +65,16 @@ export function WasteReport() {
     elaboracionReports.forEach(addMonth);
     uniqueMonths.add(format(new Date(), 'yyyy-MM'));
     return Array.from(uniqueMonths).sort().reverse();
-  }, [reports, elaboracionReports]);
+  }, [reports, elaboracionReports, shouldShowReport]);
 
   const filteredReports = useMemo(() => {
-    if (!selectedMonth) return reports;
+    if (!selectedMonth) return reports.filter(r => shouldShowReport(r));
     return reports.filter(r => {
+      if (!shouldShowReport(r)) return false;
       const logicalDate = getLogicalDate(r);
       return logicalDate && logicalDate.startsWith(selectedMonth);
     });
-  }, [reports, selectedMonth]);
+  }, [reports, selectedMonth, shouldShowReport]);
 
   const filteredElabReports = useMemo(() => {
     if (!selectedMonth) return elaboracionReports;

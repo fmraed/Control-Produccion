@@ -1,17 +1,19 @@
 import { useState, useEffect, useMemo } from 'react';
 import { collection, query, orderBy, onSnapshot, doc, setDoc, getDoc, addDoc, where, getDocs } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { ProductionReport, MonthlySnapshot, AttendanceRecord } from '../types';
-import { BarChart3, Calendar, Users, Package, Droplets, Info, Edit2, Save, X, UserCircle2, Milk as BottleIcon, Clock, Lock, Unlock, RefreshCw } from 'lucide-react';
-import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addDays } from 'date-fns';
+import { ProductionReport, MonthlySnapshot, AttendanceRecord, ScheduleAuditLog, ProductionPlan } from '../types';
+import { BarChart3, Calendar, Users, Package, Droplets, Info, Edit2, Save, X, UserCircle2, Milk as BottleIcon, Clock, Lock, Unlock, RefreshCw, AlertTriangle, ListChecks, History as HistoryIcon, Trash2 } from 'lucide-react';
+import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addDays, subDays, differenceInHours } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { getLogicalDate } from '../utils';
 import { useAppConfig } from '../hooks/useAppConfig';
 
 export function ManagementSummary() {
-  const { config, availableBrands, availableSizes, availableLines } = useAppConfig();
+  const { config, availableBrands, availableSizes, availableLines, shouldShowReport } = useAppConfig();
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
+  const [auditLogs, setAuditLogs] = useState<ScheduleAuditLog[]>([]);
+  const [plans, setPlans] = useState<ProductionPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
   const [snapshot, setSnapshot] = useState<MonthlySnapshot | null>(null);
@@ -87,42 +89,60 @@ export function ManagementSummary() {
       checkLoading();
     });
 
+    const qAudit = query(collection(db, 'schedule_audit_logs'), orderBy('timestamp', 'desc'));
+    const unsubscribeAudit = onSnapshot(qAudit, (snapshot) => {
+      const auditData: ScheduleAuditLog[] = [];
+      snapshot.forEach((doc) => {
+        auditData.push({ id: doc.id, ...doc.data() } as ScheduleAuditLog);
+      });
+      setAuditLogs(auditData);
+    });
+
+    const qPlans = query(collection(db, 'production_plans'), where('status', '==', 'Published'));
+    const unsubscribePlans = onSnapshot(qPlans, (snapshot) => {
+      const plansData: ProductionPlan[] = [];
+      snapshot.forEach((doc) => {
+        plansData.push({ id: doc.id, ...doc.data() } as ProductionPlan);
+      });
+      setPlans(plansData);
+    });
+
     return () => {
       unsubscribeReports();
       unsubscribeAttendance();
+      unsubscribeAudit();
+      unsubscribePlans();
     };
   }, []);
 
   const months = useMemo(() => {
     const uniqueMonths = new Set<string>();
     reports.forEach(r => {
-      const logicalDate = getLogicalDate(r);
-      if (logicalDate) {
-        const date = parseISO(logicalDate);
-        uniqueMonths.add(format(date, 'yyyy-MM'));
+      if (shouldShowReport(r)) {
+        const logicalDate = getLogicalDate(r);
+        if (logicalDate) {
+          const date = parseISO(logicalDate);
+          uniqueMonths.add(format(date, 'yyyy-MM'));
+        }
       }
     });
     uniqueMonths.add(format(new Date(), 'yyyy-MM'));
     return Array.from(uniqueMonths).sort().reverse();
-  }, [reports]);
+  }, [reports, shouldShowReport]);
 
   const filteredReports = useMemo(() => {
     return reports.filter(r => {
+      if (!shouldShowReport(r)) return false;
       const logicalDate = getLogicalDate(r);
       return logicalDate && logicalDate.startsWith(selectedMonth);
     });
-  }, [reports, selectedMonth]);
+  }, [reports, selectedMonth, shouldShowReport]);
 
   const filteredAttendance = useMemo(() => {
     return attendance.filter(a => {
-      let logicalDate = a.date;
-      if (a.shift === 'Noche' && a.date) {
-         try {
-           logicalDate = format(subDays(parseISO(a.date), 1), 'yyyy-MM-dd');
-         } catch(e) {
-           logicalDate = a.date;
-         }
-      }
+      // Attendance records follow the 22:00 rule: Noche shifts are logged on the calendar day they END.
+      // To filter correctly by logical start month, we must determine the logical date first.
+      const logicalDate = a.shift === 'Noche' ? format(subDays(parseISO(a.date), 1), 'yyyy-MM-dd') : a.date;
       return logicalDate && logicalDate.startsWith(selectedMonth);
     });
   }, [attendance, selectedMonth]);
@@ -130,7 +150,62 @@ export function ManagementSummary() {
   const stats = useMemo(() => {
     // If we have a snapshot, use its stats instead of recalculating
     if (snapshot) {
-      return snapshot.stats;
+      return {
+        turnosTotales: 0,
+        turnosOperativosPlanificados: 0,
+        turnosTrabajadosTotal: 0,
+        turnosPorLinea: { '1': 0, '2': 0, '3': 0 },
+        packsPorLinea: { '1': 0, '2': 0, '3': 0 },
+        totalPacks: 0,
+        extraHours: 0,
+        holidayExtraHours: 0,
+        weekendExtraHours: 0,
+        weekdayExtraHours: 0,
+        cajasUnitarias: 0,
+        relacionLitrosBotellas: 0,
+        producedProductsCount: 0,
+        producedProducts: [],
+        cajasUnitariasFisicasRatio: 0,
+        standardDailyShifts: 1,
+        pendingPlannedShifts: 0,
+        avgPacksPerShift: 0,
+        projectedPendingPacks: 0,
+        projectedTotalPacks: 0,
+        ...snapshot.stats,
+        breakdown: {
+          daysInMonth: 0,
+          holidays: [],
+          holidayNightDuration: 360,
+          standardDailyShifts: 0,
+          extraShiftsDebug: [],
+          weekendExtraHours: 0,
+          weekdayExtraHours: 0,
+          dailyPlan: {},
+          minutesByDay: {},
+          activeProductsList: [],
+          ...(snapshot.stats.breakdown || {})
+        },
+        stability: {
+          index: 100,
+          totalScheduledItems: 0,
+          modifications: 0,
+          deletions: 0,
+          criticalChanges: 0,
+          criticalLogs: [],
+          ...(snapshot.stats.stability || {})
+        },
+        fulfillment: {
+          index: 100,
+          fulfilledItems: 0,
+          partialItems: 0,
+          deviationItems: 0,
+          missedItems: 0,
+          isPartial: false,
+          ...(snapshot.stats.fulfillment || {})
+        },
+        operatorsCrossOver: snapshot.stats.operatorsCrossOver || [],
+        totalActiveProducts: snapshot.stats.totalActiveProducts || 1
+      };
     }
 
     const startDate = startOfMonth(parseISO(`${selectedMonth}-01`));
@@ -292,11 +367,32 @@ export function ManagementSummary() {
     let totalPacks = 0;
     const producedProducts = new Set<string>();
 
+    let totalScrapSoplado = 0;
+    let totalScrapEtiquetado = 0;
+    let totalScrapLlenado = 0;
+    let totalScrapHorno = 0;
+    let totalDesperdicioEtiquetas = 0;
+    let totalDesperdicioTapas = 0;
+    let totalDesperdicioSifones = 0;
+    let totalDesperdicioTermo = 0;
+    let totalBotellasRotas = 0;
+
     filteredReports.forEach(r => {
       const logicalDate = getLogicalDate(r);
       const lDate = parseISO(logicalDate);
       const lDayOfWeek = getDay(lDate);
       const dayKey = format(lDate, 'eeee').toLowerCase();
+      
+      // Accummulate scrap and waste
+      totalScrapSoplado += r.scrapSoplado || 0;
+      totalScrapEtiquetado += r.scrapEtiquetado || 0;
+      totalScrapLlenado += r.scrapLlenado || 0;
+      totalScrapHorno += r.scrapHorno || 0;
+      totalDesperdicioEtiquetas += r.desperdicioEtiquetas || 0;
+      totalDesperdicioTapas += r.desperdicioTapas || 0;
+      totalDesperdicioSifones += r.desperdicioSifones || 0;
+      totalDesperdicioTermo += r.desperdicioTermo || 0;
+      totalBotellasRotas += r.botRotas || 0;
       
       // Check for weekend overtime based on logical date
       // Sunday is always extra. Saturday is extra after 13:00.
@@ -460,15 +556,106 @@ export function ManagementSummary() {
     const projectedPendingPacks = pendingPlannedShifts * avgPacksPerShift;
     const projectedTotalPacks = totalPacks + projectedPendingPacks;
     
+    // Stability Index Calculation
+    const monthlyAuditLogs = auditLogs.filter(log => log.datePlan.startsWith(selectedMonth));
+    const monthlyPlans = plans.filter(p => p.date.startsWith(selectedMonth));
+    
+    // Fulfillment Index Calculation (Cruzado: Planes vs Reportes Reales) - BASADA EN MINUTOS
+    let fulfilledItems = 0;
+    let deviationItems = 0;
+    let missedItems = 0;
+    let partialItems = 0;
+    const planFulfillments: number[] = [];
+
+    const isTodayMonth = selectedMonth === currentMonthStr;
+    
+    // Para el cálculo de cumplimiento, solo evaluamos planes cuya fecha sea <= hoy
+    const plansForFulfillment = monthlyPlans.filter(p => !isTodayMonth || p.date <= todayStr);
+
+    plansForFulfillment.forEach(plan => {
+      // Todos los reportes para este turno/línea (Normalizando nombres de línea)
+      const reportsInShift = filteredReports.filter(r => 
+        getLogicalDate(r) === plan.date && 
+        r.turno === plan.shift && 
+        String(r.linea).replace(/\D/g, '') === String(plan.linea).replace(/\D/g, '')
+      );
+
+      const calculateDuration = (r: ProductionReport) => {
+        const entra = r.entraTurno?.split(':') || ['0', '0'];
+        const sale = r.saleTurno?.split(':') || ['0', '0'];
+        let start = parseInt(entra[0]) * 60 + parseInt(entra[1]);
+        let end = parseInt(sale[0]) * 60 + parseInt(sale[1]);
+        if (start === 0 && end === 0 && r.tiempoTurno) return r.tiempoTurno * 60;
+        if (end < start) end += 1440;
+        return Math.max(0, end - start);
+      };
+
+      const totalShiftMinutes = reportsInShift.reduce((sum, r) => sum + calculateDuration(r), 0);
+
+      if (totalShiftMinutes === 0) {
+        missedItems++;
+        planFulfillments.push(0);
+      } else {
+        const matchedMinutes = reportsInShift.filter(r => {
+           // Normalización extrema para comparación de productos
+           const s1 = String(r.sabor || r.marca || '').trim().toLowerCase();
+           const s2 = String(plan.sabor || plan.marca || '').trim().toLowerCase();
+           const m1 = String(r.marca || '').trim().toLowerCase();
+           const m2 = String(plan.marca || '').trim().toLowerCase();
+           const t1 = Math.round(Number(r.tamano || 0));
+           const t2 = Math.round(Number(plan.tamano || 0));
+           
+           // Si el sabor contiene al otro o son iguales (flexibilidad para "Triple Cola" vs "Cola")
+           const flavorMatch = s1 === s2 || (s1 && s2 && (s1.includes(s2) || s2.includes(s1)));
+           
+           return flavorMatch && (t1 === t2 || !t1 || !t2);
+        }).reduce((sum, r) => sum + calculateDuration(r), 0);
+
+        const ratio = Math.min(1, matchedMinutes / totalShiftMinutes);
+        planFulfillments.push(ratio);
+
+        if (ratio >= 0.98) fulfilledItems++;
+        else if (ratio <= 0.02) deviationItems++;
+        else partialItems++;
+      }
+    });
+
+    const totalFulfillmentItems = plansForFulfillment.length;
+    const fulfillmentIndex = totalFulfillmentItems > 0 
+      ? (planFulfillments.reduce((a, b) => a + b, 0) / totalFulfillmentItems) * 100 
+      : 0;
+
+    const modifications = monthlyAuditLogs.filter(log => log.action === 'update');
+    const deletions = monthlyAuditLogs.filter(log => log.action === 'delete');
+    const totalEvents = modifications.length + deletions.length;
+    
+    let criticalChangesCount = 0;
+    const criticalLogs: ScheduleAuditLog[] = [];
+
+    monthlyAuditLogs.forEach(log => {
+      if (log.action === 'update' || log.action === 'delete') {
+         // Check "Red Zone": less than 24h notice
+         // log.timestamp vs log.datePlan (assuming plan starts at 06:00 of that day)
+         const planDate = parseISO(`${log.datePlan}T06:00:00`);
+         const changeDate = parseISO(log.timestamp);
+         const hoursDifference = differenceInHours(planDate, changeDate);
+         if (hoursDifference < 24) {
+           criticalChangesCount++;
+           criticalLogs.push(log);
+         }
+      }
+    });
+
+    const totalScheduledItems = monthlyPlans.length;
+    const stabilityIndex = totalScheduledItems > 0 
+      ? Math.max(0, 100 - ((totalEvents + criticalChangesCount) / (totalScheduledItems + totalEvents)) * 100) 
+      : 100;
+    
     // Process attendance to count present operators per shift
     filteredAttendance.forEach(a => {
       if (a.status === 'Presente') {
-        let logicalDate = a.date;
-        if (a.shift === 'Noche' && a.date) {
-            try {
-              logicalDate = format(subDays(parseISO(a.date), 1), 'yyyy-MM-dd');
-            } catch(e) {}
-        }
+        // Apply logical date rule to attendance as well: Noche shift is associated with previous day
+        const logicalDate = a.shift === 'Noche' ? format(subDays(parseISO(a.date), 1), 'yyyy-MM-dd') : a.date;
         const crossoverKey = `${logicalDate}_${a.shift}`;
         if (!shiftCrossoverMap[crossoverKey]) {
            shiftCrossoverMap[crossoverKey] = {
@@ -483,10 +670,18 @@ export function ManagementSummary() {
       }
     });
 
+    const getShiftWeight = (s: string) => {
+      const norm = s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      if (norm === 'noche') return 0;
+      if (norm === 'tarde') return 1;
+      if (norm === 'manana') return 2;
+      return 99;
+    };
+
     const shiftCrossoverArray = Object.values(shiftCrossoverMap).map(cross => {
       let maxSimultaneousLines = 0;
       let maxRequiredOperators = 0;
-      let activeLinesAtMax = new Set<string>();
+      let activeLinesAtPeak = new Set<string>();
       
       const events: { time: number, type: 'start' | 'end', line: string, req: number }[] = [];
       
@@ -512,34 +707,33 @@ export function ManagementSummary() {
          return a.time - b.time;
       });
 
-      let lineCounts: Record<string, number> = {};
+      let currentLines = new Set<string>();
       
       events.forEach(ev => {
          if (ev.type === 'start') {
-            lineCounts[ev.line] = (lineCounts[ev.line] || 0) + 1;
+            currentLines.add(ev.line);
          } else {
-            lineCounts[ev.line] = Math.max(0, (lineCounts[ev.line] || 0) - 1);
+            currentLines.delete(ev.line);
          }
          
-         const currentLineArray = Object.keys(lineCounts).filter(l => lineCounts[l] > 0);
-         const currentLineCount = currentLineArray.length;
-         const currentReq = currentLineArray.reduce((sum, l) => sum + (config?.lineOperators?.[l] || 0), 0);
+         const currentLineCount = currentLines.size;
+         // Required is the SUM of requirements of all lines active simultaneously
+         let currentSumReq = 0;
+         currentLines.forEach(l => {
+            currentSumReq += config?.lineOperators?.[l] || 0;
+         });
          
-         if (currentReq > maxRequiredOperators || (currentReq === maxRequiredOperators && currentLineCount > maxSimultaneousLines)) {
-            maxRequiredOperators = currentReq;
+         if (currentLineCount > maxSimultaneousLines) {
             maxSimultaneousLines = currentLineCount;
-            activeLinesAtMax = new Set(currentLineArray);
+         }
+         
+         if (currentSumReq > maxRequiredOperators) {
+            maxRequiredOperators = currentSumReq;
+            activeLinesAtPeak = new Set(currentLines);
          }
       });
       
-      // If no configurations were present but lines ran, activeLinesAtMax might be empty. Fallback to all.
-      if (activeLinesAtMax.size === 0 && cross.activeLines.size > 0 && events.length === 0) {
-         // This is a rare edge case where a report was added without times, or similar.
-         // Or there just wasn't overlapping data but we want to show something.
-         // activeLinesAtMax will just remain empty, or we can use cross.activeLines as fallback.
-      }
-      
-      const activeArr = Array.from(activeLinesAtMax.size > 0 ? activeLinesAtMax : cross.activeLines).sort();
+      const activeArr = Array.from(activeLinesAtPeak.size > 0 ? activeLinesAtPeak : cross.activeLines).sort();
       const inactiveArr = (config?.lines || [])
         .filter(l => config?.enabledLines?.[l] !== false && !cross.activeLines.has(l))
         .sort();
@@ -547,12 +741,21 @@ export function ManagementSummary() {
       return {
         date: cross.date,
         shift: cross.shift,
+        activeLinesCount: maxSimultaneousLines || (cross.activeLines.size > 0 ? 1 : 0),
         activeLines: activeArr,
         inactiveLines: inactiveArr,
         required: maxRequiredOperators,
         present: cross.presentOperators
       };
-    }).sort((a, b) => b.date.localeCompare(a.date) || a.shift.localeCompare(b.shift));
+    }).sort((a, b) => {
+      // Sort by date DESC, then by shift ASC (chronological)
+      const dateDiff = b.date.localeCompare(a.date);
+      if (dateDiff !== 0) return dateDiff;
+      
+      const weightA = getShiftWeight(a.shift);
+      const weightB = getShiftWeight(b.shift);
+      return weightA - weightB;
+    });
     
     const cajasUnitarias = totalLiters / 5.67;
     const relacionLitrosBotellas = totalBottles > 0 ? totalLiters / totalBottles : 0;
@@ -610,11 +813,40 @@ export function ManagementSummary() {
       projectedTotalPacks,
       cajasUnitarias,
       relacionLitrosBotellas,
+      waste: {
+        totalScrapSoplado,
+        totalScrapEtiquetado,
+        totalScrapLlenado,
+        totalScrapHorno,
+        totalDesperdicioEtiquetas,
+        totalDesperdicioTapas,
+        totalDesperdicioSifones,
+        totalDesperdicioTermo,
+        totalBotellasRotas
+      },
       producedProductsCount: producedProducts.size,
       producedProducts: Array.from(producedProducts),
       totalActiveProducts: totalActiveProducts || 1,
       cajasUnitariasFisicasRatio: totalPacks > 0 ? cajasUnitarias / totalPacks : 0,
       operatorsCrossOver: shiftCrossoverArray,
+      stability: {
+        index: Math.round(stabilityIndex),
+        totalEvents,
+        modifications: modifications.length,
+        deletions: deletions.length,
+        criticalChanges: criticalChangesCount,
+        criticalLogs: criticalLogs.slice(0, 5), // Keep top 5 latest critical for display
+        totalScheduledItems
+      },
+      fulfillment: {
+        index: Math.round(fulfillmentIndex),
+        fulfilledItems,
+        deviationItems,
+        missedItems,
+        partialItems,
+        totalPlans: totalFulfillmentItems,
+        isPartial: isTodayMonth
+      },
       breakdown: {
         extraShiftsDebug,
         daysInMonth: daysInMonth.length,
@@ -635,16 +867,32 @@ export function ManagementSummary() {
         projectedTotalPacks
       }
     };
-  }, [filteredReports, selectedMonth, config, availableBrands, availableSizes, snapshot]);
+  }, [filteredReports, filteredAttendance, selectedMonth, config, availableBrands, availableSizes, snapshot, auditLogs, plans]);
 
   // Automatic snapshot saving for past months
   useEffect(() => {
     const currentMonth = format(new Date(), 'yyyy-MM');
-    if (selectedMonth < currentMonth && !snapshot && !loading && !isSnapshotLoading && !isSavingSnapshot && stats && Object.keys(stats).length > 0) {
+    if (selectedMonth < currentMonth && !loading && !isSnapshotLoading && !isSavingSnapshot && !snapshot && stats && Object.keys(stats).length > 0) {
+      // Extra safety check: if we are still loading something, don't save
+      if (loading) return;
+
       const saveSnapshot = async () => {
         setIsSavingSnapshot(true);
         try {
+          // Double check snapshot hasn't been created in the meantime
           const [year, month] = selectedMonth.split('-');
+          const q = query(
+            collection(db, 'monthly_snapshots'), 
+            where('year', '==', parseInt(year)),
+            where('month', '==', month)
+          );
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+             setSnapshot({ id: snap.docs[0].id, ...snap.docs[0].data() } as MonthlySnapshot);
+             setIsSavingSnapshot(false);
+             return;
+          }
+
           const newSnapshot: Omit<MonthlySnapshot, 'id'> = {
             month,
             year: parseInt(year),
@@ -837,6 +1085,153 @@ export function ManagementSummary() {
             </div>
           </div>
 
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mb-6">
+            <div className="bg-slate-50 p-6 border-b border-gray-200">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="bg-slate-200 p-2.5 rounded-xl">
+                    <ListChecks className="w-6 h-6 text-slate-700" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-slate-800 tracking-tight">Estabilidad del Programa</h3>
+                    <p className="text-xs text-slate-500 font-medium">Cumplimiento y cambios en los programas publicados</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-right">
+                    <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Índice de Estabilidad</span>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-4xl font-black ${
+                        stats.stability.index > 90 ? 'text-emerald-600' : 
+                        stats.stability.index > 75 ? 'text-amber-600' : 'text-red-600'
+                      }`}>{stats.stability.index}%</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Items Planificados</span>
+                <span className="text-2xl font-black text-slate-700">{stats.stability.totalScheduledItems}</span>
+              </div>
+              <div className="bg-amber-50 p-4 rounded-xl border border-amber-100">
+                <div className="flex justify-between items-start">
+                  <span className="block text-[10px] font-black text-amber-500 uppercase tracking-widest mb-1">Modificaciones</span>
+                  <Edit2 className="w-3 h-3 text-amber-400" />
+                </div>
+                <span className="text-2xl font-black text-amber-700">{stats.stability.modifications}</span>
+              </div>
+              <div className="bg-rose-50 p-4 rounded-xl border border-rose-100">
+                 <div className="flex justify-between items-start">
+                  <span className="block text-[10px] font-black text-rose-500 uppercase tracking-widest mb-1">Eliminaciones</span>
+                  <Trash2 className="w-3 h-3 text-rose-400" />
+                </div>
+                <span className="text-2xl font-black text-rose-700">{stats.stability.deletions}</span>
+              </div>
+              <div className="bg-red-600 p-4 rounded-xl shadow-lg shadow-red-100">
+                <div className="flex justify-between items-start">
+                  <span className="block text-[10px] font-black text-red-100 uppercase tracking-widest mb-1">Zona Roja (&lt;24h)</span>
+                  <AlertTriangle className="w-4 h-4 text-white animate-pulse" />
+                </div>
+                <span className="text-2xl font-black text-white">{stats.stability.criticalChanges}</span>
+              </div>
+            </div>
+
+            {stats.stability.criticalLogs.length > 0 && (
+              <div className="px-6 pb-6">
+                <div className="bg-red-50 rounded-xl border border-red-100 overflow-hidden">
+                  <div className="bg-red-100/50 px-4 py-2 flex items-center gap-2">
+                    <HistoryIcon className="w-3 h-3 text-red-600" />
+                    <span className="text-[10px] font-black text-red-700 uppercase tracking-wider">Últimos Cambios Críticos</span>
+                  </div>
+                  <div className="divide-y divide-red-100">
+                    {stats.stability.criticalLogs.map((log: any, i: number) => (
+                      <div key={i} className="p-3 flex items-center justify-between text-[11px]">
+                        <div className="flex flex-col">
+                          <span className="font-bold text-red-900">
+                            Cambio para el {format(parseISO(log.datePlan), 'dd/MM')}
+                          </span>
+                          <span className="text-red-600/70">
+                            Realizado el {format(parseISO(log.timestamp), 'dd/MM HH:mm')}
+                          </span>
+                        </div>
+                        <div className="flex flex-col items-end">
+                          {log.changes?.map((c: any, ci: number) => (
+                            <span key={ci} className="text-red-800 italic">
+                              {c.field}: {c.oldValue} → {c.newValue}
+                            </span>
+                          ))}
+                          {log.action === 'delete' && <span className="text-red-800 font-bold uppercase text-[9px]">Eliminado</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mb-6">
+            <div className="bg-indigo-50 p-6 border-b border-indigo-200">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="bg-indigo-200 p-2.5 rounded-xl">
+                    <Calendar className="w-6 h-6 text-indigo-700" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-indigo-800 tracking-tight">Cumplimiento del Programa</h3>
+                    <p className="text-xs text-indigo-500 font-medium">Ejecución real vs planificación publicada (Sabor/Línea)</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-right">
+                    <span className="block text-[10px] font-black text-indigo-400 uppercase tracking-widest">
+                      Índice de Cumplimiento {stats.fulfillment.isPartial ? '(Al día)' : ''}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-4xl font-black ${
+                        stats.fulfillment.index > 90 ? 'text-emerald-600' : 
+                        stats.fulfillment.index > 75 ? 'text-amber-600' : 'text-red-600'
+                      }`}>{stats.fulfillment.index}%</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100 flex flex-col items-center text-center">
+                <span className="block text-[10px] font-black text-emerald-500 uppercase tracking-widest mb-1">Totalmente Cumplidos</span>
+                <span className="text-3xl font-black text-emerald-700">{stats.fulfillment.fulfilledItems}</span>
+                <span className="text-[10px] text-emerald-600 font-medium">Sabor y Línea 100%</span>
+              </div>
+              <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 flex flex-col items-center text-center">
+                <span className="block text-[10px] font-black text-blue-500 uppercase tracking-widest mb-1">Parciales</span>
+                <span className="text-3xl font-black text-blue-700">{stats.fulfillment.partialItems}</span>
+                <span className="text-[10px] text-blue-600 font-medium">Cambio de sabor en el turno</span>
+              </div>
+              <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 flex flex-col items-center text-center">
+                <span className="block text-[10px] font-black text-amber-500 uppercase tracking-widest mb-1">Desvíos Totales</span>
+                <span className="text-3xl font-black text-amber-700">{stats.fulfillment.deviationItems}</span>
+                <span className="text-[10px] text-amber-600 font-medium">Se produjo otro sabor</span>
+              </div>
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex flex-col items-center text-center">
+                <span className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">No Ejecutados</span>
+                <span className="text-3xl font-black text-slate-700">{stats.fulfillment.missedItems}</span>
+                <span className="text-[10px] text-slate-600 font-medium">Sin reporte en el turno</span>
+              </div>
+            </div>
+            
+            <div className="px-6 pb-6 text-center">
+              <p className="text-[10px] text-gray-400 italic">
+                * El cálculo cruza cada item publicado en el programa con los partes de producción cargados para esa misma fecha, turno y línea.
+                {stats.fulfillment.isPartial && " Para el mes en curso, solo se consideran los planes hasta la fecha de hoy."}
+              </p>
+            </div>
+          </div>
+
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="bg-gray-50 p-4 border-b border-gray-200 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -853,7 +1248,7 @@ export function ManagementSummary() {
                     <div key={idx} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 rounded-xl border border-gray-100 bg-gray-50 gap-2">
                       <div className="flex flex-col">
                          <span className="text-xs font-black text-gray-800 uppercase">{format(parseISO(cross.date), 'dd/MM/yyyy')} - {cross.shift}</span>
-                         <span className="text-[10px] text-emerald-600 font-bold mt-1">Líneas Activas: {cross.activeLines.length > 0 ? cross.activeLines.join(', ') : 'Ninguna'}</span>
+                         <span className="text-[10px] text-emerald-600 font-bold mt-1">Líneas Simultáneas: {cross.activeLinesCount} ({cross.activeLines.length > 0 ? cross.activeLines.join(', ') : 'Ninguna'})</span>
                          {cross.inactiveLines.length > 0 && (
                             <span className="text-[10px] text-gray-400 font-medium">Líneas Abajo: {cross.inactiveLines.join(', ')}</span>
                          )}
@@ -1107,11 +1502,11 @@ export function ManagementSummary() {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between border-b pb-1">
                     <span className="text-gray-500">Fines de Semana:</span>
-                    <span className="font-bold">{stats.breakdown.weekendExtraShifts}</span>
+                    <span className="font-bold">{stats.breakdown.weekendExtraHours?.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 }) || '0'} hs</span>
                   </div>
                   <div className="flex justify-between border-b pb-1">
                     <span className="text-gray-500">Excedentes Plan:</span>
-                    <span className="font-bold">{stats.breakdown.weekdayExtraShifts}</span>
+                    <span className="font-bold">{stats.breakdown.weekdayExtraHours?.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 }) || '0'} hs</span>
                   </div>
                   <p className="text-[10px] text-gray-400 mt-2 italic">
                     * Fines de semana: Sábados {'>'} 13hs y Domingos.<br/>

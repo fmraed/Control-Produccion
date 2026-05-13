@@ -17,7 +17,10 @@ import {
   BarChart3, 
   Users,
   DraftingCompass,
-  Database
+  Database,
+  History,
+  Upload,
+  Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Dashboard } from './components/Dashboard';
@@ -38,6 +41,11 @@ import { ProductionScheduler } from './components/ProductionScheduler';
 import { SyrupReport } from './components/SyrupReport';
 import { GoalFulfillment } from './components/GoalFulfillment';
 import { StockControl } from './components/StockControl';
+import { HistoricalReport } from './components/HistoricalReport';
+import { HistoricalImporter } from './components/HistoricalImporter';
+import { HistoricalExporter } from './components/HistoricalExporter';
+import { HistoricalElaboracionImporter } from './components/HistoricalElaboracionImporter';
+import { HistoricalElaboracionExporter } from './components/HistoricalElaboracionExporter';
 import { Auth } from './components/Auth';
 import { ProductionReport, ElaboracionReport, UserProfile, UserRole } from './types';
 import { useRolePermissions } from './hooks/useRolePermissions';
@@ -47,7 +55,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null | undefined>(null);
   const [loading, setLoading] = useState(true);
-  const [currentView, setCurrentView] = useState<'dashboard' | 'new' | 'consolidated' | 'waste' | 'downtime' | 'pareto' | 'efficiency' | 'gantt' | 'admin' | 'elaboracion' | 'elaboracion_history' | 'profile' | 'live' | 'management_summary' | 'personnel' | 'scheduler' | 'syrup' | 'goal_fulfillment' | 'stock_control'>('dashboard');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'new' | 'consolidated' | 'waste' | 'downtime' | 'pareto' | 'efficiency' | 'gantt' | 'admin' | 'elaboracion' | 'elaboracion_history' | 'profile' | 'live' | 'management_summary' | 'personnel' | 'scheduler' | 'syrup' | 'goal_fulfillment' | 'stock_control' | 'historical_report' | 'historical_importer' | 'historical_exporter' | 'historical_elab_importer' | 'historical_elab_exporter'>('dashboard');
   const [editingReport, setEditingReport] = useState<ProductionReport | undefined>(undefined);
   const [editingElabReport, setEditingElabReport] = useState<ElaboracionReport | undefined>(undefined);
   const [paretoLine, setParetoLine] = useState<string>('');
@@ -273,6 +281,11 @@ export default function App() {
             {currentView === 'syrup' && 'Balance de Jarabes'}
             {currentView === 'goal_fulfillment' && 'Cumplimiento de Objetivos'}
             {currentView === 'stock_control' && 'Control de Stock y Salidas'}
+            {currentView === 'historical_report' && 'Histórico'}
+            {currentView === 'historical_importer' && 'Importación Histórica (Envasado)'}
+            {currentView === 'historical_exporter' && 'Exportación Histórica (Envasado)'}
+            {currentView === 'historical_elab_importer' && 'Importación Histórica (Elaboración)'}
+            {currentView === 'historical_elab_exporter' && 'Exportación Histórica (Elaboración)'}
             {currentView === 'admin' && 'Administración'}
             {currentView === 'profile' && 'Mi Perfil'}
             {currentView === 'new' && (editingReport ? 'Editar Parte de Producción' : 'Nuevo Parte de Producción')}
@@ -480,6 +493,56 @@ export default function App() {
                           Gantt Prod.
                         </button>
                       )}
+
+                      <button
+                        onClick={() => { setCurrentView('historical_report'); setActiveMenu(null); }}
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                          currentView === 'historical_report' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        <History className="w-4 h-4" />
+                        Histórico
+                      </button>
+
+                      <button
+                        onClick={() => { setCurrentView('historical_importer'); setActiveMenu(null); }}
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                          currentView === 'historical_importer' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        <Upload className="w-4 h-4" />
+                        Imp. Hist. (Envasado)
+                      </button>
+
+                      <button
+                        onClick={() => { setCurrentView('historical_exporter'); setActiveMenu(null); }}
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                          currentView === 'historical_exporter' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        <Download className="w-4 h-4" />
+                        Exp. Hist. (Envasado)
+                      </button>
+
+                      <button
+                        onClick={() => { setCurrentView('historical_elab_importer'); setActiveMenu(null); }}
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                          currentView === 'historical_elab_importer' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        <Upload className="w-4 h-4" />
+                        Imp. Hist. (Elab)
+                      </button>
+
+                      <button
+                        onClick={() => { setCurrentView('historical_elab_exporter'); setActiveMenu(null); }}
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                          currentView === 'historical_elab_exporter' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        <Download className="w-4 h-4" />
+                        Exp. Hist. (Elab)
+                      </button>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -590,6 +653,21 @@ export default function App() {
         )}
         {currentView === 'stock_control' && (
           <StockControl />
+        )}
+        {currentView === 'historical_report' && (
+          <HistoricalReport />
+        )}
+        {currentView === 'historical_importer' && (
+          <HistoricalImporter />
+        )}
+        {currentView === 'historical_exporter' && (
+          <HistoricalExporter />
+        )}
+        {currentView === 'historical_elab_importer' && (
+          <HistoricalElaboracionImporter />
+        )}
+        {currentView === 'historical_elab_exporter' && (
+          <HistoricalElaboracionExporter />
         )}
         {currentView === 'management_summary' && (
           <ManagementSummary />

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { ProductionPlan, ProductionReport } from '../types';
+import { ProductionPlan, ProductionReport, ScheduleAuditLog } from '../types';
 import { FLAVOR_COLORS, SABORES } from '../constants';
 import { 
   CalendarDays, 
@@ -134,6 +134,32 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
 
   const handleUpdatePlan = async (id: string, updates: Partial<ProductionPlan>) => {
     try {
+      const existingPlan = plans.find(p => p.id === id);
+      if (existingPlan && existingPlan.status === 'Published') {
+        // Track changes
+        const changes: any[] = [];
+        Object.entries(updates).forEach(([key, value]) => {
+          if ((existingPlan as any)[key] !== value) {
+            changes.push({
+              field: key,
+              oldValue: (existingPlan as any)[key],
+              newValue: value
+            });
+          }
+        });
+
+        if (changes.length > 0) {
+          const auditLog: Omit<ScheduleAuditLog, 'id'> = {
+            planId: id,
+            action: updates.status === 'Published' && existingPlan.status === 'Published' ? 'update' : (updates.status === 'Published' ? 'publish' : 'update'),
+            datePlan: existingPlan.date,
+            timestamp: new Date().toISOString(),
+            changes,
+            authorId: auth.currentUser?.uid || ''
+          };
+          await addDoc(collection(db, 'schedule_audit_logs'), auditLog);
+        }
+      }
       await updateDoc(doc(db, 'production_plans', id), updates);
     } catch (error) {
       console.error("Error updating plan:", error);
@@ -215,6 +241,17 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
 
   const handleDeletePlan = async (id: string) => {
     try {
+      const existingPlan = plans.find(p => p.id === id);
+      if (existingPlan && existingPlan.status === 'Published') {
+        const auditLog: Omit<ScheduleAuditLog, 'id'> = {
+          planId: id,
+          action: 'delete',
+          datePlan: existingPlan.date,
+          timestamp: new Date().toISOString(),
+          authorId: auth.currentUser?.uid || ''
+        };
+        await addDoc(collection(db, 'schedule_audit_logs'), auditLog);
+      }
       await deleteDoc(doc(db, 'production_plans', id));
     } catch (error) {
       console.error("Error deleting plan:", error);
@@ -224,14 +261,26 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
   const handlePublishAll = async () => {
     setIsSaving(true);
     const batch = writeBatch(db);
-    plans
-      .filter(p => p.status === 'Draft')
-      .forEach(p => {
-        batch.update(doc(db, 'production_plans', p.id!), { status: 'Published' });
-      });
+    const draftPlans = plans.filter(p => p.status === 'Draft');
+    
+    draftPlans.forEach(p => {
+      batch.update(doc(db, 'production_plans', p.id!), { status: 'Published' });
+    });
     
     try {
       await batch.commit();
+      
+      // Log publications
+      for (const p of draftPlans) {
+        const auditLog: Omit<ScheduleAuditLog, 'id'> = {
+          planId: p.id!,
+          action: 'publish',
+          datePlan: p.date,
+          timestamp: new Date().toISOString(),
+          authorId: auth.currentUser?.uid || ''
+        };
+        await addDoc(collection(db, 'schedule_audit_logs'), auditLog);
+      }
     } catch (error) {
       console.error("Error publishing plans:", error);
     } finally {
@@ -828,23 +877,46 @@ function SchedulerConfig({ config, brands, sizes, lines, reports }: {
   const [defaults, setDefaults] = useState<Record<string, any>>(config?.schedulerDefaults || {});
   const [calDefaults, setCalDefaults] = useState<Record<number, number>>(config?.calibreDefaults || {});
   const [isSaving, setIsSaving] = useState(false);
+  const [reports30, setReports30] = useState<ProductionReport[]>([]);
 
-  // Calculate monthly averages per line
+  useEffect(() => {
+    const thirtyDaysAgo = format(subDays(new Date(), 30), 'yyyy-MM-dd');
+    const q = query(
+      collection(db, 'production_reports'),
+      where('fecha', '>=', thirtyDaysAgo)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      setReports30(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProductionReport)));
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (config?.schedulerDefaults) setDefaults(config.schedulerDefaults);
+    if (config?.calibreDefaults) setCalDefaults(config.calibreDefaults);
+  }, [config?.schedulerDefaults, config?.calibreDefaults]);
+
+  // Calculate monthly averages per line (like Effectiveness report: (total / Marcha Bruta) * 480)
   const monthlyAverages = useMemo(() => {
     const averages: Record<string, number> = {};
     lines.forEach(line => {
-      const lineReports = reports.filter(r => r.linea === line);
+      const lineReports = reports30.filter(r => r.linea === line);
       if (lineReports.length === 0) {
         averages[line] = 0;
         return;
       }
-      const totalPacks = lineReports.reduce((sum, r) => sum + (r.paquetes || 0), 0);
-      // Group by date/shift to count active shifts
-      const activeShifts = new Set(lineReports.map(r => `${r.fecha}-${r.turno}`)).size;
-      averages[line] = activeShifts > 0 ? Math.round(totalPacks / activeShifts) : 0;
+      let totalPacks = 0;
+      let totalMarchaBruta = 0;
+      
+      lineReports.forEach(r => {
+        totalPacks += (r.paquetes || 0);
+        totalMarchaBruta += (r.tiempoTurno || 0);
+      });
+      
+      averages[line] = totalMarchaBruta > 0 ? Math.round((totalPacks / totalMarchaBruta) * 480) : 0;
     });
     return averages;
-  }, [reports, lines]);
+  }, [reports30, lines]);
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -899,7 +971,7 @@ function SchedulerConfig({ config, brands, sizes, lines, reports }: {
               <th className="px-6 py-4 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Marca</th>
               <th className="px-6 py-4 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Tamaño</th>
               <th className="px-6 py-4 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Packs Previstos</th>
-              <th className="px-6 py-4 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest bg-indigo-50/30">Promedio Mes</th>
+              <th className="px-6 py-4 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest bg-indigo-50/30">Promedio por Turno</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -1002,7 +1074,7 @@ function SchedulerConfig({ config, brands, sizes, lines, reports }: {
       <div className="p-6 bg-amber-50 border-t border-amber-100 flex gap-4">
         <Info className="w-5 h-5 text-amber-600 shrink-0" />
         <p className="text-xs text-amber-700 leading-relaxed">
-          Los <strong>Packs Previstos</strong> se cargarán automáticamente al crear un nuevo plan. El <strong>Promedio Mes</strong> se calcula automáticamente en base a los últimos 30 días de reportes de producción.
+          Los <strong>Packs Previstos</strong> se cargarán automáticamente al crear un nuevo plan. El <strong>Promedio por Turno</strong> se calcula dividiendo el total de packs fabricados por la cantidad de turnos productivos del rango cargado.
         </p>
       </div>
     </div>

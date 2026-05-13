@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { collection, addDoc, query, where, orderBy, limit, getDocs, doc, updateDoc, writeBatch, deleteDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Save, X, Plus, Trash2, Clock, Activity, AlertCircle, FileText, CheckCircle2, Printer } from 'lucide-react';
+import { Save, X, Plus, Trash2, Clock, Activity, AlertCircle, FileText, CheckCircle2, Printer, ClipboardList } from 'lucide-react';
 import { ProductionReport, HourlyProduction, Downtime } from '../types';
 import { 
   SUPERVISORES, TURNOS, LINEAS, MARCAS, SABORES, TAMANOS, SABORES_SIN_JARABE,
@@ -13,25 +13,8 @@ import {
 } from '../constants';
 import { useAppConfig } from '../hooks/useAppConfig';
 import { getShiftHours, getDefaultInputDate } from '../utils';
-import { printProductionReport } from '../utils/printReport';
-
-const CO2_VOLUMES: Record<string, Record<string, number>> = {
-  'Torasso': {
-    'Cola': 4.2,
-    'Citrus': 2.5,
-    'Lima Limon': 4.0,
-    'Limonada': 4.0,
-    'Manzana': 3.4,
-    'Naranja': 3.2,
-    'Pomelo': 3.5,
-    'Pomelo Blanco': 3.5,
-    'Granadina': 3.4,
-    'Agua Tónica': 3.9,
-    'Soda Sifon': 5.1,
-    'Soda': 4.5,
-    'Agua': 0
-  }
-};
+import { printProductionReport, printInternalReport } from '../utils/printReport';
+import { CO2_VOLUMES } from '../constants';
 
 // DOWNTIME_CATEGORIES imported from constants.ts
 
@@ -48,7 +31,7 @@ function getAvailableMinutesInHour(horaStr: string, entraTurno?: string, saleTur
 
   let entraH = -1, entraM = 0;
   if (entraTurno) {
-    const normalizedEntra = entraTurno.replace(/[,.]/g, ':');
+    const normalizedEntra = String(entraTurno).replace(/[,.]/g, ':');
     const parts = normalizedEntra.split(':');
     entraH = parseInt(parts[0]) || 0;
     entraM = parseInt(parts[1]) || 0;
@@ -57,7 +40,7 @@ function getAvailableMinutesInHour(horaStr: string, entraTurno?: string, saleTur
 
   let saleH = -1, saleM = 0;
   if (saleTurno) {
-    const normalizedSale = saleTurno.replace(/[,.]/g, ':');
+    const normalizedSale = String(saleTurno).replace(/[,.]/g, ':');
     const parts = normalizedSale.split(':');
     saleH = parseInt(parts[0]) || 0;
     saleM = parseInt(parts[1]) || 0;
@@ -94,10 +77,10 @@ function getAvailableMinutesInHour(horaStr: string, entraTurno?: string, saleTur
   }
 }
 
-function parseTime(t: string): number {
+function parseTime(t: any): number {
   if (!t) return 0;
   // Permite formatos como "24:00", "24.00", "24,00"
-  const normalized = t.replace(/[,.]/g, ':');
+  const normalized = String(t).replace(/[,.]/g, ':');
   const parts = normalized.split(':');
   let h = parseInt(parts[0]) || 0;
   let m = parseInt(parts[1]) || 0;
@@ -148,7 +131,7 @@ function getBotellasTotales(report: any): number {
 function calculateLiveEfficiency(report: any, botellasTotales: number): number {
   if (!report.entraTurno || !report.velocidad || botellasTotales <= 0) return 0;
   
-  const entraParts = report.entraTurno.split(':');
+  const entraParts = String(report.entraTurno).split(':');
   if (entraParts.length !== 2) return 0;
   
   let startHour = parseInt(entraParts[0], 10);
@@ -156,7 +139,7 @@ function calculateLiveEfficiency(report: any, botellasTotales: number): number {
   
   // If saleTurno is provided, use it as the end time
   if (report.saleTurno) {
-    const saleParts = report.saleTurno.split(':');
+    const saleParts = String(report.saleTurno).split(':');
     if (saleParts.length === 2) {
       let endHour = parseInt(saleParts[0], 10);
       const endMin = parseInt(saleParts[1], 10);
@@ -165,7 +148,7 @@ function calculateLiveEfficiency(report: any, botellasTotales: number): number {
       if (totalMinutes > 0) {
         const expectedBottles = totalMinutes * report.velocidad;
         if (expectedBottles > 0) {
-          return Number(((botellasTotales / expectedBottles) * 100).toFixed(1));
+          return Math.round((botellasTotales / expectedBottles) * 100);
         }
       }
     }
@@ -197,19 +180,19 @@ function calculateLiveEfficiency(report: any, botellasTotales: number): number {
   const expectedBottles = totalMinutes * report.velocidad;
   if (expectedBottles <= 0) return 0;
   
-  return Number(((botellasTotales / expectedBottles) * 100).toFixed(1));
+  return Math.round((botellasTotales / expectedBottles) * 100);
 }
 
 // Función para detectar turno automáticamente
-const detectTurno = (timeStr: string, dateStr: string): string => {
+const detectTurno = (timeStr: any, dateStr: any): string => {
   if (!timeStr || !dateStr) return '';
-  const parts = timeStr.split(':');
+  const parts = String(timeStr).split(':');
   const hours = parseInt(parts[0], 10);
   const minutes = parts.length > 1 ? parseInt(parts[1], 10) : 0;
   const timeInMinutes = hours * 60 + (isNaN(minutes) ? 0 : minutes);
   
   // Parse date manually YYYY-MM-DD to avoid timezone issues
-  const [year, month, day] = dateStr.split('-').map(Number);
+  const [year, month, day] = String(dateStr).split('-').map(Number);
   const date = new Date(year, month - 1, day);
   const dayOfWeek = date.getDay(); // 0 = Domingo, 1 = Lunes, ..., 6 = Sábado
   const isSaturday = dayOfWeek === 6;
@@ -297,7 +280,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
     getFilteredSizes, 
     availableBrands, 
     availableLines, 
-    availableSupervisors 
+    availableSupervisors
   } = useAppConfig();
   const [activeTab, setActiveTab] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -370,6 +353,27 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
     };
   };
 
+  let initialHourlyProduction = initialData?.hourlyProduction || (initialData ? createDefaultHourlyProduction(initialData.turno, initialData.fecha) : undefined);
+  if (initialHourlyProduction && initialData?.origin === 'historical') {
+    const needsFix = initialHourlyProduction.some(hp => hp.botMin > 0 && hp.marcador === 0);
+    const needsMinProdFix = initialHourlyProduction.some(hp => hp.botMin > 0 && (!hp.minProd || hp.minProd === 0));
+    
+    if (needsFix || needsMinProdFix) {
+      let currentMarcador = initialData.contInicial || 0;
+      const velocidad = initialData.velocidad || 0;
+      initialHourlyProduction = initialHourlyProduction.map(hp => {
+        if (hp.botMin > 0) {
+          currentMarcador += hp.botMin;
+        }
+        return { 
+          ...hp, 
+          marcador: needsFix ? currentMarcador : hp.marcador,
+          minProd: (needsMinProdFix && hp.botMin > 0 && velocidad) ? Math.round((hp.botMin / velocidad) * 10) / 10 : hp.minProd
+        };
+      });
+    }
+  }
+
   const { register, control, handleSubmit, watch, setValue, getValues, trigger, reset, formState: { errors, isDirty } } = useForm<ReportFormValues>({
     resolver: zodResolver(reportSchema),
     defaultValues: {
@@ -384,7 +388,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
         desperdicioTapas: initialData.desperdicioTapas || 0,
         desperdicioSifones: initialData.desperdicioSifones || 0,
         desperdicioTermo: initialData.desperdicioTermo || 0,
-        hourlyProduction: initialData.hourlyProduction || createDefaultHourlyProduction(initialData.turno, initialData.fecha),
+        hourlyProduction: initialHourlyProduction,
         downtimes: DOWNTIME_CATEGORIES.flatMap(cat => 
           cat.reasons.map(reason => {
             let existing = initialData.downtimes?.find(d => d.reason === reason);
@@ -578,17 +582,33 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
   };
 
   // Efecto para calcular Velocidad automáticamente
+  const lastLineaTamano = useRef<Record<string, string>>({});
+  
   useEffect(() => {
     if (!isDraftLoaded) return;
     reports?.forEach((report, index) => {
       if (report.linea && report.tamano) {
         const vel = config?.velocidadMatrix?.[report.linea]?.[report.tamano] || 0;
-        if (report.velocidad !== vel) {
-          setValue(`reports.${index}.velocidad`, vel, { shouldValidate: true });
+        const currentKey = `${report.linea}-${report.tamano}`;
+        const previousKey = lastLineaTamano.current[index];
+        
+        if (previousKey === undefined) {
+          // Primera carga
+          lastLineaTamano.current[index] = currentKey;
+          // Si no tiene velocidad (ej. nuevo), se la asignamos
+          if (!report.velocidad && vel > 0) {
+            setValue(`reports.${index}.velocidad`, vel, { shouldValidate: true });
+          }
+        } else if (previousKey !== currentKey) {
+          // Cambió la línea o tamaño
+          lastLineaTamano.current[index] = currentKey;
+          if (vel > 0) {
+            setValue(`reports.${index}.velocidad`, vel, { shouldValidate: true });
+          }
         }
       }
     });
-  }, [reports, setValue]);
+  }, [reports, setValue, isDraftLoaded, config]);
 
   // Efecto para calcular Tiempo Bruto automáticamente
   useEffect(() => {
@@ -601,7 +621,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
         }
       }
     });
-  }, [reports, setValue]);
+  }, [reports, setValue, isDraftLoaded]);
 
   // Efecto para obtener el parcial anterior y jarabe inicial
   useEffect(() => {
@@ -612,7 +632,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
         // no sobrescribimos el parcialAnterior si el sabor/tamaño es el mismo que el original.
         if (initialData && index === 0 && 
             report.sabor === initialData.sabor && 
-            report.tamano === initialData.tamano &&
+            Number(report.tamano) === Number(initialData.tamano) &&
             report.linea === initialData.linea) {
           return;
         }
@@ -643,7 +663,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
             let jarabeInicial = 0;
             if (!snapshot.empty) {
               const lastReport = snapshot.docs[0].data();
-              if (lastReport.sabor === report.sabor && lastReport.tamano === report.tamano) {
+              if (lastReport.sabor === report.sabor && Number(lastReport.tamano) === Number(report.tamano)) {
                 parcialAnterior = lastReport.parcialActual || 0;
                 jarabeInicial = lastReport.jarabeFinal || 0;
               }
@@ -658,7 +678,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
               const fallbackQ = query(
                 collection(db, 'production_reports'),
                 orderBy('createdAt', 'desc'),
-                limit(50)
+                limit(300)
               );
               const fallbackSnapshot = await getDocs(fallbackQ);
               const matchingReport = fallbackSnapshot.docs
@@ -667,7 +687,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
               
               let parcialAnterior = 0;
               let jarabeInicial = 0;
-              if (matchingReport && matchingReport.sabor === report.sabor && matchingReport.tamano === report.tamano) {
+              if (matchingReport && matchingReport.sabor === report.sabor && Number(matchingReport.tamano) === Number(report.tamano)) {
                 parcialAnterior = matchingReport.parcialActual || 0;
                 jarabeInicial = matchingReport.jarabeFinal || 0;
               }
@@ -676,13 +696,13 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
               lastCalculated.current[key] = { parcialAnterior, jarabeInicial };
             } catch (fallbackError) {
               console.error("Fallback error:", fallbackError);
-              lastCalculated.current[key] = undefined;
+              lastCalculated.current[key] = { parcialAnterior: 0, jarabeInicial: 0 };
             }
           }
         } else if (lastCalculated.current[key] !== 'fetching') {
           // If it's already cached, we still need to update the form because the user might have switched back from another flavor
           const cached = lastCalculated.current[key];
-          if (report.parcialAnterior !== cached.parcialAnterior) {
+          if (isNewFlavor && report.parcialAnterior !== cached.parcialAnterior) {
             setValue(`reports.${index}.parcialAnterior`, cached.parcialAnterior, { shouldValidate: true });
           }
           // Only auto-update jarabeInicial if the flavor actually changed.
@@ -693,7 +713,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
         }
       }
     });
-  }, [reports, setValue]);
+  }, [reports, setValue, isDraftLoaded]);
 
   // Efecto para actualizar horas según el turno y el día
   useEffect(() => {
@@ -725,19 +745,26 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
       
       // Solo resetear si la estructura de horas cambió realmente
       if (JSON.stringify(horas) !== JSON.stringify(currentHoras)) {
-        const newHourlyProduction = horas.map(hora => ({
-          hora,
-          marcador: 0,
-          botMin: 0,
-          minProd: 60,
-        }));
+        const existingData = report.hourlyProduction || [];
+        const newHourlyProduction = horas.map((hora, hIdx) => {
+          const existingHour = existingData[hIdx];
+          return {
+            hora,
+            marcador: existingHour ? existingHour.marcador : 0,
+            botMin: existingHour ? existingHour.botMin : 0,
+            minProd: existingHour ? (existingHour.minProd || 60) : 60,
+          };
+        });
         setValue(`reports.${index}.hourlyProduction`, newHourlyProduction);
         
-        // También inicializar minutos de paradas para las nuevas horas
+        // También inicializar minutos de paradas para las nuevas horas,
+        // intentando preservar la data existente si es posible
         report.downtimes?.forEach((d, dIndex) => {
-          const newMinutes = new Array(horas.length).fill('');
+          const existingMinutes = d.minutes || [];
+          const newMinutes = horas.map((_, hIdx) => {
+            return existingMinutes[hIdx] !== undefined ? existingMinutes[hIdx] : '';
+          });
           setValue(`reports.${index}.downtimes.${dIndex}.minutes`, newMinutes);
-          setValue(`reports.${index}.downtimes.${dIndex}.totalMinutes`, 0);
         });
       }
     });
@@ -771,7 +798,12 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
             return velocidad ? Math.round((botMin / velocidad) * 10) / 10 : 0;
           });
 
-          const newSinRegistrarMinutes = hourlyData.map((h, hIndex) => {
+          let totalAvailable = 0;
+          let totalMinProd = 0;
+          let totalOtherDowntime = 0;
+          let hasMarkers = false;
+
+          const hourlyDeficits = hourlyData.map((h, hIndex) => {
             let currentMarcador = parseValue(h.marcador);
             // Si es la última hora y no hay marcador, intentar usar el marcador final
             if (currentMarcador === 0 && hIndex === hourlyData.length - 1 && contFinal > 0) {
@@ -780,10 +812,10 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
             
             // Si no hay marcador en esta hora, no calculamos sin registrar aún
             if (currentMarcador === 0) return 0;
+            hasMarkers = true;
 
             const minProd = minProdArray[hIndex] || 0;
             const availableMinutes = getAvailableMinutesInHour(h.hora, report.entraTurno, report.saleTurno);
-            const totalDowntimeAvailable = availableMinutes - minProd;
             
             let sumOtherDowntime = 0;
             report.downtimes?.forEach((d, dIndex) => {
@@ -793,13 +825,24 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
               }
             });
             
-            return Math.round(Math.max(0, totalDowntimeAvailable - sumOtherDowntime));
+            totalAvailable += availableMinutes;
+            totalMinProd += minProd;
+            totalOtherDowntime += sumOtherDowntime;
+
+            return availableMinutes - minProd - sumOtherDowntime;
           });
           
-          const key = `sinRegistrar-${index}`;
-          if (JSON.stringify(lastCalculated.current[key]) !== JSON.stringify(newSinRegistrarMinutes)) {
-            setValue(`reports.${index}.downtimes.${sinRegistrarIndex}.minutes`, newSinRegistrarMinutes);
-            lastCalculated.current[key] = newSinRegistrarMinutes;
+          let newSinRegistrarMinutes = new Array(hourlyData.length).fill('');
+
+          if (hasMarkers) {
+            const totalSinRegistrar = Math.round(Math.max(0, totalAvailable - totalMinProd - totalOtherDowntime));
+            
+            const key = `sinRegistrarTotal-${index}`;
+            if (lastCalculated.current[key] !== totalSinRegistrar) {
+              setValue(`reports.${index}.downtimes.${sinRegistrarIndex}.minutes`, newSinRegistrarMinutes);
+              setValue(`reports.${index}.downtimes.${sinRegistrarIndex}.totalMinutes`, totalSinRegistrar);
+              lastCalculated.current[key] = totalSinRegistrar;
+            }
           }
         }
       }
@@ -807,7 +850,8 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
       // 2. Jarabe & Botellas
       const botellas = getBotellasTotales(report);
       const litrosTotales = (botellas * tamano) / 1000;
-      const usesSyrup = !SABORES_SIN_JARABE.includes(report.sabor || '');
+      const saboresSinJarabeCfg = config?.saboresSinJarabe || SABORES_SIN_JARABE;
+      const usesSyrup = !saboresSinJarabeCfg.includes(report.sabor || '');
       const jarabeConsumidoCalc = usesSyrup ? litrosTotales / 6 : 0;
       const jarabeFinalCalc = usesSyrup ? Math.max(0, jarabeInicial - jarabeConsumidoCalc) : 0;
       
@@ -823,7 +867,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
         lastCalculated.current[keyFinal] = Number(jarabeFinalCalc.toFixed(3));
       }
     });
-  }, [reports, setValue]);
+  }, [reports, setValue, isDraftLoaded]);
 
   const handleSaveCurrentPart = async () => {
     if (!auth.currentUser) {
@@ -906,7 +950,10 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
 
       const processedDowntimes = report.downtimes?.map(dt => {
         const minutesArray = dt.minutes?.map(m => Number(m) || 0) || [];
-        const totalMinutes = minutesArray.reduce((sum, m) => sum + m, 0);
+        const isSinRegistrar = dt.reason === 'SIN REGISTRAR';
+        const totalMinutes = isSinRegistrar
+          ? (dt.totalMinutes || 0)
+          : minutesArray.reduce((sum, m) => sum + m, 0);
         return {
           category: dt.category || 'Otros',
           reason: dt.reason,
@@ -935,12 +982,14 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
 
       const eficBruta = Math.round(calculateLiveEfficiency(report, botellas)) || 0;
 
-      const vol = CO2_VOLUMES[report.marca]?.[report.sabor || ''] || 0;
+      const co2VolumesCfg = config?.co2Volumes || CO2_VOLUMES;
+      const vol = co2VolumesCfg[report.marca]?.[report.sabor || ''] || 0;
       const litrosBebida = (botellas * (report.tamano || 0)) / 1000;
       const co2 = Number(((litrosBebida * vol * 1.9765) / 1000).toFixed(1));
 
       const reportData = {
         ...report,
+        origin: 'manual',
         botellas,
         paquetes,
         tickets,
@@ -1332,7 +1381,8 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
                     {(() => {
                       const marca = reports[index].marca;
                       const sabor = reports[index].sabor;
-                      const vol = CO2_VOLUMES[marca]?.[sabor] || 0;
+                      const co2VolumesCfg = config?.co2Volumes || CO2_VOLUMES;
+                      const vol = co2VolumesCfg[marca]?.[sabor] || 0;
                       const botellas = getBotellasTotales(reports[index]);
                       // Fórmula: (Botellas * Tamaño en L) * Volúmenes de CO2 * 1.9765 g/L / 1000 = kg de CO2
                       const litrosBebida = (botellas * (reports[index].tamano || 0)) / 1000;
@@ -1347,7 +1397,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
                     {(() => {
                       const actual = getBotellasTotales(reports[index]);
                       const liveEff = calculateLiveEfficiency(reports[index], actual);
-                      return liveEff > 0 ? liveEff.toFixed(1) : '0.0';
+                      return liveEff > 0 ? Math.round(liveEff) : '0';
                     })()}%
                   </p>
                 </div>
@@ -1642,7 +1692,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
                       control={control}
                       render={({ field }) => (
                         <div>
-                          <label className="block text-sm font-medium text-gray-700">Termo (kg)</label>
+                          <label className="block text-sm font-medium text-gray-700">Film (kg)</label>
                           <input
                             type="number"
                             step="0.01"
@@ -1678,15 +1728,17 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
               <div className="sticky top-16 bg-white z-10 grid grid-cols-8 gap-0 mb-2 py-2 border border-gray-200 -mx-4 px-4 rounded-t-lg">
                 {reports[index].hourlyProduction?.map((hp, i) => (
                   <div key={i} className={`text-xs font-bold text-gray-700 text-center py-1 ${i > 0 ? 'border-l border-gray-200' : ''}`}>
-                    {hp.hora.split(':')[0]}hs
+                    {(hp.hora || String(i + 1)).split(':')[0]}hs
                   </div>
                 ))}
               </div>
 
               <div className="space-y-0 border border-gray-200 rounded-b-lg -mx-4">
                 {reports[index].downtimes?.map((downtime, dIndex) => {
-                  const total = downtime.minutes?.reduce((sum, m) => sum + (Number(m) || 0), 0) || 0;
                   const isSinRegistrar = downtime.reason === 'SIN REGISTRAR';
+                  const total = isSinRegistrar 
+                    ? (downtime.totalMinutes || 0)
+                    : (downtime.minutes?.reduce((sum, m) => sum + (Number(m) || 0), 0) || 0);
                   
                   return (
                     <div 
@@ -1759,14 +1811,24 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
             </div>
             <div className="grid grid-cols-1 gap-3 w-full">
               {lastSavedReport && (
-                <button
-                  type="button"
-                  onClick={() => printProductionReport(lastSavedReport)}
-                  className="flex items-center justify-center gap-3 px-6 py-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all shadow-lg hover:shadow-blue-200 active:scale-95"
-                >
-                  <Printer className="w-6 h-6" />
-                  Imprimir para Expedición
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => printProductionReport(lastSavedReport)}
+                    className="flex items-center justify-center gap-3 px-6 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all shadow-lg hover:shadow-blue-200 active:scale-95"
+                  >
+                    <Printer className="w-5 h-5" />
+                    Imprimir para Expedición
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => printInternalReport(lastSavedReport)}
+                    className="flex items-center justify-center gap-3 px-6 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-lg hover:shadow-indigo-200 active:scale-95"
+                  >
+                    <ClipboardList className="w-5 h-5" />
+                    Imprimir Parte Interno (Detallado)
+                  </button>
+                </>
               )}
               <div className="grid grid-cols-2 gap-3">
                 <button
