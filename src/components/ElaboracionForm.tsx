@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useForm, useFieldArray, Controller, useWatch } from 'react-hook-form';
 import { db, auth } from '../firebase';
-import { collection, addDoc, serverTimestamp, updateDoc, doc, writeBatch, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, updateDoc, doc, writeBatch, deleteDoc, query, where, getDocs } from 'firebase/firestore';
 import { ElaboracionReport, ElaboracionHourlyData } from '../types';
 import { Save, X, Plus, Trash2, Beaker, Thermometer, Droplets, Gauge, CheckCircle2, AlertCircle, Clock, Activity } from 'lucide-react';
 import { TURNOS, CARBONATION_TABLE, CARBONATION_PRESSURES, CARBONATION_TEMPS, SABORES_SIN_JARABE } from '../constants';
@@ -33,6 +33,7 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+  const [hasCo2InShift, setHasCo2InShift] = useState<Record<number, boolean>>({});
   const lastShiftDate = useRef<Record<number, string>>({});
 
   const parseValue = (val: any): number => {
@@ -365,6 +366,43 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
     });
   }, [watchedReports, setValue]);
 
+  // Check for existing CO2 in same shift
+  useEffect(() => {
+    if (!isDraftLoaded || !watchedReports) return;
+
+    const checkExistingCo2 = async (index: number) => {
+      const report = watchedReports[index];
+      if (!report.fecha || !report.turno) return;
+
+      try {
+        const q = query(
+          collection(db, 'elaboracion_reports'),
+          where('fecha', '==', report.fecha),
+          where('turno', '==', report.turno)
+        );
+        const snapshot = await getDocs(q);
+        const alreadyHasCo2 = snapshot.docs.some(docRecord => {
+          const data = docRecord.data();
+          if (initialData?.id && docRecord.id === initialData.id) return false;
+          
+          const co2Ini = parseValue(data.co2Inicial);
+          const co2Fin = parseValue(data.co2Final);
+          const co2Rec = parseValue(data.co2Recarga);
+          return co2Ini > 0 || co2Fin > 0 || co2Rec > 0;
+        });
+
+        setHasCo2InShift(prev => {
+          if (prev[index] === alreadyHasCo2) return prev;
+          return { ...prev, [index]: alreadyHasCo2 };
+        });
+      } catch (e) {
+        console.error("Error checking status:", e);
+      }
+    };
+
+    watchedReports.forEach((_, i) => checkExistingCo2(i));
+  }, [watchedReports?.map(r => r.fecha).join(','), watchedReports?.map(r => r.turno).join(','), isDraftLoaded, initialData]);
+
   const handleSaveCurrentPart = async () => {
     if (!auth.currentUser) return;
     
@@ -695,6 +733,22 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
                   <span className="text-sm font-bold text-green-700">CONSUMO REAL:</span>
                   <span className="text-lg font-black text-green-800">{(watchedReports[reportIndex].co2Consumido || 0).toLocaleString()} Kg</span>
                 </div>
+
+                {hasCo2InShift[reportIndex] && (watchedReports[reportIndex]?.co2Consumido || 0) > 0 && (
+                  <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg flex items-start gap-2 relative overflow-hidden">
+                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-orange-400"></div>
+                    <AlertCircle className="w-5 h-5 text-orange-500 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-xs font-bold text-orange-800 uppercase tracking-wider">Aviso de Duplicidad</p>
+                      <p className="text-xs text-orange-700 leading-relaxed font-medium">
+                        Ya se detectó un parte con carga de CO2 para este turno ({watchedReports[reportIndex].fecha} - {watchedReports[reportIndex].turno}). 
+                      </p>
+                      <p className="text-[10px] text-orange-600 mt-1 italic">
+                        Solo ingrese valores si este es el parte designado para el control de CO2.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
