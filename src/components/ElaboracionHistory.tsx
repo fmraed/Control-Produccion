@@ -11,9 +11,25 @@ import { useAppConfig } from '../hooks/useAppConfig';
 interface ElaboracionHistoryProps {
   onEditReport: (report: ElaboracionReport) => void;
   onNewReport: () => void;
+  isAdmin?: boolean;
+  filters: {
+    selectedMonth: string;
+    selectedLinea: string;
+    selectedMarca: string;
+    selectedSabor: string;
+    sortField: 'fechaTurno' | 'planilla' | 'marca' | 'sabor';
+    sortDirection: 'asc' | 'desc';
+  };
+  onFiltersChange: (filters: any) => void;
 }
 
-export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: ElaboracionHistoryProps & { isAdmin?: boolean }) {
+export function ElaboracionHistory({ 
+  onEditReport, 
+  onNewReport, 
+  isAdmin,
+  filters,
+  onFiltersChange
+}: ElaboracionHistoryProps) {
   const { 
     availableFlavors, 
     availableSizes, 
@@ -29,17 +45,21 @@ export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: Elabo
   const PAGE_SIZE = 25;
   const [expandedReport, setExpandedReport] = useState<string | null>(null);
 
-  // Filters state
-  const [selectedMonth, setSelectedMonth] = useState<string>('');
-  const [selectedLinea, setSelectedLinea] = useState<string>('');
-  const [selectedMarca, setSelectedMarca] = useState<string>('');
-  const [selectedSabor, setSelectedSabor] = useState<string>('');
   const [reportToDelete, setReportToDelete] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Sort state
-  const [sortField, setSortField] = useState<'fechaTurno' | 'planilla' | 'marca' | 'sabor'>('fechaTurno');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const {
+    selectedMonth,
+    selectedLinea,
+    selectedMarca,
+    selectedSabor,
+    sortField,
+    sortDirection
+  } = filters;
+
+  const setFilter = (field: string, value: any) => {
+    onFiltersChange((prev: any) => ({ ...prev, [field]: value }));
+  };
 
   const fetchReports = useCallback(async (isNextPage = false) => {
     if (isNextPage) setLoadingMore(true);
@@ -186,7 +206,7 @@ export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: Elabo
             <label className="block text-xs font-medium text-gray-500 mb-1">Mes</label>
             <select
               value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
+              onChange={(e) => setFilter('selectedMonth', e.target.value)}
               className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
             >
               <option value="">Todos los meses</option>
@@ -201,7 +221,7 @@ export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: Elabo
             <label className="block text-xs font-medium text-gray-500 mb-1">Línea</label>
             <select
               value={selectedLinea}
-              onChange={(e) => setSelectedLinea(e.target.value)}
+              onChange={(e) => setFilter('selectedLinea', e.target.value)}
               className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
             >
               <option value="">Todas las líneas</option>
@@ -212,7 +232,7 @@ export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: Elabo
             <label className="block text-xs font-medium text-gray-500 mb-1">Marca</label>
             <select
               value={selectedMarca}
-              onChange={(e) => setSelectedMarca(e.target.value)}
+              onChange={(e) => setFilter('selectedMarca', e.target.value)}
               className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
             >
               <option value="">Todas</option>
@@ -223,7 +243,7 @@ export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: Elabo
             <label className="block text-xs font-medium text-gray-500 mb-1">Sabor</label>
             <select
               value={selectedSabor}
-              onChange={(e) => setSelectedSabor(e.target.value)}
+              onChange={(e) => setFilter('selectedSabor', e.target.value)}
               className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
             >
               <option value="">Todos</option>
@@ -234,7 +254,7 @@ export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: Elabo
             <label className="block text-xs font-medium text-gray-500 mb-1">Ordenar por</label>
             <select
               value={sortField}
-              onChange={(e) => setSortField(e.target.value as any)}
+              onChange={(e) => setFilter('sortField', e.target.value)}
               className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
             >
               <option value="fechaTurno">Fecha / Turno</option>
@@ -247,7 +267,7 @@ export function ElaboracionHistory({ onEditReport, onNewReport, isAdmin }: Elabo
             <label className="block text-xs font-medium text-gray-500 mb-1">Orden</label>
             <select
               value={sortDirection}
-              onChange={(e) => setSortDirection(e.target.value as 'asc' | 'desc')}
+              onChange={(e) => setFilter('sortDirection', e.target.value)}
               className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
             >
               <option value="desc">Descendente</option>

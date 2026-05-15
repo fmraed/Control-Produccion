@@ -1,8 +1,8 @@
 import { useState, useEffect, Fragment } from 'react';
-import { collection, query, orderBy, onSnapshot, doc, getDoc, setDoc, addDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, getDoc, setDoc, addDoc, deleteDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, CO2_VOLUMES, SABORES_SIN_JARABE } from '../constants';
-import { Settings, Save, CheckCircle2, XCircle, AlertCircle, Plus, Trash2, Users, Database, FlaskConical, Link2, Clock, Calendar, ShieldCheck, UserCog, Briefcase } from 'lucide-react';
+import { Settings, Save, CheckCircle2, XCircle, AlertCircle, Plus, Trash2, Users, Database, FlaskConical, Link2, Clock, Calendar, ShieldCheck, UserCog, Briefcase, AlertTriangle } from 'lucide-react';
 import { UserProfile, UserRole, RolePermissions } from '../types';
 import { SQLIntegration } from './SQLIntegration';
 import { SQLMappingEditor } from './SQLMappingEditor';
@@ -50,7 +50,9 @@ export function AdminPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
-  const [activeTab, setActiveTab] = useState<'config' | 'sql' | 'mappings' | 'shifts' | 'users' | 'permissions' | 'formulas'>('config');
+  const [activeTab, setActiveTab] = useState<'config' | 'sql' | 'mappings' | 'shifts' | 'users' | 'permissions' | 'formulas' | 'danger'>('config');
+  const [isPurging, setIsPurging] = useState(false);
+  const [confirmPurge, setConfirmPurge] = useState(false);
 
   // User management states
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -762,7 +764,60 @@ export function AdminPanel() {
     });
   };
 
-    const saveConfig = async () => {
+    const handlePurgePersonnelData = async () => {
+    setIsPurging(true);
+    setMessage(null);
+    try {
+      // 1. Delete all employees
+      const employeesSnap = await getDocs(collection(db, 'employees'));
+      const batch1 = writeBatch(db);
+      employeesSnap.docs.forEach(d => batch1.delete(d.ref));
+      await batch1.commit();
+
+      // 2. Delete all attendance_records
+      const attendanceSnap = await getDocs(collection(db, 'attendance_records'));
+      const batch2 = writeBatch(db);
+      let count = 0;
+      let currentBatch = writeBatch(db);
+      for (const d of attendanceSnap.docs) {
+        currentBatch.delete(d.ref);
+        count++;
+        if (count === 400) {
+          await currentBatch.commit();
+          currentBatch = writeBatch(db);
+          count = 0;
+        }
+      }
+      if (count > 0) await currentBatch.commit();
+
+      // 3. Delete all shift_assignments
+      const assignmentsSnap = await getDocs(collection(db, 'shift_assignments'));
+      const batch3 = writeBatch(db);
+      count = 0;
+      currentBatch = writeBatch(db);
+      for (const d of assignmentsSnap.docs) {
+        currentBatch.delete(d.ref);
+        count++;
+        if (count === 400) {
+          await currentBatch.commit();
+          currentBatch = writeBatch(db);
+          count = 0;
+        }
+      }
+      if (count > 0) await currentBatch.commit();
+
+      setMessage({ type: 'success', text: 'Toda la base de datos de Control de Personal ha sido borrada.' });
+      window.scrollTo(0, 0);
+    } catch (error) {
+      console.error("Error purging personnel data:", error);
+      setMessage({ type: 'error', text: 'Error al borrar los datos de personal.' });
+    } finally {
+      setIsPurging(false);
+      setTimeout(() => setMessage(null), 5000);
+    }
+  };
+
+  const saveConfig = async () => {
     if (!config) return;
     setSaving(true);
     setMessage(null);
@@ -867,6 +922,17 @@ export function AdminPanel() {
         >
           <ShieldCheck className="w-4 h-4" />
           Permisos Dinámicos
+        </button>
+        <button
+          onClick={() => setActiveTab('danger')}
+          className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+            activeTab === 'danger'
+              ? 'border-red-600 text-red-600'
+              : 'border-transparent text-red-400 hover:text-red-700 hover:border-red-300'
+          }`}
+        >
+          <AlertTriangle className="w-4 h-4" />
+          Zona de Config.
         </button>
       </div>
 
@@ -2323,6 +2389,70 @@ export function AdminPanel() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'danger' && (
+        <div className="bg-white rounded-xl shadow-sm border border-red-200 p-6">
+          <div className="flex items-center gap-2 mb-6 text-red-600">
+            <AlertTriangle className="w-6 h-6" />
+            <h2 className="text-xl font-bold">Zona de Peligro (Cuidado)</h2>
+          </div>
+          
+          <div className="bg-red-50 border border-red-200 rounded-xl p-6">
+            <h3 className="text-lg font-bold text-red-900 mb-2">Borrar Datos de Prueba de Personal</h3>
+            <p className="text-sm text-red-700 mb-6">
+              Esta acción eliminará de forma <b>permanente e irreversible</b> todos los empleados, 
+              registros de asistencia y asignaciones de turnos de la base de datos de "Control de Personal".
+              Use esta función únicamente si desea limpiar la base de datos luego de realizar pruebas, 
+              para comenzar a cargar datos reales desde cero. No se podrán recuperar los datos eliminados.
+            </p>
+            
+            {!confirmPurge ? (
+              <button
+                onClick={() => setConfirmPurge(true)}
+                className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-xl font-bold uppercase tracking-widest text-xs transition-all"
+              >
+                <Trash2 className="w-4 h-4" />
+                Borrar Base de Datos de Personal
+              </button>
+            ) : (
+              <div className="bg-white p-5 rounded-xl border border-red-200 shadow-sm max-w-xl">
+                <p className="text-red-800 font-bold mb-4">¿Está ABSOLUTAMENTE seguro de borrar todos los datos de personal? Esta acción no se puede deshacer.</p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={async () => {
+                      await handlePurgePersonnelData();
+                      setConfirmPurge(false);
+                    }}
+                    disabled={isPurging}
+                    className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-xl font-bold uppercase tracking-widest text-xs transition-all disabled:opacity-50"
+                  >
+                    {isPurging ? (
+                      <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
+                    ) : (
+                      <Trash2 className="w-4 h-4" />
+                    )}
+                    {isPurging ? 'Borrando...' : 'Sí, borrar definitivamente'}
+                  </button>
+                  <button
+                    onClick={() => setConfirmPurge(false)}
+                    disabled={isPurging}
+                    className="flex items-center gap-2 bg-gray-200 hover:bg-gray-300 text-gray-800 px-6 py-3 rounded-xl font-bold uppercase tracking-widest text-xs transition-all disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {message && message.type === 'success' && isPurging === false && (
+              <p className="mt-4 text-sm font-bold text-green-600 uppercase tracking-widest">{message.text}</p>
+            )}
+            {message && message.type === 'error' && isPurging === false && (
+              <p className="mt-4 text-sm font-bold text-red-600 uppercase tracking-widest">{message.text}</p>
+            )}
           </div>
         </div>
       )}

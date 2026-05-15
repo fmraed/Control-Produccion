@@ -41,6 +41,23 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
   const bottomScrollRef = useRef<HTMLDivElement>(null);
   const comparisonScrollRef = useRef<HTMLDivElement>(null);
 
+  // Scroll to end on week change if navigated back
+  const prevWeekRef = useRef(selectedWeek);
+  useEffect(() => {
+    if (selectedWeek < prevWeekRef.current) {
+      // Small timeout to ensure DOM is updated
+      setTimeout(() => {
+        if (bottomScrollRef.current) {
+          bottomScrollRef.current.scrollLeft = bottomScrollRef.current.scrollWidth;
+        }
+        if (comparisonScrollRef.current) {
+          comparisonScrollRef.current.scrollLeft = comparisonScrollRef.current.scrollWidth;
+        }
+      }, 50);
+    }
+    prevWeekRef.current = selectedWeek;
+  }, [selectedWeek]);
+
   const syncScroll = (source: 'bottom' | 'comparison') => {
     const refs = [bottomScrollRef, comparisonScrollRef];
     const sourceRef = source === 'bottom' ? bottomScrollRef : comparisonScrollRef;

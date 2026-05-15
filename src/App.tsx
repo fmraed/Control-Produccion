@@ -62,6 +62,53 @@ export default function App() {
   const [paretoMonth, setParetoMonth] = useState<string>('');
   const [activeMenu, setActiveMenu] = useState<'data' | 'reports' | null>(null);
 
+  // Persistent Dashboard Filters
+  const [dbFilters, setDbFilters] = useState({
+    selectedMonth: '',
+    selectedLinea: '',
+    selectedSupervisor: '',
+    selectedTamano: '',
+    selectedSabor: '',
+    selectedMarca: '',
+    sortField: 'fechaTurno' as 'fechaTurno' | 'planilla' | 'marca' | 'sabor',
+    sortDirection: 'desc' as 'asc' | 'desc'
+  });
+
+  // Persistent Elaboration History Filters
+  const [elabFilters, setElabFilters] = useState({
+    selectedMonth: '',
+    selectedLinea: '',
+    selectedMarca: '',
+    selectedSabor: '',
+    sortField: 'fechaTurno' as 'fechaTurno' | 'planilla' | 'marca' | 'sabor',
+    sortDirection: 'desc' as 'asc' | 'desc'
+  });
+
+  // Reset filters when leaving data section
+  useEffect(() => {
+    const dataViews = ['dashboard', 'elaboracion_history', 'personnel', 'new', 'elaboracion'];
+    if (!dataViews.includes(currentView)) {
+      setDbFilters({
+        selectedMonth: '',
+        selectedLinea: '',
+        selectedSupervisor: '',
+        selectedTamano: '',
+        selectedSabor: '',
+        selectedMarca: '',
+        sortField: 'fechaTurno',
+        sortDirection: 'desc'
+      });
+      setElabFilters({
+        selectedMonth: '',
+        selectedLinea: '',
+        selectedMarca: '',
+        selectedSabor: '',
+        sortField: 'fechaTurno',
+        sortDirection: 'desc'
+      });
+    }
+  }, [currentView]);
+
   const { permissions, loading: permissionsLoading } = useRolePermissions(userProfile?.role);
 
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -73,9 +120,22 @@ export default function App() {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
+    // Handle tab visibility changes to prevent "suspension" issues
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // When user comes back to the tab, check if auth is still active
+        // Firestore and Auth usually handle this, but we force a check
+        if (auth.currentUser) {
+          auth.currentUser.getIdToken(true).catch(e => console.warn("Session refresh error:", e));
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 
@@ -624,7 +684,13 @@ export default function App() {
         </div>
 
         {currentView === 'dashboard' && (
-          <Dashboard onNewReport={handleNewReport} onEditReport={handleEditReport} isAdmin={isAdmin} />
+          <Dashboard 
+            onNewReport={handleNewReport} 
+            onEditReport={handleEditReport} 
+            isAdmin={isAdmin}
+            filters={dbFilters}
+            onFiltersChange={setDbFilters}
+          />
         )}
         {currentView === 'consolidated' && (
           <ConsolidatedReport />
@@ -741,7 +807,13 @@ export default function App() {
           />
         )}
         {currentView === 'elaboracion_history' && (
-          <ElaboracionHistory onEditReport={handleEditElabReport} onNewReport={() => setCurrentView('elaboracion')} isAdmin={isAdmin} />
+          <ElaboracionHistory 
+            onEditReport={handleEditElabReport} 
+            onNewReport={() => setCurrentView('elaboracion')} 
+            isAdmin={isAdmin}
+            filters={elabFilters}
+            onFiltersChange={setElabFilters}
+          />
         )}
         {currentView === 'new' && (
           <NewReportForm 
