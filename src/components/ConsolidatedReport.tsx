@@ -86,15 +86,25 @@ export function ConsolidatedReport() {
     });
 
     // 2. Add enabled (active) items
-    // Sizes
-    enabledSizes.forEach(s => sizesWithData.add(s));
-    
-    // Combinations
+    // Sizes and Combinations filtered by local production
     enabledBrands.forEach(marca => {
-      // getFilteredFlavors(marca) returns flavors that are enabled globally AND for this brand
-      const brandFlavors = getFilteredFlavors(marca);
-      brandFlavors.forEach(sabor => {
-        uniqueCombinations.add(`${marca}|${sabor}`);
+      const brandActive = config?.activeProducts?.[marca];
+      const hasBrandConfig = brandActive && Object.keys(brandActive).length > 0;
+      const brandCombos = config?.brandFlavorCombinations?.[marca] || [];
+
+      enabledSizes.forEach(size => {
+        const sizeStr = size.toString();
+        const hasSizeConfig = brandActive && sizeStr in brandActive;
+        const flavors = hasSizeConfig ? (brandActive as any)[sizeStr] : (hasBrandConfig ? [] : brandCombos);
+        
+        const externalForSize = config?.externalProducts?.[marca]?.[sizeStr] || [];
+        
+        flavors.forEach((sabor: string) => {
+          if (config?.enabledFlavors?.[sabor] !== false && !externalForSize.includes(sabor)) {
+            uniqueCombinations.add(`${marca}|${sabor}`);
+            sizesWithData.add(size);
+          }
+        });
       });
     });
 
@@ -123,7 +133,11 @@ export function ConsolidatedReport() {
     filteredReports.forEach(report => {
       const key = `${report.marca || 'Torasso'}|${report.sabor}`;
       const tamano = Number(report.tamano);
-      if (tamano && data[key] && data[key][tamano]) {
+      
+      // Double check it's not an external product (though it shouldn't be reported anyway)
+      const isExternal = (config?.externalProducts?.[report.marca]?.[tamano.toString()] || []).includes(report.sabor);
+      
+      if (tamano && data[key] && data[key][tamano] && !isExternal) {
         const botellas = report.botellas || 0;
         const botellasPorPack = config?.botellasPorPack?.[tamano] || 1;
         const packs = Math.floor(botellas / botellasPorPack);
@@ -228,7 +242,7 @@ export function ConsolidatedReport() {
                       const cell = consolidatedData.data[key][tamano];
                       const totalForSize = consolidatedData.totalsBySize[tamano] || 0;
                       const percentage = totalForSize > 0 ? (cell.packs / totalForSize) * 100 : 0;
-                      const isActive = getFilteredFlavors(marca, tamano).includes(sabor);
+                      const isActive = getFilteredFlavors(marca, tamano, false).includes(sabor);
 
                       return (
                         <td key={tamano} colSpan={3} className={`px-0 py-0 border-r border-gray-300 ${isActive ? '' : 'bg-gray-300/80 relative'}`}>

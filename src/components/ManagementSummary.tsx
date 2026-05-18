@@ -771,18 +771,25 @@ export function ManagementSummary() {
         sizes.forEach(s => supportableSizes.add(Number(s)));
       });
 
-      availableBrands.forEach(brand => {
-        availableSizes.forEach(size => {
-          // Only count if the size can be produced on at least one enabled line
-          if (!supportableSizes.has(Number(size))) return;
+        availableBrands.forEach(brand => {
+          availableSizes.forEach(size => {
+            // Only count if the size can be produced on at least one enabled line
+            if (!supportableSizes.has(Number(size))) return;
 
-          const sizeStr = size.toString();
-          // Use triple combination (Brand + Size) for flavors, fallback to brand-only
-          const allowedFlavors = config.activeProducts?.[brand]?.[sizeStr] || config.brandFlavorCombinations[brand] || [];
-          
-          allowedFlavors.forEach(flavor => {
-            // Must be enabled in global flavor list
-            if (config.enabledFlavors?.[flavor] !== false) {
+            const sizeStr = size.toString();
+            const brandActive = config.activeProducts?.[brand];
+            const hasBrandConfig = brandActive && Object.keys(brandActive).length > 0;
+            const hasSizeConfig = brandActive && sizeStr in brandActive;
+            
+            // Use triple combination (Brand + Size) for flavors, fallback to brand-only ONLY if NO activeProducts exist for this brand
+            const allowedFlavors = hasSizeConfig
+              ? brandActive[sizeStr]
+              : (hasBrandConfig ? [] : (config.brandFlavorCombinations[brand] || []));
+            
+            allowedFlavors.forEach(flavor => {
+            // Must be enabled in global flavor list and NOT be an external product
+            const isExternal = (config.externalProducts?.[brand]?.[sizeStr] || []).includes(flavor);
+            if (config.enabledFlavors?.[flavor] !== false && !isExternal) {
               totalActiveProducts++;
               activeProductsList.push({ 
                 name: `${brand} ${flavor} ${size}cc`,

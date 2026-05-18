@@ -26,6 +26,7 @@ export function StockControl() {
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [goals, setGoals] = useState<MonthlyGoal[]>([]);
   const [sqlStock, setSqlStock] = useState<any[]>([]);
+  const [sqlPending, setSqlPending] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
@@ -58,6 +59,7 @@ export function StockControl() {
       const result = await response.json();
       if (result.success) {
         setSqlStock(result.data);
+        setSqlPending(result.pendingData || []);
       } else {
         setError(result.details ? `${result.error}: ${result.details}` : result.error || "Error al conectar con SQL Server");
       }
@@ -102,18 +104,30 @@ export function StockControl() {
 
   const activeProducts = useMemo(() => {
     if (!config) return [];
-    const products: { marca: string, sabor: string, tamano: number, key: string }[] = [];
+    const products: { marca: string, sabor: string, tamano: number, key: string, isExternal: boolean }[] = [];
     
     availableBrands.forEach(brand => {
       availableSizes.forEach(size => {
-        const allowedFlavors = config.activeProducts?.[brand]?.[size.toString()] || config.brandFlavorCombinations[brand] || [];
+        const sizeStr = size.toString();
+        const brandActive = config.activeProducts?.[brand];
+        const hasBrandConfig = brandActive && Object.keys(brandActive).length > 0;
+        const hasSizeConfig = brandActive && sizeStr in brandActive;
+        
+        // If the brand has ANY specific product configuration, only use that.
+        // Do not fall back to brandFlavorCombinations if they've started defining active products.
+        const allowedFlavors = hasSizeConfig
+          ? brandActive[sizeStr]
+          : (hasBrandConfig ? [] : (config.brandFlavorCombinations[brand] || []));
+
         allowedFlavors.forEach(flavor => {
           if (config.enabledFlavors?.[flavor] !== false) {
+            const isExternal = (config.externalProducts?.[brand]?.[sizeStr] || []).includes(flavor);
             products.push({
               marca: brand,
               sabor: flavor,
               tamano: Number(size),
-              key: `${brand}|${flavor}|${size}`
+              key: `${brand}|${flavor}|${size}`,
+              isExternal
             });
           }
         });
@@ -121,6 +135,7 @@ export function StockControl() {
     });
 
     return products.sort((a, b) => {
+      if (a.isExternal !== b.isExternal) return a.isExternal ? 1 : -1;
       if (a.marca !== b.marca) return a.marca.localeCompare(b.marca);
       if (a.tamano !== b.tamano) return b.tamano - a.tamano;
       const priorityA = FLAVOR_PRIORITY[a.sabor] || 999;
@@ -159,15 +174,30 @@ export function StockControl() {
       const mappingKey = `${p.sabor}-${p.tamano}`;
       const sqlCode = sqlMappings[mappingKey];
       const sqlData = sqlStock.find(s => s.codigo === sqlCode) || { stock_actual: 0, salida_acumulada: 0, stock_inicial: 0 };
+      
+      const requiresQC = (config.qualityControlFlavors || ['Agua']).includes(p.sabor);
+      const isExternal = (config.externalProducts?.[p.marca]?.[p.tamano.toString()] || []).includes(p.sabor);
+      
+      const pendingData = requiresQC ? sqlPending.find(s => s.codigo === sqlCode) : undefined;
+      const pendingQuantity = pendingData?.cantidad_pendiente || 0;
 
-      // Salida calculada = Stock Inicial + Producción Mensual - Stock Actual
-      const accumulatedExit = Math.max(0, sqlData.stock_inicial + totalProducedMonth - sqlData.stock_actual);
+      // For external products, we use income instead of production if available
+      // For now, income is 0, but we can display the column
+      const income = 0; 
+
+      // Salida calculada = Stock Inicial + Producción/Ingresos - Stock Actual
+      const accumulatedExit = Math.max(0, sqlData.stock_inicial + totalProducedMonth + income - sqlData.stock_actual);
 
       // Promedio salida diaria = Total Pedido Mes / 21 (días hábiles típicos)
       const avgDailyExit = goal / 21;
       
-      // Días de cobertura = Stock Actual / Promedio salida diaria
-      const coverageDays = avgDailyExit > 0 ? Math.floor(sqlData.stock_actual / avgDailyExit) : 0;
+      // Días de cobertura = (Stock Actual + Por Liberar) / Promedio salida diaria
+      const coverageDays = avgDailyExit > 0 ? Math.floor((sqlData.stock_actual + pendingQuantity) / avgDailyExit) : 0;
+
+      const packsPorPaleta = config.packsPorPaleta?.[p.tamano] || 1;
+      const totalPalettes = (sqlData.stock_actual + pendingQuantity) / packsPorPaleta;
+      const isStackable = config.stackableFlavors?.includes(p.sabor) ?? true;
+      const positionsUsed = isStackable ? Math.ceil(totalPalettes / 2) : Math.ceil(totalPalettes);
 
       const fulfillment = goal > 0 ? (accumulatedExit / goal) * 100 : 0;
 
@@ -182,13 +212,14 @@ export function StockControl() {
         initialStock: sqlData.stock_inicial,
         accumulatedExit,
         totalProducedMonth,
-        pending: 0,
+        pending: pendingQuantity,
+        positionsUsed,
         income: 0
       };
     });
 
     return productsMap;
-  }, [activeProducts, reports, goals, sqlStock, sqlMappings, selectedMonth]);
+  }, [activeProducts, reports, goals, sqlStock, sqlPending, sqlMappings, selectedMonth]);
 
   const groupTotals = useMemo(() => {
     interface GroupData {
@@ -200,6 +231,8 @@ export function StockControl() {
       fulfillment: number;
       initialStock: number;
       accumulatedExit: number;
+      pending: number;
+      positionsUsed: number;
       products: any[];
     }
     const groups: Record<string, GroupData> = {};
@@ -227,6 +260,8 @@ export function StockControl() {
           fulfillment: 0,
           initialStock: 0,
           accumulatedExit: 0,
+          pending: 0,
+          positionsUsed: 0,
           products: []
         };
       }
@@ -237,6 +272,8 @@ export function StockControl() {
       groups[groupKey].avgExit += pData.avgDailyExit;
       groups[groupKey].initialStock += pData.initialStock;
       groups[groupKey].accumulatedExit += pData.accumulatedExit;
+      groups[groupKey].pending += pData.pending;
+      groups[groupKey].positionsUsed += pData.positionsUsed;
       groups[groupKey].products.push(pData);
     });
 
@@ -249,6 +286,17 @@ export function StockControl() {
   }, [activeProducts, dataByProduct]);
 
   const groupValues = Object.values(groupTotals) as any[];
+
+  const storageOccupancy = useMemo(() => {
+    if (!config?.warehousePositions) return { used: 0, total: 2300, percentage: 0 };
+    const used = groupValues.reduce((sum, g) => sum + g.positionsUsed, 0);
+    const total = config.warehousePositions;
+    return {
+      used,
+      total,
+      percentage: (used / total) * 100
+    };
+  }, [groupValues, config?.warehousePositions]);
 
   if (loading) {
     return (
@@ -296,6 +344,49 @@ export function StockControl() {
         </div>
       </div>
 
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="md:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest flex items-center gap-2">
+              <Package className="w-4 h-4 text-blue-500" />
+              Ocupación de Almacenamiento
+            </h3>
+            <span className={`text-lg font-black ${storageOccupancy.percentage > 90 ? 'text-red-600' : storageOccupancy.percentage > 75 ? 'text-orange-600' : 'text-blue-600'}`}>
+              {storageOccupancy.percentage.toFixed(1)}%
+            </span>
+          </div>
+          
+          <div className="relative w-full h-4 bg-gray-100 rounded-full overflow-hidden mb-2">
+            <div 
+              className={`h-full transition-all duration-1000 ease-out rounded-full ${
+                storageOccupancy.percentage > 90 ? 'bg-red-500' : 
+                storageOccupancy.percentage > 75 ? 'bg-orange-500' : 
+                'bg-blue-500'
+              }`}
+              style={{ width: `${Math.min(100, storageOccupancy.percentage)}%` }}
+            />
+          </div>
+          
+          <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-gray-500">
+            <span>{storageOccupancy.used.toLocaleString('es-AR')} POSICIONES OCUPADAS</span>
+            <span>CAPACIDAD: {storageOccupancy.total.toLocaleString('es-AR')} POS</span>
+          </div>
+        </div>
+
+        <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-6 rounded-2xl shadow-lg border border-blue-500 flex flex-col justify-center text-white">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="p-2 bg-white/10 rounded-lg">
+              <TrendingUp className="w-5 h-5 text-blue-100" />
+            </div>
+            <span className="text-[10px] font-black uppercase tracking-widest text-blue-100">Posiciones Disponibles</span>
+          </div>
+          <div className="text-3xl font-black">
+            {(storageOccupancy.total - storageOccupancy.used).toLocaleString('es-AR')}
+          </div>
+          <p className="text-[10px] font-medium text-blue-200 mt-1 uppercase">Libres para nuevos ingresos</p>
+        </div>
+      </div>
+
       {error && (
         <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex items-center gap-3 text-red-700">
           <AlertCircle className="w-5 h-5" />
@@ -313,7 +404,8 @@ export function StockControl() {
                 <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Calibre</th>
                 <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200 bg-gray-200/30">Total Pedido Mes</th>
                 <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200 bg-blue-50/50">Stock {format(new Date(), 'dd/MM/yyyy')}</th>
-                <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Prod. Mensual</th>
+                <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200 bg-orange-50/50">Por Liberar</th>
+                <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Ingresos / Prod.</th>
                 <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Promedio Salida Diaria</th>
                 <th className="px-6 py-3 text-xs font-black text-blue-900 uppercase tracking-widest border-r border-gray-300 bg-blue-50">Días Cover.</th>
                 <th className="px-3 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest border-r border-gray-200 bg-gray-50">% Objet. Mes</th>
@@ -322,70 +414,96 @@ export function StockControl() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {groupValues.map((group, index) => (
-                <Fragment key={index}>
-                  {group.products.map((p: any) => (
-                    <tr key={p.key} className="hover:bg-gray-50 transition-colors group">
-                      <td className="px-4 py-3 text-xs font-black text-gray-900 border-r border-gray-100 italic">{p.marca}</td>
-                      <td className="px-4 py-3 text-xs font-bold text-gray-600 border-r border-gray-100">{p.sabor}</td>
-                      <td className="px-4 py-3 text-xs font-mono font-bold text-gray-500 border-r border-gray-100">{p.tamano}</td>
-                      <td className="px-4 py-3 text-xs font-bold text-gray-600 border-r border-gray-100 bg-gray-50/30">
-                        {p.totalOrdered.toLocaleString('es-AR')}
-                      </td>
-                      <td className="px-4 py-3 text-sm font-black text-blue-700 border-r border-gray-100 bg-blue-50/20">
-                        {p.currentStock.toLocaleString('es-AR')}
-                      </td>
-                      <td className="px-4 py-3 text-xs font-bold text-gray-600 border-r border-gray-100">
-                        {p.totalProducedMonth.toLocaleString('es-AR')}
-                      </td>
-                      <td className="px-4 py-3 text-xs font-bold text-gray-600 border-r border-gray-100">
-                        {p.avgDailyExit.toLocaleString('es-AR', { maximumFractionDigits: 0 })}
-                      </td>
-                      <td className={`px-6 py-3 border-r border-gray-200 text-center ${
-                        p.coverageDays < 5 ? 'bg-red-500 shadow-inner' :
-                        p.coverageDays < 10 ? 'bg-yellow-400 shadow-inner' :
-                        'bg-green-500 shadow-inner'
-                      }`}>
-                        <div className="flex flex-col items-center">
-                          <span className="text-lg font-black text-white drop-shadow-sm leading-none">
-                            {p.coverageDays}
-                          </span>
-                          <span className="text-[8px] font-black text-white/90 uppercase tracking-tighter">
-                            Días
-                          </span>
-                        </div>
-                      </td>
-                      <td className={`px-3 py-3 text-xs font-bold border-r border-gray-100 text-center ${
-                        p.fulfillment >= 100 ? 'text-green-700 bg-green-50/30' : 
-                        p.fulfillment >= 80 ? 'text-blue-700 bg-blue-50/30' : 
-                        p.fulfillment >= 50 ? 'text-orange-700 bg-orange-50/30' : 'text-red-700 bg-red-50/30'
-                      }`}>
-                        {p.fulfillment.toFixed(0)}%
-                      </td>
-                      <td className="px-4 py-3 text-xs font-bold text-gray-500 border-r border-gray-100 italic">
-                        {p.initialStock.toLocaleString('es-AR')}
-                      </td>
-                      <td className="px-4 py-3 text-xs font-bold text-gray-900 bg-gray-50/50">
-                        {p.accumulatedExit.toLocaleString('es-AR')}
-                      </td>
+              {groupValues.map((group, index) => {
+                const isExternalGroup = group.products.every((p: any) => p.isExternal);
+                return (
+                  <Fragment key={index}>
+                    {index === 0 && !group.products[0].isExternal && (
+                      <tr className="bg-blue-50/50">
+                        <td colSpan={12} className="px-4 py-2 text-[10px] font-black text-blue-800 uppercase tracking-widest text-center border-b border-blue-100">PRODUCCIÓN LOCAL (TUCUMÁN)</td>
+                      </tr>
+                    )}
+                    {group.products[0].isExternal && (index === 0 || !groupValues[index-1].products[0].isExternal) && (
+                      <tr className="bg-purple-50/50">
+                        <td colSpan={12} className="px-4 py-2 text-[10px] font-black text-purple-800 uppercase tracking-widest text-center border-b border-purple-100">PRODUCTOS EXTERNOS (OTRAS PLANTAS)</td>
+                      </tr>
+                    )}
+                    {group.products.map((p: any) => (
+                      <tr key={p.key} className="hover:bg-gray-50 transition-colors group">
+                        <td className="px-4 py-3 text-xs font-black text-gray-900 border-r border-gray-100 italic">{p.marca}</td>
+                        <td className="px-4 py-3 text-xs font-bold text-gray-600 border-r border-gray-100 uppercase">
+                          <div className="flex flex-col">
+                            <span className="truncate">{p.sabor}</span>
+                            {p.isExternal && (
+                              <span className="text-[7px] bg-purple-100 text-purple-700 px-1 py-0.5 rounded w-fit font-black mt-0.5 tracking-tighter">EXTERNO</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-xs font-mono font-bold text-gray-500 border-r border-gray-100">{p.tamano}</td>
+                        <td className="px-4 py-3 text-xs font-bold text-gray-600 border-r border-gray-100 bg-gray-50/30">
+                          {p.totalOrdered.toLocaleString('es-AR')}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-black text-blue-700 border-r border-gray-100 bg-blue-50/20">
+                          {p.currentStock.toLocaleString('es-AR')}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-black text-orange-600 border-r border-gray-100 bg-orange-50/10">
+                          {p.pending > 0 ? p.pending.toLocaleString('es-AR') : '-'}
+                        </td>
+                        <td className="px-4 py-3 text-xs font-bold text-gray-600 border-r border-gray-100 italic">
+                          {p.isExternal ? <span className="text-gray-300">N/A</span> : p.totalProducedMonth.toLocaleString('es-AR')}
+                        </td>
+                        <td className="px-4 py-3 text-xs font-bold text-gray-600 border-r border-gray-100 opacity-50">
+                          {p.isExternal ? <span className="text-gray-300">N/A</span> : p.avgDailyExit.toLocaleString('es-AR', { maximumFractionDigits: 0 })}
+                        </td>
+                        <td className={`px-6 py-3 border-r border-gray-200 text-center ${
+                          p.isExternal ? 'bg-gray-50' :
+                          p.coverageDays < 5 ? 'bg-red-500 shadow-inner' :
+                          p.coverageDays < 10 ? 'bg-yellow-400 shadow-inner' :
+                          'bg-green-500 shadow-inner'
+                        }`}>
+                          <div className="flex flex-col items-center">
+                            <span className={`text-lg font-black drop-shadow-sm leading-none ${p.isExternal ? 'text-gray-300' : 'text-white'}`}>
+                              {p.isExternal ? '-' : p.coverageDays}
+                            </span>
+                            {!p.isExternal && (
+                              <span className="text-[8px] font-black text-white/90 uppercase tracking-tighter">
+                                Días
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className={`px-3 py-3 text-xs font-bold border-r border-gray-100 text-center ${
+                          p.isExternal ? 'text-gray-300' :
+                          p.fulfillment >= 100 ? 'text-green-700 bg-green-50/30' : 
+                          p.fulfillment >= 80 ? 'text-blue-700 bg-blue-50/30' : 
+                          p.fulfillment >= 50 ? 'text-orange-700 bg-orange-50/30' : 'text-red-700 bg-red-50/30'
+                        }`}>
+                          {p.isExternal ? '-' : `${p.fulfillment.toFixed(0)}%`}
+                        </td>
+                        <td className="px-4 py-3 text-xs font-bold text-gray-500 border-r border-gray-100 italic">
+                          {p.initialStock.toLocaleString('es-AR')}
+                        </td>
+                        <td className="px-4 py-3 text-xs font-bold text-gray-900 bg-gray-50/50">
+                          {p.accumulatedExit.toLocaleString('es-AR')}
+                        </td>
+                      </tr>
+                    ))}
+                    {/* SUbtotal Row */}
+                    <tr className={`${isExternalGroup ? 'bg-purple-600' : 'bg-cyan-500'} text-white font-black`}>
+                      <td colSpan={3} className="px-4 py-2 text-[10px] uppercase tracking-widest">{group.label}</td>
+                      <td className="px-4 py-2 text-sm">{group.ordered.toLocaleString('es-AR')}</td>
+                      <td className="px-4 py-2 text-sm">{group.stock.toLocaleString('es-AR')}</td>
+                      <td className="px-4 py-2 text-sm">{group.pending > 0 ? group.pending.toLocaleString('es-AR') : '-'}</td>
+                      <td className="px-4 py-2 text-sm">{isExternalGroup ? '-' : group.products.reduce((sum, p) => sum + p.totalProducedMonth, 0).toLocaleString('es-AR')}</td>
+                      <td className="px-4 py-2 text-sm opacity-50">{isExternalGroup ? '-' : group.avgExit.toLocaleString('es-AR', { maximumFractionDigits: 0 })}</td>
+                      <td className={`px-4 py-2 border-r ${isExternalGroup ? 'border-purple-500 bg-purple-700' : 'border-cyan-400 bg-cyan-600'} text-center`}></td>
+                      <td className={`px-4 py-2 text-sm ${isExternalGroup ? 'text-purple-100 border-purple-500' : 'text-cyan-100 border-r border-cyan-400'} text-center`}>{isExternalGroup ? '-' : `${group.fulfillment.toFixed(0)}%`}</td>
+                      <td className={`px-4 py-2 text-sm italic opacity-80 border-r ${isExternalGroup ? 'border-purple-500' : 'border-cyan-400'}`}>{group.initialStock.toLocaleString('es-AR')}</td>
+                      <td className={`px-4 py-2 text-sm ${isExternalGroup ? 'bg-black/10' : 'bg-gray-800/20'}`}>{group.accumulatedExit.toLocaleString('es-AR')}</td>
                     </tr>
-                  ))}
-                  {/* SUbtotal Row */}
-                  <tr className="bg-cyan-500 text-white font-black">
-                    <td colSpan={3} className="px-4 py-2 text-[10px] uppercase tracking-widest">{group.label}</td>
-                    <td className="px-4 py-2 text-sm">{group.ordered.toLocaleString('es-AR')}</td>
-                    <td className="px-4 py-2 text-sm">{group.stock.toLocaleString('es-AR')}</td>
-                    <td className="px-4 py-2 text-sm">{group.products.reduce((sum, p) => sum + p.totalProducedMonth, 0).toLocaleString('es-AR')}</td>
-                    <td className="px-4 py-2 text-sm">{group.avgExit.toLocaleString('es-AR', { maximumFractionDigits: 0 })}</td>
-                    <td className="px-4 py-2 border-r border-cyan-400 bg-cyan-600 text-center">
-                      {/* Subtotal coverage can be an average or just blank, we'll keep it simple */}
-                    </td>
-                    <td className="px-4 py-2 text-sm text-cyan-100 border-r border-cyan-400 text-center">{group.fulfillment.toFixed(0)}%</td>
-                    <td className="px-4 py-2 text-sm italic opacity-80 border-r border-cyan-400">{group.initialStock.toLocaleString('es-AR')}</td>
-                    <td className="px-4 py-2 text-sm bg-gray-800/20">{group.accumulatedExit.toLocaleString('es-AR')}</td>
-                  </tr>
-                </Fragment>
-              ))}
+                  </Fragment>
+                );
+              })}
             </tbody>
             {/* Grand Total Footer */}
             <tfoot className="bg-blue-900 text-white font-black">
@@ -396,6 +514,9 @@ export function StockControl() {
                 </td>
                 <td className="px-4 py-4 text-base">
                   {groupValues.reduce((sum, g) => sum + g.stock, 0).toLocaleString('es-AR')}
+                </td>
+                <td className="px-4 py-4 text-base text-orange-200">
+                  {groupValues.reduce((sum, g) => sum + g.pending, 0).toLocaleString('es-AR')}
                 </td>
                 <td className="px-4 py-4 text-base">
                   {groupValues.reduce((sum, g) => sum + g.products.reduce((s, p) => s + p.totalProducedMonth, 0), 0).toLocaleString('es-AR')}

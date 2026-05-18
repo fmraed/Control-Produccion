@@ -43,6 +43,10 @@ interface AppConfig {
     historicalStartDate?: string;
   };
   salariosPorRango?: Record<string, number>;
+  qualityControlFlavors?: string[];
+  warehousePositions?: number;
+  stackableFlavors?: string[];
+  externalProducts?: Record<string, Record<string, string[]>>;
 }
 
 export function useAppConfig() {
@@ -82,6 +86,10 @@ export function useAppConfig() {
           historicalSettings: data.historicalSettings || { showHistoricalGlobal: false },
           saboresSinJarabe: data.saboresSinJarabe || SABORES_SIN_JARABE,
           salariosPorRango: data.salariosPorRango || {},
+          qualityControlFlavors: Array.isArray(data.qualityControlFlavors) ? data.qualityControlFlavors : ['Agua'],
+          warehousePositions: data.warehousePositions || 2300,
+          stackableFlavors: Array.isArray(data.stackableFlavors) ? data.stackableFlavors : (data.flavors || SABORES).filter((s: string) => s !== 'Soda Sifon' && s !== 'Soda'),
+          externalProducts: data.externalProducts || {},
           co2Volumes: (() => {
             const defaultVols = { ...CO2_VOLUMES };
             if (data.co2Volumes) {
@@ -144,7 +152,10 @@ export function useAppConfig() {
           lineOperators: {},
           historicalSettings: { showHistoricalGlobal: false },
           saboresSinJarabe: SABORES_SIN_JARABE,
-          co2Volumes: CO2_VOLUMES
+          co2Volumes: CO2_VOLUMES,
+          warehousePositions: 2300,
+          stackableFlavors: SABORES.filter(s => s !== 'Soda Sifon' && s !== 'Soda'),
+          externalProducts: {}
         });
       }
       setLoading(false);
@@ -186,26 +197,66 @@ export function useAppConfig() {
     return config.chemists.filter(c => config.enabledChemists?.[c] !== false);
   }, [config]);
 
-  const getFilteredFlavors = (brand?: string, size?: number) => {
+  const localBrands = useMemo(() => {
+    if (!config || !availableBrands) return [];
+    return availableBrands.filter(brand => {
+      // Check if brand has ANY combination that is NOT external
+      const brandActive = config.activeProducts?.[brand];
+      const hasBrandConfig = brandActive && Object.keys(brandActive).length > 0;
+      const brandCombos = config.brandFlavorCombinations?.[brand] || [];
+      
+      // Check all available sizes
+      return availableSizes.some(size => {
+        const sizeStr = size.toString();
+        const hasSizeConfig = brandActive && sizeStr in brandActive;
+        const flavors = hasSizeConfig ? brandActive[sizeStr] : (hasBrandConfig ? [] : brandCombos);
+        const externalForSize = config.externalProducts?.[brand]?.[sizeStr] || [];
+        
+        return flavors.some(f => !externalForSize.includes(f) && config.enabledFlavors?.[f] !== false);
+      });
+    });
+  }, [config, availableBrands, availableSizes]);
+
+  const getFilteredFlavors = (brand?: string, size?: number, includeExternal: boolean = true) => {
     let filtered = availableFlavors;
     
     // Triple filter (Brand + Size -> Flavors)
-    if (brand && size && config?.activeProducts?.[brand]) {
-      const brandProducts = config.activeProducts[brand];
-      if (size.toString() in brandProducts) {
-        const allowed = brandProducts[size.toString()];
-        if (Array.isArray(allowed)) {
-          return filtered.filter(s => allowed.includes(s));
+    if (brand && size && config?.activeProducts) {
+      const brandActive = config.activeProducts[brand];
+      const sizeStr = size.toString();
+      const hasBrandConfig = brandActive && Object.keys(brandActive).length > 0;
+      const hasSizeConfig = brandActive && sizeStr in brandActive;
+
+      const allowed = hasSizeConfig
+        ? brandActive[sizeStr]
+        : (hasBrandConfig ? [] : (config.brandFlavorCombinations?.[brand] || []));
+
+      filtered = filtered.filter(s => allowed.includes(s));
+    } else if (brand && config?.brandFlavorCombinations?.[brand]) {
+      // Fallback to Brand -> Flavors filter (only if no activeProducts at all for this brand)
+      const brandActive = config.activeProducts?.[brand];
+      if (brandActive && Object.keys(brandActive).length > 0) {
+        // If brand has configs but we don't have a size, maybe we return nothing or everything?
+        // Usually brand+size is safest. If only brand provided, we could return all brand active flavors.
+        const allActiveFlavors = new Set<string>();
+        Object.values(brandActive as Record<string, string[]>).forEach(flavors => {
+          if (Array.isArray(flavors)) {
+            flavors.forEach(f => allActiveFlavors.add(f));
+          }
+        });
+        filtered = filtered.filter(s => allActiveFlavors.has(s));
+      } else {
+        const allowedForBrand = config.brandFlavorCombinations[brand];
+        if (Array.isArray(allowedForBrand)) {
+          filtered = filtered.filter(s => allowedForBrand.includes(s));
         }
       }
     }
-
-    // Fallback to Brand -> Flavors filter
-    if (brand && config?.brandFlavorCombinations?.[brand]) {
-      const allowedForBrand = config.brandFlavorCombinations[brand];
-      if (Array.isArray(allowedForBrand)) {
-        filtered = filtered.filter(s => allowedForBrand.includes(s));
-      }
+    
+    // Filter external products if requested
+    if (!includeExternal && brand && size && config?.externalProducts?.[brand]) {
+      const externalForSize = config.externalProducts[brand][size.toString()] || [];
+      filtered = filtered.filter(s => !externalForSize.includes(s));
     }
     
     return filtered;
@@ -256,6 +307,7 @@ export function useAppConfig() {
     availableLines,
     availableSupervisors,
     availableChemists,
+    localBrands,
     getFilteredFlavors, 
     getFilteredSizes,
     shouldShowReport

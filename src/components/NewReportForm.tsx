@@ -279,6 +279,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
     getFilteredFlavors, 
     getFilteredSizes, 
     availableBrands, 
+    localBrands,
     availableLines, 
     availableSupervisors
   } = useAppConfig();
@@ -1196,7 +1197,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
                       <label className="block text-sm font-medium text-gray-700">Marca</label>
                       <select {...field} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
                         <option value="">Seleccione...</option>
-                        {availableBrands.map(m => <option key={m} value={m}>{m}</option>)}
+                        {localBrands.map(m => <option key={m} value={m}>{m}</option>)}
                       </select>
                       {errors.reports?.[index]?.marca && <p className="text-red-500 text-xs mt-1">{errors.reports?.[index]?.marca?.message}</p>}
                     </div>
@@ -1224,7 +1225,7 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
                       <label className="block text-sm font-medium text-gray-700">Sabor</label>
                       <select {...field} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
                         <option value="">Seleccione...</option>
-                        {getFilteredFlavors(reports[index]?.marca, reports[index]?.tamano).map(s => <option key={s} value={s}>{s}</option>)}
+                        {getFilteredFlavors(reports[index]?.marca, reports[index]?.tamano, false).map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
                       {errors.reports?.[index]?.sabor && <p className="text-red-500 text-xs mt-1">{errors.reports?.[index]?.sabor?.message}</p>}
                     </div>

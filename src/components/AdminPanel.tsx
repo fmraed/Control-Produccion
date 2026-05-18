@@ -2,7 +2,7 @@ import { useState, useEffect, Fragment, useMemo } from 'react';
 import { collection, query, orderBy, onSnapshot, doc, getDoc, setDoc, addDoc, deleteDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, CO2_VOLUMES, SABORES_SIN_JARABE, RANGOS_MIXTO } from '../constants';
-import { Settings, Save, CheckCircle2, XCircle, AlertCircle, Plus, Trash2, Users, Database, FlaskConical, Link2, Clock, Calendar, ShieldCheck, UserCog, Briefcase, AlertTriangle, Hash } from 'lucide-react';
+import { Settings, Save, CheckCircle2, XCircle, AlertCircle, Plus, Trash2, Users, Database, FlaskConical, Link2, Clock, Calendar, ShieldCheck, UserCog, Briefcase, AlertTriangle, Hash, Package, TrendingUp } from 'lucide-react';
 import { UserProfile, UserRole, RolePermissions } from '../types';
 import { SQLIntegration } from './SQLIntegration';
 import { SQLMappingEditor } from './SQLMappingEditor';
@@ -45,6 +45,10 @@ interface AppConfig {
   saboresSinJarabe?: string[];
   co2Volumes?: Record<string, Record<string, number>>;
   salariosPorRango?: Record<string, number>;
+  qualityControlFlavors?: string[];
+  warehousePositions?: number;
+  stackableFlavors?: string[];
+  externalProducts?: Record<string, Record<string, string[]>>;
 }
 
 export function AdminPanel() {
@@ -191,7 +195,11 @@ export function AdminPanel() {
           historicalSettings: data.historicalSettings || { showHistoricalGlobal: false },
           saboresSinJarabe: Array.isArray(data.saboresSinJarabe) ? data.saboresSinJarabe : SABORES_SIN_JARABE,
           co2Volumes: data.co2Volumes || CO2_VOLUMES,
-          salariosPorRango: data.salariosPorRango || {}
+          salariosPorRango: data.salariosPorRango || {},
+          qualityControlFlavors: Array.isArray(data.qualityControlFlavors) ? data.qualityControlFlavors : ['Agua'],
+          warehousePositions: data.warehousePositions || 2300,
+          stackableFlavors: Array.isArray(data.stackableFlavors) ? data.stackableFlavors : (data.flavors || SABORES).filter((s: string) => s !== 'Soda Sifon' && s !== 'Soda'),
+          externalProducts: data.externalProducts || {}
         };
         setConfig(mergedConfig);
       } else {
@@ -244,6 +252,10 @@ export function AdminPanel() {
           botellasPorPack: BOTELLAS_POR_PACK,
           lineOperators: {},
           salariosPorRango: {},
+          qualityControlFlavors: ['Agua'],
+          warehousePositions: 2300,
+          stackableFlavors: SABORES.filter(s => s !== 'Soda Sifon' && s !== 'Soda'),
+          externalProducts: {},
           shiftConfig: {
             standardShiftDuration: 480,
             shiftDurations: { Mañana: 480, Tarde: 480, Noche: 480 },
@@ -794,6 +806,32 @@ export function AdminPanel() {
         ...currentActiveProducts,
         [brand]: {
           ...brandActiveProducts,
+          [sizeStr]: newFlavors
+        }
+      }
+    });
+  };
+
+  const handleToggleExternalProduct = (brand: string, size: number, flavor: string) => {
+    if (!config) return;
+    const sizeStr = size.toString();
+    const currentExternal = config.externalProducts || {};
+    const brandExternal = currentExternal[brand] || {};
+    const sizeFlavors = brandExternal[sizeStr] || [];
+    
+    let newFlavors;
+    if (sizeFlavors.includes(flavor)) {
+      newFlavors = sizeFlavors.filter(f => f !== flavor);
+    } else {
+      newFlavors = [...sizeFlavors, flavor];
+    }
+    
+    setConfig({
+      ...config,
+      externalProducts: {
+        ...currentExternal,
+        [brand]: {
+          ...brandExternal,
           [sizeStr]: newFlavors
         }
       }
@@ -1947,22 +1985,37 @@ export function AdminPanel() {
                     : (config.brandFlavorCombinations[selectedBrandForTriple] || []);
                   
                   const isEnabled = currentActiveFlavors.includes(flavor);
+                  const isExternal = (config.externalProducts?.[selectedBrandForTriple]?.[sizeStr] || []).includes(flavor);
                   const isFlavorActive = config.enabledFlavors?.[flavor] !== false;
 
                   return (
-                    <button
-                      key={flavor}
-                      disabled={!isFlavorActive}
-                      onClick={() => handleToggleTripleCombination(selectedBrandForTriple, selectedSizeForTriple, flavor)}
-                      className={`px-4 py-3 rounded-2xl border text-xs font-black uppercase transition-all flex items-center justify-between gap-2 shadow-sm ${
-                        isEnabled
-                          ? 'bg-blue-600 border-blue-600 text-white ring-4 ring-blue-50 shadow-blue-100'
-                          : 'bg-white border-gray-100 text-gray-400 hover:border-blue-200 hover:text-blue-600'
-                      } ${(!isFlavorActive) ? 'opacity-20 grayscale cursor-not-allowed border-dashed' : ''}`}
-                    >
-                      <span className="truncate">{flavor}</span>
-                      {isEnabled && <CheckCircle2 className="w-4 h-4" />}
-                    </button>
+                    <div key={flavor} className="flex flex-col gap-1.5">
+                      <button
+                        disabled={!isFlavorActive}
+                        onClick={() => handleToggleTripleCombination(selectedBrandForTriple, selectedSizeForTriple, flavor)}
+                        className={`w-full px-4 py-3 rounded-2xl border text-xs font-black uppercase transition-all flex items-center justify-between gap-2 shadow-sm ${
+                          isEnabled
+                            ? 'bg-blue-600 border-blue-600 text-white ring-4 ring-blue-50 shadow-blue-100'
+                            : 'bg-white border-gray-100 text-gray-400 hover:border-blue-200 hover:text-blue-600'
+                        } ${(!isFlavorActive) ? 'opacity-20 grayscale cursor-not-allowed border-dashed' : ''}`}
+                      >
+                        <span className="truncate">{flavor}</span>
+                        {isEnabled && <CheckCircle2 className="w-4 h-4" />}
+                      </button>
+                      
+                      {isEnabled && (
+                        <button
+                          onClick={() => handleToggleExternalProduct(selectedBrandForTriple, selectedSizeForTriple, flavor)}
+                          className={`text-[9px] font-black uppercase py-1.5 px-3 rounded-xl transition-all border ${
+                            isExternal 
+                              ? 'bg-purple-600 border-purple-600 text-white shadow-sm shadow-purple-100' 
+                              : 'bg-white border-gray-100 text-gray-400 hover:border-purple-200 hover:text-purple-600'
+                          }`}
+                        >
+                          {isExternal ? 'Producto Externo' : 'Producción Local'}
+                        </button>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -2430,6 +2483,88 @@ export function AdminPanel() {
                </div>
               </section>
               
+              <section className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                 <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Control de Calidad (Por Liberar)</h3>
+                 <p className="text-xs text-gray-500 mb-4">Seleccione qué sabores pasan por Control de Calidad previo a su liberación (ej. Agua).</p>
+                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {config.flavors.map(sabor => {
+                       const isQC = (config.qualityControlFlavors || ['Agua']).includes(sabor);
+                       return (
+                         <button
+                           key={sabor}
+                           onClick={() => {
+                              const list = config.qualityControlFlavors || ['Agua'];
+                              if (isQC) {
+                                 setConfig({...config, qualityControlFlavors: list.filter(s => s !== sabor)});
+                              } else {
+                                 setConfig({...config, qualityControlFlavors: [...list, sabor]});
+                              }
+                           }}
+                           className={`flex-1 flex items-center justify-between p-3 rounded-lg border transition-all ${
+                             isQC
+                               ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-sm' 
+                               : 'bg-white border-gray-200 text-gray-500'
+                           }`}
+                         >
+                           <span className="font-medium text-sm">{sabor}</span>
+                           {isQC ? <CheckCircle2 className="w-4 h-4" /> : <div className="w-4 h-4 rounded-full border-2 border-gray-200" />}
+                         </button>
+                       );
+                    })}
+                 </div>
+              </section>
+
+              <section className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                 <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Almacenamiento y Logística</h3>
+                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
+                    <div className="p-4 bg-white rounded-xl border border-gray-200 shadow-sm">
+                      <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Posiciones Totales en Galpón</label>
+                      <div className="flex items-center gap-2">
+                        <Package className="w-5 h-5 text-blue-500" />
+                        <input
+                          type="number"
+                          min="1"
+                          value={config.warehousePositions || 2300}
+                          onChange={(e) => setConfig({ ...config, warehousePositions: Number(e.target.value) })}
+                          className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                        />
+                      </div>
+                      <p className="text-[10px] text-gray-400 mt-2 font-medium">Capacidad total teórica del depósito en posiciones de paleta.</p>
+                    </div>
+                 </div>
+
+                 <p className="text-xs text-gray-500 mb-4">Seleccione qué sabores se pueden <b>apilar (doble paleta)</b> en una sola posición. Sabores como Soda Sifon suelen ocupar 1 posición por paleta.</p>
+                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {config.flavors.map(sabor => {
+                       const isStackable = (config.stackableFlavors || []).includes(sabor);
+                       return (
+                         <button
+                           key={sabor}
+                           onClick={() => {
+                              const list = config.stackableFlavors || [];
+                              if (isStackable) {
+                                 setConfig({...config, stackableFlavors: list.filter(s => s !== sabor)});
+                              } else {
+                                 setConfig({...config, stackableFlavors: [...list, sabor]});
+                              }
+                           }}
+                           className={`flex-1 flex items-center justify-between p-3 rounded-lg border transition-all ${
+                             isStackable
+                               ? 'bg-green-50 border-green-200 text-green-700 shadow-sm' 
+                               : 'bg-white border-gray-200 text-gray-500'
+                           }`}
+                         >
+                           <div className="flex flex-col items-start">
+                             <span className="font-medium text-sm">{sabor}</span>
+                             <span className="text-[10px] opacity-70">{isStackable ? 'Apilable (2/pos)' : 'No Apilable (1/pos)'}</span>
+                           </div>
+                           {isStackable ? <TrendingUp className="w-4 h-4 text-green-600" /> : <div className="w-4 h-4 rounded-full border-2 border-gray-200" />}
+                         </button>
+                       );
+                    })}
+                 </div>
+              </section>
+
               <section className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                  <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Volúmenes de CO2</h3>
                  <p className="text-xs text-gray-500 mb-4">Ajuste el volumen de gas según Marca y Sabor. Deje en 0 para sabores como Agua que no llevan CO2.</p>

@@ -199,7 +199,7 @@ export default function App() {
               const allowedData = allowedDoc.data();
               const isAdminEmail = email === 'fraed.fordrinks@gmail.com';
               
-              const baseProfile = profileToSet || {
+              const baseProfile: Partial<UserProfile> = profileToSet || {
                 uid: currentUser.uid,
                 email: currentUser.email || '',
                 displayName: currentUser.displayName || 'Usuario',
@@ -207,11 +207,11 @@ export default function App() {
               };
               
               if (currentUser.photoURL) {
-                (baseProfile as any).photoURL = currentUser.photoURL;
+                baseProfile.photoURL = currentUser.photoURL;
               }
 
               // Build profile correctly without updating role if not allowed
-              const updatedProfile: UserProfile = {
+              const updatedProfile: any = {
                 ...baseProfile,
                 uid: currentUser.uid,
                 sector: allowedData?.sector || baseProfile.sector || '',
@@ -228,9 +228,9 @@ export default function App() {
               }
 
               try {
-                await setDoc(doc(db, 'users', currentUser.uid), updatedProfile, { merge: true });
+                await setDoc(doc(db, 'users', currentUser.uid), updatedProfile as UserProfile, { merge: true });
                 await deleteDoc(doc(db, 'allowed_users', email));
-                profileToSet = updatedProfile;
+                profileToSet = updatedProfile as UserProfile;
               } catch (e) {
                 console.error("Error synchronizing allowed_users", e);
                 // Even if deletion fails (perms or UI), use profile

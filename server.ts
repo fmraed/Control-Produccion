@@ -187,13 +187,28 @@ async function startServer() {
           AND a.id_familia NOT IN (13, 17, 136, 137, 141, 142, 155, 244, 246)
       `;
 
+      const pendingQuery = `
+        SELECT 
+            a.[co_codAbre] AS codigo,
+            SUM(c.[nu_cantidadPendiente]) as cantidad_pendiente
+        FROM [forDrink].[dbo].[pr_ca_control] c
+        JOIN [forDrink].[dbo].[fc_articulos] a
+            ON c.id_articulo = a.id_articulo
+        WHERE c.id_sucursal = 2 AND c.id_estado = 10
+        GROUP BY a.[co_codAbre]
+      `;
+
       const result = await pool.request()
         .input('startOfMonth', sql.VarChar, startOfMonthDate)
         .query(query);
 
+      const pendingResult = await pool.request()
+        .query(pendingQuery);
+
       res.json({
         success: true,
         data: result.recordset,
+        pendingData: pendingResult.recordset,
         message: "Datos de stock obtenidos correctamente."
       });
     } catch (err) {
