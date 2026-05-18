@@ -2,17 +2,36 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, orderBy, onSnapshot, doc, setDoc, addDoc, deleteDoc, where, getDocs, writeBatch } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { ProductionReport, ElaboracionReport, UserProfile, Employee, AttendanceRecord, ShiftAssignment } from '../types';
-import { Users, UserPlus, Calendar, CheckCircle2, XCircle, Clock, Search, Filter, Save, Trash2, ChevronLeft, ChevronRight, LayoutGrid, List as ListIcon, AlertCircle, Edit2, X, BarChart3, FileText } from 'lucide-react';
+import { Users, UserPlus, Calendar, CheckCircle2, XCircle, Clock, Search, Filter, Save, Trash2, ChevronLeft, ChevronRight, LayoutGrid, List as ListIcon, AlertCircle, Edit2, X, BarChart3, FileText, DollarSign } from 'lucide-react';
 import { format, startOfWeek, addDays, parseISO, isSameDay, startOfDay, endOfDay, getDay, eachDayOfInterval } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useAppConfig } from '../hooks/useAppConfig';
 import { motion, AnimatePresence } from 'motion/react';
 import { getDefaultInputDate } from '../utils';
 
-type Tab = 'list' | 'planning' | 'attendance' | 'analysis' | 'benefits';
+import { RANGOS_MIXTO, RANGOS_PRODUCCION, RANGOS_MANTENIMIENTO } from '../constants';
+
+const SECTORES = [
+  'Producción',
+  'Elaboración',
+  'Mantenimiento',
+  'Soplado'
+] as const;
+
+const getRangosParaSector = (sector?: string) => {
+  if (sector === 'Mantenimiento') return RANGOS_MANTENIMIENTO;
+  if (sector === 'Elaboración' || sector === 'Soplado') return RANGOS_MIXTO;
+  return RANGOS_PRODUCCION; // Default to Producción
+};
+
+type Tab = 'list' | 'planning' | 'attendance' | 'analysis' | 'benefits' | 'nomina';
+
+import { NominaTab } from './NominaTab';
+import { useRolePermissions } from '../hooks/useRolePermissions';
 
 export function PersonnelManagement({ userProfile }: { userProfile: UserProfile | null }) {
   const { config } = useAppConfig();
+  const { permissions } = useRolePermissions(userProfile?.role);
   const [activeTab, setActiveTab] = useState<Tab>('attendance');
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [assignments, setAssignments] = useState<ShiftAssignment[]>([]);
@@ -52,6 +71,8 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
     active: true,
     type: 'Efectivo',
     sector: userProfile?.sector || 'Producción',
+    rango: getRangosParaSector(userProfile?.sector || 'Producción')[0],
+    convenio: '',
     hireDate: format(new Date(), 'yyyy-MM-dd'),
     vacationAdjustment: 0,
     compensationAdjustment: 0
@@ -144,6 +165,7 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
   // Planning states
   const [selectedWeek, setSelectedWeek] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [planningShiftTab, setPlanningShiftTab] = useState<'Todos' | 'Mañana' | 'Tarde' | 'Noche' | 'Sin Asignar'>('Todos');
+  const [showAssignedOthers, setShowAssignedOthers] = useState(false);
 
   // Attendance states
   const [attendanceDate, setAttendanceDate] = useState(getDefaultInputDate());
@@ -187,8 +209,9 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
     
     // Sector filter
     const effectiveSector = isAdmin ? selectedSector : userProfile?.sector;
+    const empSector = e.sector || 'Producción';
     
-    if (effectiveSector && effectiveSector !== 'Todos' && e.sector !== effectiveSector) {
+    if (effectiveSector && effectiveSector !== 'Todos' && empSector !== effectiveSector) {
       return false;
     }
     
@@ -242,20 +265,36 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
   const handleSaveEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const cleanEmployee = Object.fromEntries(
+        Object.entries(newEmployee).filter(([_, v]) => v !== undefined)
+      );
+
       if (editingEmployee?.id) {
         await setDoc(doc(db, 'employees', editingEmployee.id), {
-          ...newEmployee,
+          ...cleanEmployee,
           updatedAt: new Date().toISOString()
         }, { merge: true });
       } else {
         await addDoc(collection(db, 'employees'), {
-          ...newEmployee,
+          ...cleanEmployee,
           createdAt: new Date().toISOString()
         });
       }
       setShowEmployeeForm(false);
       setEditingEmployee(null);
-      setNewEmployee({ name: '', legajo: '', position: '', active: true });
+      setNewEmployee({ 
+        name: '', 
+        legajo: '', 
+        position: '', 
+        active: true,
+        type: 'Efectivo',
+        sector: userProfile?.sector || 'Producción',
+        rango: getRangosParaSector(userProfile?.sector || 'Producción')[0],
+        convenio: '',
+        hireDate: format(new Date(), 'yyyy-MM-dd'),
+        vacationAdjustment: 0,
+        compensationAdjustment: 0
+      });
     } catch (error) {
       console.error("Error saving employee:", error);
     }
@@ -293,13 +332,14 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
     setShowCopyConfirm(false);
 
     try {
-      // 1. Precise date range for the previous week (Mon to Sun)
+      // 1. Precise date range for the previous week (Sun to Sat)
+      // Since 'Noche' starts on Sunday before Monday, we need Sunday to Saturday
       const currentMon = startOfWeek(selectedWeek, { weekStartsOn: 1 });
-      const prevMon = addDays(currentMon, -7);
-      const prevSun = addDays(prevMon, 6);
+      const prevStart = addDays(currentMon, -8); // Sunday week X-2
+      const prevEnd = addDays(currentMon, -2);   // Saturday week X-1
       
-      const startStr = format(prevMon, 'yyyy-MM-dd');
-      const endStr = format(prevSun, 'yyyy-MM-dd');
+      const startStr = format(prevStart, 'yyyy-MM-dd');
+      const endStr = format(prevEnd, 'yyyy-MM-dd');
 
       console.log(`Copying assignments from range: ${startStr} to ${endStr}`);
       
@@ -374,27 +414,38 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
       alert("No tiene permisos para modificar la planificación de semanas anteriores.");
       return;
     }
+    // Determine target indices in weekDays based on shift
+    // weekDays: 0(Sun), 1(Mon), 2(Tue), 3(Wed), 4(Thu), 5(Fri), 6(Sat), 7(Sun)
+    let targetIndices: number[] = [];
+    if (shift === 'Mañana') {
+      targetIndices = [1, 2, 3, 4, 5, 6]; // Lunes a Sábado
+    } else if (shift === 'Tarde') {
+      targetIndices = [1, 2, 3, 4, 5]; // Lunes a Viernes
+    } else if (shift === 'Noche') {
+      targetIndices = [0, 1, 2, 3, 4, 5]; // Domingo(ant) a Viernes
+    }
+
     // Get all assignments for this employee, this shift, in the current week
     const currentWeekAssignments = assignments.filter(a => 
       a.employeeId === employeeId && 
       a.shift === shift && 
-      weekDays.some(day => a.date === format(day, 'yyyy-MM-dd'))
+      targetIndices.some(idx => a.date === format(weekDays[idx], 'yyyy-MM-dd'))
     );
 
     const batch = writeBatch(db);
     
-    // If all 6 days (Mon-Sat) are already assigned, we deselect them
+    // If all target days are assigned, we deselect them
     // Otherwise, we fill the missing days
-    const isFull = currentWeekAssignments.length >= 6;
+    const isFull = currentWeekAssignments.length >= targetIndices.length;
 
     if (isFull) {
       currentWeekAssignments.forEach(a => {
         batch.delete(doc(db, 'shift_assignments', a.id!));
       });
     } else {
-      // Monday to Saturday (first 6 days of the week)
-      for (let i = 0; i < 6; i++) {
-        const day = weekDays[i];
+      // Fill missing days
+      for (const idx of targetIndices) {
+        const day = weekDays[idx];
         const dateStr = format(day, 'yyyy-MM-dd');
         
         const exists = assignments.some(a => 
@@ -743,7 +794,7 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
   };
 
   const weekDays = useMemo(() => {
-    return Array.from({ length: 7 }).map((_, i) => addDays(selectedWeek, i));
+    return Array.from({ length: 8 }).map((_, i) => addDays(selectedWeek, i - 1));
   }, [selectedWeek]);
 
   return (
@@ -762,22 +813,25 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
           </div>
           
           <div className="flex bg-gray-100 p-1 rounded-xl w-full md:w-auto overflow-x-auto">
-            {(['attendance', 'planning', 'benefits', 'list', 'analysis'] as Tab[]).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all whitespace-nowrap ${
-                  activeTab === tab 
-                    ? 'bg-white text-blue-600 shadow-sm' 
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                {tab === 'list' ? 'Personal' : 
-                 tab === 'planning' ? 'Planificación' : 
-                 tab === 'attendance' ? 'Asistencia' : 
-                 tab === 'benefits' ? 'Vacaciones/Comp' : 'Análisis'}
-              </button>
-            ))}
+            {(['attendance', 'planning', 'benefits', 'list', 'analysis', 'nomina'] as Tab[])
+              .filter(tab => tab !== 'nomina' || permissions.viewPersonnelPayroll)
+              .map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all whitespace-nowrap ${
+                    activeTab === tab 
+                      ? 'bg-white text-blue-600 shadow-sm' 
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  {tab === 'list' ? 'Personal' : 
+                   tab === 'planning' ? 'Planificación' : 
+                   tab === 'attendance' ? 'Asistencia' : 
+                   tab === 'nomina' ? 'Nómina' :
+                   tab === 'benefits' ? 'Vacaciones/Comp' : 'Análisis'}
+                </button>
+              ))}
           </div>
         </div>
       </div>
@@ -787,8 +841,8 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
         <div className="space-y-4">
           <div className="flex justify-between items-center gap-4">
             {isAdmin && (
-              <div className="flex items-center gap-2 bg-gray-100 p-1 rounded-xl">
-                {['Todos', 'Producción', 'Elaboración', 'Calidad', 'Administración'].map(s => (
+              <div className="flex flex-wrap items-center gap-2 bg-gray-100 p-1 rounded-xl">
+                {['Todos', ...SECTORES].map(s => (
                   <button
                     key={s}
                     onClick={() => setSelectedSector(s)}
@@ -843,6 +897,7 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                 <tr>
                   <th className="px-6 py-4 text-left font-bold text-gray-600 uppercase tracking-wider text-[10px]">Legajo</th>
                   <th className="px-6 py-4 text-left font-bold text-gray-600 uppercase tracking-wider text-[10px]">Nombre</th>
+                  <th className="px-6 py-4 text-left font-bold text-gray-600 uppercase tracking-wider text-[10px]">Puesto / Categoría</th>
                   <th className="px-6 py-4 text-left font-bold text-gray-600 uppercase tracking-wider text-[10px]">Tipo</th>
                   <th className="px-6 py-4 text-left font-bold text-gray-600 uppercase tracking-wider text-[10px]">Antigüedad</th>
                   <th className="px-6 py-4 text-center font-bold text-gray-600 uppercase tracking-wider text-[10px]">Estado</th>
@@ -857,6 +912,15 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                       <div className="flex flex-col">
                         <span className="font-bold text-gray-900">{emp.name}</span>
                         <span className="text-xs text-gray-500">{emp.position}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col">
+                        <span className="text-[11px] font-bold text-gray-800">{emp.rango || '-'}</span>
+                        <div className="text-[10px] text-gray-400 mt-0.5 flex gap-2">
+                          <span>{emp.convenio || 'Sin Conv.'}</span>
+                          {config?.salariosPorRango?.[emp.rango || ''] ? <span>| Base: ${config.salariosPorRango[emp.rango || '']}</span> : null}
+                        </div>
                       </div>
                     </td>
                     <td className="px-6 py-4">
@@ -896,6 +960,9 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                             position: emp.position, 
                             active: emp.active,
                             type: emp.type || 'Efectivo',
+                            sector: emp.sector || 'Producción',
+                            rango: emp.rango || '',
+                            convenio: emp.convenio || '',
                             hireDate: emp.hireDate,
                             terminationDate: emp.terminationDate,
                             vacationAdjustment: emp.vacationAdjustment || 0,
@@ -1081,11 +1148,12 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                     <td className="px-2 py-3 border-r border-gray-50">
                       <div className="flex flex-col gap-1 items-center">
                         {['Mañana', 'Tarde', 'Noche'].map(shift => {
+                          const targetIndices = shift === 'Mañana' ? [1,2,3,4,5,6] : shift === 'Tarde' ? [1,2,3,4,5] : [0,1,2,3,4,5];
                           const isAssignedFull = assignments.filter(a => 
                             a.employeeId === emp.id && 
                             a.shift === shift && 
-                            weekDays.some(day => a.date === format(day, 'yyyy-MM-dd'))
-                          ).length >= 6;
+                            targetIndices.some(idx => a.date === format(weekDays[idx], 'yyyy-MM-dd'))
+                          ).length >= targetIndices.length;
                           
                           const isLocked = isDateRestricted(format(selectedWeek, 'yyyy-MM-dd'));
 
@@ -1144,112 +1212,144 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
             )}
 
             {/* Otros Operarios Section */}
-                <tr className="bg-gray-50">
-                  <td colSpan={weekDays.length + 2} className="px-4 py-2 text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                    {planningShiftTab === 'Sin Asignar' ? 'Todos los Operarios sin Asignar' : 'Otros Operarios (Disponibles)'}
+            {(() => {
+              const availableEmployees = employees.filter(e => {
+                if (!e.active) return false;
+                
+                const hasAnyAssignment = weekDays.some(day => 
+                  assignments.some(a => a.employeeId === e.id && a.date === format(day, 'yyyy-MM-dd'))
+                );
+                
+                if (planningShiftTab === 'Sin Asignar') {
+                  return !hasAnyAssignment;
+                }
+                
+                if (planningShiftTab === 'Todos') {
+                  return !hasAnyAssignment;
+                }
+                
+                const hasAssignmentInThisShift = weekDays.some(day => 
+                  assignments.some(a => a.employeeId === e.id && a.date === format(day, 'yyyy-MM-dd') && a.shift === planningShiftTab)
+                );
+                
+                return !hasAssignmentInThisShift;
+              });
+
+              const completelyUnassigned = availableEmployees.filter(e => {
+                return !weekDays.some(day => 
+                  assignments.some(a => a.employeeId === e.id && a.date === format(day, 'yyyy-MM-dd'))
+                );
+              });
+
+              const assignedToOtherShifts = availableEmployees.filter(e => {
+                return weekDays.some(day => 
+                  assignments.some(a => a.employeeId === e.id && a.date === format(day, 'yyyy-MM-dd'))
+                );
+              });
+
+              // The render helper for a row
+              const renderEmployeeRow = (emp: Employee, isUnassigned: boolean) => (
+                <tr key={emp.id} className={`hover:bg-gray-50 transition-colors ${
+                  isUnassigned
+                    ? 'opacity-60 grayscale-[0.5] hover:opacity-100 hover:grayscale-0'
+                    : 'bg-blue-50/20'
+                }`}>
+                  <td className="px-4 py-3 font-bold text-gray-900 sticky left-0 bg-white z-10 border-r border-gray-100">
+                    <div className="flex flex-col">
+                      <span>{emp.name}</span>
+                      <span className="text-[10px] text-gray-400 font-mono">{emp.legajo}</span>
+                    </div>
                   </td>
+                  <td className="px-2 py-3 border-r border-gray-50">
+                    <div className="flex flex-col gap-1 items-center">
+                      {['Mañana', 'Tarde', 'Noche'].map(shift => {
+                        const targetIndices = shift === 'Mañana' ? [1,2,3,4,5,6] : shift === 'Tarde' ? [1,2,3,4,5] : [0,1,2,3,4,5];
+                        const isAssignedFull = assignments.filter(a => 
+                          a.employeeId === emp.id && 
+                          a.shift === shift && 
+                          targetIndices.some(idx => a.date === format(weekDays[idx], 'yyyy-MM-dd'))
+                        ).length >= targetIndices.length;
+
+                        const isLocked = isDateRestricted(format(selectedWeek, 'yyyy-MM-dd'));
+
+                        return (
+                          <button
+                            key={shift}
+                            onClick={() => handleAssignFullWeek(emp.id!, shift)}
+                            disabled={isLocked}
+                            className={`w-10 py-0.5 rounded text-[8px] font-black uppercase transition-all border ${
+                              isAssignedFull 
+                                ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
+                                : 'bg-blue-50 text-blue-600 border-blue-100 hover:bg-blue-200'
+                            } ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            title={isAssignedFull ? `Quitar ${shift} toda la semana` : `Asignar ${shift} toda la semana`}
+                          >
+                            {shift === 'Mañana' ? 'M' : shift === 'Tarde' ? 'T' : 'N'}+
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </td>
+                  {weekDays.map((day, i) => {
+                    const dateStr = format(day, 'yyyy-MM-dd');
+                    const dayAssignments = assignments.filter(a => a.employeeId === emp.id && a.date === dateStr);
+                    const isLocked = isDateRestricted(dateStr);
+                    
+                    return (
+                      <td key={i} className="px-1 py-3">
+                        <div className="flex flex-col gap-1 items-center">
+                          {['Mañana', 'Tarde', 'Noche'].map(shift => {
+                            const isAssigned = dayAssignments.some(a => a.shift === shift);
+                            const shortName = shift === 'Mañana' ? 'M' : shift === 'Tarde' ? 'T' : 'N';
+                            return (
+                              <button
+                                key={shift}
+                                onClick={() => handleToggleAssignment(emp.id!, dateStr, shift)}
+                                disabled={isLocked}
+                                className={`w-6 h-6 rounded text-[9px] font-black transition-all border ${
+                                  isAssigned 
+                                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
+                                    : 'bg-white text-gray-300 border-gray-100 hover:border-gray-300 hover:text-gray-500'
+                                } ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                title={shift}
+                              >
+                                {shortName}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </td>
+                    );
+                  })}
                 </tr>
-                {employees
-                  .filter(e => {
-                    if (!e.active) return false;
-                    const hasAnyAssignment = weekDays.some(day => 
-                      assignments.some(a => a.employeeId === e.id && a.date === format(day, 'yyyy-MM-dd'))
-                    );
-                    
-                    if (planningShiftTab === 'Sin Asignar') {
-                      return !hasAnyAssignment;
-                    }
-                    
-                    // In a specific shift tab or 'Todos', show those who DON'T have assignments in THAT shift (or any if Todos)
-                    // Actually, if we are in 'Todos', we show those with NO assignments at all.
-                    if (planningShiftTab === 'Todos') {
-                      return !hasAnyAssignment;
-                    }
-                    
-                    // If in a shift tab, show those who don't have an assignment in THIS shift but might have in others?
-                    // No, usually "Otros" means people not yet assigned at all to be useful.
-                    // But maybe we want to see people who are in another shift to move them?
-                    // Let's stick to showing anyone who DOES NOT have an assignment in the CURRENTLY SELECTED SHIFT.
-                    const hasAssignmentInThisShift = weekDays.some(day => 
-                      assignments.some(a => a.employeeId === e.id && a.date === format(day, 'yyyy-MM-dd') && a.shift === planningShiftTab)
-                    );
-                    
-                    return !hasAssignmentInThisShift;
-                  })
-                  .map((emp) => (
-                  <tr key={emp.id} className={`hover:bg-gray-50 transition-colors ${
-                    !weekDays.some(day => assignments.some(a => a.employeeId === emp.id && a.date === format(day, 'yyyy-MM-dd')))
-                      ? 'opacity-60 grayscale-[0.5] hover:opacity-100 hover:grayscale-0'
-                      : 'bg-blue-50/20'
-                  }`}>
-                    <td className="px-4 py-3 font-bold text-gray-900 sticky left-0 bg-white z-10 border-r border-gray-100">
-                      <div className="flex flex-col">
-                        <span>{emp.name}</span>
-                        <span className="text-[10px] text-gray-400 font-mono">{emp.legajo}</span>
-                      </div>
-                    </td>
-                    <td className="px-2 py-3 border-r border-gray-50">
-                      <div className="flex flex-col gap-1 items-center">
-                        {['Mañana', 'Tarde', 'Noche'].map(shift => {
-                          const isAssignedFull = assignments.filter(a => 
-                            a.employeeId === emp.id && 
-                            a.shift === shift && 
-                            weekDays.some(day => a.date === format(day, 'yyyy-MM-dd'))
-                          ).length >= 6;
+              );
 
-                          const isLocked = isDateRestricted(format(selectedWeek, 'yyyy-MM-dd'));
-
-                          return (
-                            <button
-                              key={shift}
-                              onClick={() => handleAssignFullWeek(emp.id!, shift)}
-                              disabled={isLocked}
-                              className={`w-10 py-0.5 rounded text-[8px] font-black uppercase transition-all border ${
-                                isAssignedFull 
-                                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
-                                  : 'bg-blue-50 text-blue-600 border-blue-100 hover:bg-blue-200'
-                              } ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
-                              title={isAssignedFull ? `Quitar ${shift} toda la semana` : `Asignar ${shift} toda la semana`}
-                            >
-                              {shift === 'Mañana' ? 'M' : shift === 'Tarde' ? 'T' : 'N'}+
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </td>
-                    {weekDays.map((day, i) => {
-                      const dateStr = format(day, 'yyyy-MM-dd');
-                      const dayAssignments = assignments.filter(a => a.employeeId === emp.id && a.date === dateStr);
-                      const isLocked = isDateRestricted(dateStr);
-                      
-                      return (
-                        <td key={i} className="px-1 py-3">
-                          <div className="flex flex-col gap-1 items-center">
-                            {['Mañana', 'Tarde', 'Noche'].map(shift => {
-                              const isAssigned = dayAssignments.some(a => a.shift === shift);
-                              const shortName = shift === 'Mañana' ? 'M' : shift === 'Tarde' ? 'T' : 'N';
-                              return (
-                                <button
-                                  key={shift}
-                                  onClick={() => handleToggleAssignment(emp.id!, dateStr, shift)}
-                                  disabled={isLocked}
-                                  className={`w-6 h-6 rounded text-[9px] font-black transition-all border ${
-                                    isAssigned 
-                                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
-                                      : 'bg-white text-gray-300 border-gray-100 hover:border-gray-300 hover:text-gray-500'
-                                  } ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                  title={shift}
-                                >
-                                  {shortName}
-                                </button>
-                              );
-                            })}
-                          </div>
+              return (
+                <>
+                  {completelyUnassigned.length > 0 && (
+                    <>
+                      <tr className="bg-gray-50">
+                        <td colSpan={weekDays.length + 2} className="px-4 py-2 text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                          Operarios sin asignar en la semana
                         </td>
-                      );
-                    })}
-                  </tr>
-                ))}
+                      </tr>
+                      {completelyUnassigned.map(emp => renderEmployeeRow(emp, true))}
+                    </>
+                  )}
+                  {assignedToOtherShifts.length > 0 && (
+                    <>
+                      <tr className="bg-gray-50 cursor-pointer hover:bg-gray-100" onClick={() => setShowAssignedOthers(!showAssignedOthers)}>
+                        <td colSpan={weekDays.length + 2} className="px-4 py-2 text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center justify-between">
+                          <span>Operarios asignados a otros turnos en la semana ({assignedToOtherShifts.length})</span>
+                          <span>{showAssignedOthers ? 'Ocultar ▲' : 'Mostrar ▼'}</span>
+                        </td>
+                      </tr>
+                      {showAssignedOthers && assignedToOtherShifts.map(emp => renderEmployeeRow(emp, false))}
+                    </>
+                  )}
+                </>
+              );
+            })()}
               </tbody>
             </table>
           </div>
@@ -1728,6 +1828,10 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
         </div>
       )}
 
+      {activeTab === 'nomina' && permissions.viewPersonnelPayroll && (
+        <NominaTab employees={employees} config={config} />
+      )}
+
       {/* Leave Range Modal */}
       {showLeaveRangeModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -2054,13 +2158,17 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                   <select
                     value={newEmployee.sector || 'Producción'}
                     disabled={!isAdmin}
-                    onChange={(e) => setNewEmployee({ ...newEmployee, sector: e.target.value })}
+                    onChange={(e) => {
+                      const newSector = e.target.value;
+                      setNewEmployee({ 
+                        ...newEmployee, 
+                        sector: newSector,
+                        rango: getRangosParaSector(newSector)[0]
+                      });
+                    }}
                     className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                   >
-                    <option value="Producción">Producción</option>
-                    <option value="Elaboración">Elaboración</option>
-                    <option value="Calidad">Calidad</option>
-                    <option value="Administración">Administración</option>
+                    {SECTORES.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
                 <div className="space-y-1">
@@ -2072,6 +2180,34 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                     onChange={(e) => setNewEmployee({ ...newEmployee, hireDate: e.target.value })}
                     className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                   />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Rango / Categoría</label>
+                  <select
+                    value={newEmployee.rango || ''}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, rango: e.target.value })}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  >
+                    <option value="">Seleccione...</option>
+                    {getRangosParaSector(newEmployee.sector).map(r => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Convenio Gremial</label>
+                  <select
+                    value={newEmployee.convenio || ''}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, convenio: e.target.value })}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  >
+                    <option value="">Seleccione...</option>
+                    <option value="SUTIAGA">SUTIAGA</option>
+                    <option value="Sin Convenio">Sin Convenio</option>
+                  </select>
                 </div>
               </div>
 

@@ -160,7 +160,7 @@ export default function App() {
             }
           } else {
             // Check if user is in allowed_users whitelist
-            const email = currentUser.email?.toLowerCase();
+            const email = currentUser.email?.toLowerCase().trim();
             if (email) {
               const allowedDoc = await getDoc(doc(db, 'allowed_users', email));
               
@@ -353,33 +353,33 @@ export default function App() {
           
           <div className="flex flex-wrap items-center gap-2 bg-white rounded-xl shadow-sm border border-gray-200 p-1.5 w-full lg:w-auto">
             {/* GRUPO: DATOS CARGADOS */}
-            <div className="relative">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setActiveMenu(activeMenu === 'data' ? null : 'data');
-                }}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
-                  ['dashboard', 'elaboracion_history'].includes(currentView)
-                    ? 'bg-blue-600 text-white shadow-md shadow-blue-200'
-                    : 'text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                <ClipboardList className="w-4 h-4" />
-                <span className="hidden sm:inline">Datos</span>
-                <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${activeMenu === 'data' ? 'rotate-180' : ''}`} />
-              </button>
-              
-              <AnimatePresence>
-                {activeMenu === 'data' && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                    transition={{ duration: 0.15, ease: "easeOut" }}
-                    className="absolute top-full left-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-30 overflow-hidden"
-                  >
-                    {permissions.viewReports && (
+            {(permissions.viewReports && permissions.viewElaboracion) ? (
+              <div className="relative">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveMenu(activeMenu === 'data' ? null : 'data');
+                  }}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
+                    ['dashboard', 'elaboracion_history'].includes(currentView)
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-200'
+                      : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  <ClipboardList className="w-4 h-4" />
+                  <span className="hidden sm:inline">Datos</span>
+                  <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${activeMenu === 'data' ? 'rotate-180' : ''}`} />
+                </button>
+                
+                <AnimatePresence>
+                  {activeMenu === 'data' && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      transition={{ duration: 0.15, ease: "easeOut" }}
+                      className="absolute top-full left-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-30 overflow-hidden"
+                    >
                       <button
                         onClick={() => { setCurrentView('dashboard'); setActiveMenu(null); }}
                         className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
@@ -389,8 +389,6 @@ export default function App() {
                         <FileText className="w-4 h-4" />
                         Datos Prod.
                       </button>
-                    )}
-                    {permissions.viewElaboracion && (
                       <button
                         onClick={() => { setCurrentView('elaboracion_history'); setActiveMenu(null); }}
                         className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
@@ -400,24 +398,35 @@ export default function App() {
                         <Beaker className="w-4 h-4" />
                         Datos Elab.
                       </button>
-                    )}
-                    {permissions.viewPersonnel && (
-                      <button
-                        onClick={() => { setCurrentView('personnel'); setActiveMenu(null); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === 'personnel' ? 'bg-blue-50 text-blue-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        <Users className="w-4 h-4" />
-                        Personal
-                      </button>
-                    )}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            ) : permissions.viewReports ? (
+              <button
+                onClick={() => { setCurrentView('dashboard'); setActiveMenu(null); }}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
+                  currentView === 'dashboard' ? 'bg-blue-600 text-white shadow-md shadow-blue-200' : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <ClipboardList className="w-4 h-4" />
+                <span className="hidden sm:inline">Datos Prod.</span>
+              </button>
+            ) : permissions.viewElaboracion ? (
+              <button
+                onClick={() => { setCurrentView('elaboracion_history'); setActiveMenu(null); }}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
+                  currentView === 'elaboracion_history' ? 'bg-blue-600 text-white shadow-md shadow-blue-200' : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <Beaker className="w-4 h-4" />
+                <span className="hidden sm:inline">Datos Elab.</span>
+              </button>
+            ) : null}
 
-            <div className="w-px h-6 bg-gray-200 mx-0.5" />
+            {((permissions.viewReports || permissions.viewElaboracion) && permissions.viewAnalytics) && (
+              <div className="w-px h-6 bg-gray-200 mx-0.5" />
+            )}
 
             {permissions.viewAnalytics && (
               <div className="relative">
@@ -609,10 +618,22 @@ export default function App() {
               </div>
             )}
 
-            <div className="w-px h-6 bg-gray-200 mx-0.5" />
+            {(permissions.viewAnalytics && (permissions.viewPersonnel || permissions.viewScheduler || permissions.viewLiveMonitor)) && (
+              <div className="w-px h-6 bg-gray-200 mx-0.5" />
+            )}
 
             {/* ACCIONES DIRECTAS */}
-            <div className="w-px h-6 bg-gray-200 mx-0.5" />
+            {permissions.viewPersonnel && (
+              <button
+                onClick={() => { setCurrentView('personnel'); setActiveMenu(null); }}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
+                  currentView === 'personnel' ? 'bg-blue-600 text-white shadow-md shadow-blue-200' : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <Users className="w-4 h-4" />
+                <span className="hidden md:inline">Personal</span>
+              </button>
+            )}
 
             {permissions.viewScheduler && (
               <button
@@ -639,7 +660,11 @@ export default function App() {
                 <span className="md:hidden">Monitor</span>
               </button>
             )}
-            <div className="w-px h-6 bg-gray-200 mx-0.5" />
+
+            {(permissions.editElaboracion || permissions.editReports || permissions.viewAdmin) && (permissions.viewPersonnel || permissions.viewScheduler || permissions.viewLiveMonitor) && (
+              <div className="w-px h-6 bg-gray-200 mx-0.5" />
+            )}
+
             {permissions.editElaboracion && (
               <button
                 onClick={() => { setCurrentView('elaboracion'); setActiveMenu(null); }}
@@ -668,7 +693,9 @@ export default function App() {
 
             {permissions.viewAdmin && (
               <>
-                <div className="w-px h-6 bg-gray-200 mx-0.5" />
+                {(permissions.editElaboracion || permissions.editReports || permissions.viewPersonnel || permissions.viewScheduler || permissions.viewLiveMonitor) && (
+                   <div className="w-px h-6 bg-gray-200 mx-0.5" />
+                )}
                 <button
                   onClick={() => { setCurrentView('admin'); setActiveMenu(null); }}
                   className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${

@@ -1,11 +1,12 @@
 import { useState, useEffect, Fragment } from 'react';
 import { collection, query, orderBy, onSnapshot, doc, getDoc, setDoc, addDoc, deleteDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
-import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, CO2_VOLUMES, SABORES_SIN_JARABE } from '../constants';
-import { Settings, Save, CheckCircle2, XCircle, AlertCircle, Plus, Trash2, Users, Database, FlaskConical, Link2, Clock, Calendar, ShieldCheck, UserCog, Briefcase, AlertTriangle } from 'lucide-react';
+import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, CO2_VOLUMES, SABORES_SIN_JARABE, RANGOS_MIXTO } from '../constants';
+import { Settings, Save, CheckCircle2, XCircle, AlertCircle, Plus, Trash2, Users, Database, FlaskConical, Link2, Clock, Calendar, ShieldCheck, UserCog, Briefcase, AlertTriangle, Hash } from 'lucide-react';
 import { UserProfile, UserRole, RolePermissions } from '../types';
 import { SQLIntegration } from './SQLIntegration';
 import { SQLMappingEditor } from './SQLMappingEditor';
+import { CounterControl } from './CounterControl';
 
 interface AppConfig {
   flavors: string[];
@@ -43,6 +44,7 @@ interface AppConfig {
   };
   saboresSinJarabe?: string[];
   co2Volumes?: Record<string, Record<string, number>>;
+  salariosPorRango?: Record<string, number>;
 }
 
 export function AdminPanel() {
@@ -50,7 +52,7 @@ export function AdminPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
-  const [activeTab, setActiveTab] = useState<'config' | 'sql' | 'mappings' | 'shifts' | 'users' | 'permissions' | 'formulas' | 'danger'>('config');
+  const [activeTab, setActiveTab] = useState<'config' | 'sql' | 'mappings' | 'shifts' | 'users' | 'permissions' | 'formulas' | 'danger' | 'salaries' | 'counters'>('config');
   const [isPurging, setIsPurging] = useState(false);
   const [confirmPurge, setConfirmPurge] = useState(false);
 
@@ -82,6 +84,13 @@ export function AdminPanel() {
   
   // Deletion confirmation state
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'brand' | 'line' | 'flavor' | 'size' | 'supervisor' | 'chemist', id: string | number, step: number } | null>(null);
+
+  const [userSearch, setUserSearch] = useState('');
+  
+  const filteredUsers = users.filter(u => 
+    u.displayName?.toLowerCase().includes(userSearch.toLowerCase()) || 
+    u.email?.toLowerCase().includes(userSearch.toLowerCase())
+  );
 
   useEffect(() => {
     const configRef = doc(db, 'config', 'production');
@@ -172,7 +181,8 @@ export function AdminPanel() {
           shiftConfig: shiftConfig,
           historicalSettings: data.historicalSettings || { showHistoricalGlobal: false },
           saboresSinJarabe: Array.isArray(data.saboresSinJarabe) ? data.saboresSinJarabe : SABORES_SIN_JARABE,
-          co2Volumes: data.co2Volumes || CO2_VOLUMES
+          co2Volumes: data.co2Volumes || CO2_VOLUMES,
+          salariosPorRango: data.salariosPorRango || {}
         };
         setConfig(mergedConfig);
       } else {
@@ -224,6 +234,7 @@ export function AdminPanel() {
           packsPorPaleta: PACKS_POR_PALETA,
           botellasPorPack: BOTELLAS_POR_PACK,
           lineOperators: {},
+          salariosPorRango: {},
           shiftConfig: {
             standardShiftDuration: 480,
             shiftDurations: { Mañana: 480, Tarde: 480, Noche: 480 },
@@ -284,10 +295,29 @@ export function AdminPanel() {
   useEffect(() => {
     if (activeTab === 'users') {
       const unsubUsers = onSnapshot(collection(db, 'users'), (snap) => {
-        setUsers(snap.docs.map(d => d.data() as UserProfile));
+        const usersList = snap.docs.map(d => ({ ...d.data(), uid: d.id } as UserProfile));
+        // Sort in memory by createdAt desc, handling missing fields
+        usersList.sort((a, b) => {
+          const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return dateB - dateA;
+        });
+        setUsers(usersList);
+      }, (error) => {
+        console.error("Error loading users:", error);
+        setMessage({ type: 'error', text: 'Error al cargar usuarios registrados' });
       });
       const unsubAllowed = onSnapshot(collection(db, 'allowed_users'), (snap) => {
-        setAllowedUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        const allowedList = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+        allowedList.sort((a, b) => {
+          const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return dateB - dateA;
+        });
+        setAllowedUsers(allowedList);
+      }, (error) => {
+        console.error("Error loading allowed users:", error);
+        setMessage({ type: 'error', text: 'Error al cargar invitaciones' });
       });
       return () => {
         unsubUsers();
@@ -318,22 +348,26 @@ export function AdminPanel() {
             admin: {
               viewReports: true, editReports: true, viewElaboracion: true, editElaboracion: true,
               viewScheduler: true, editScheduler: true, viewPersonnel: true, editPersonnel: true,
-              viewLiveMonitor: true, viewAnalytics: true, ...analyticsDefaultsTrue, viewAdmin: true
+              viewLiveMonitor: true, viewAnalytics: true, ...analyticsDefaultsTrue, viewAdmin: true,
+              viewPersonnelPayroll: true
             },
             jefe_produccion: {
               viewReports: true, editReports: true, viewElaboracion: true, editElaboracion: true,
               viewScheduler: true, editScheduler: true, viewPersonnel: true, editPersonnel: true,
-              viewLiveMonitor: true, viewAnalytics: true, ...analyticsDefaultsTrue, viewAdmin: false
+              viewLiveMonitor: true, viewAnalytics: true, ...analyticsDefaultsTrue, viewAdmin: false,
+              viewPersonnelPayroll: true
             },
             produccion: {
               viewReports: true, editReports: true, viewElaboracion: true, editElaboracion: true,
               viewScheduler: true, editScheduler: false, viewPersonnel: true, editPersonnel: true,
-              viewLiveMonitor: true, viewAnalytics: false, ...analyticsDefaultsFalse, viewAdmin: false
+              viewLiveMonitor: true, viewAnalytics: false, ...analyticsDefaultsFalse, viewAdmin: false,
+              viewPersonnelPayroll: false
             },
             calidad: {
               viewReports: true, editReports: false, viewElaboracion: true, editElaboracion: true,
               viewScheduler: true, editScheduler: false, viewPersonnel: true, editPersonnel: true,
-              viewLiveMonitor: true, viewAnalytics: false, ...analyticsDefaultsFalse, viewAdmin: false
+              viewLiveMonitor: true, viewAnalytics: false, ...analyticsDefaultsFalse, viewAdmin: false,
+              viewPersonnelPayroll: false
             }
           };
           setRolePermissions(defaults);
@@ -845,94 +879,116 @@ export function AdminPanel() {
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-12">
-      <div className="flex border-b border-gray-200">
+      <div className="flex flex-wrap gap-2 p-1.5 bg-gray-100/80 rounded-2xl border border-gray-200 mb-8">
         <button
           onClick={() => setActiveTab('config')}
-          className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+          className={`flex-1 min-w-[140px] px-4 py-2.5 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 ${
             activeTab === 'config'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              ? 'bg-white text-blue-600 shadow-sm border border-gray-200'
+              : 'text-gray-500 hover:text-gray-700'
           }`}
         >
-          <Settings className="w-4 h-4" />
-          Configuración General
+          <Settings className="w-3.5 h-3.5" />
+          General
         </button>
         <button
           onClick={() => setActiveTab('sql')}
-          className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+          className={`flex-1 min-w-[140px] px-4 py-2.5 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 ${
             activeTab === 'sql'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              ? 'bg-white text-blue-600 shadow-sm border border-gray-200'
+              : 'text-gray-500 hover:text-gray-700'
           }`}
         >
-          <Database className="w-4 h-4" />
-          Cruce SQL Server
+          <Database className="w-3.5 h-3.5" />
+          SQL Server
         </button>
         <button
           onClick={() => setActiveTab('mappings')}
-          className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+          className={`flex-1 min-w-[140px] px-4 py-2.5 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 ${
             activeTab === 'mappings'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              ? 'bg-white text-blue-600 shadow-sm border border-gray-200'
+              : 'text-gray-500 hover:text-gray-700'
           }`}
         >
-          <Link2 className="w-4 h-4" />
-          Mapeo de Códigos
+          <Link2 className="w-3.5 h-3.5" />
+          Mapeos
         </button>
         <button
           onClick={() => setActiveTab('shifts')}
-          className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+          className={`flex-1 min-w-[140px] px-4 py-2.5 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 ${
             activeTab === 'shifts'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              ? 'bg-white text-blue-600 shadow-sm border border-gray-200'
+              : 'text-gray-500 hover:text-gray-700'
           }`}
         >
-          <Clock className="w-4 h-4" />
-          Configuración de Turnos
+          <Clock className="w-3.5 h-3.5" />
+          Turnos
         </button>
         <button
           onClick={() => setActiveTab('users')}
-          className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+          className={`flex-1 min-w-[140px] px-4 py-2.5 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 ${
             activeTab === 'users'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              ? 'bg-white text-blue-600 shadow-sm border border-gray-200'
+              : 'text-gray-500 hover:text-gray-700'
           }`}
         >
-          <UserCog className="w-4 h-4" />
-          Usuarios y Roles
+          <UserCog className="w-3.5 h-3.5" />
+          Usuarios
         </button>
         <button
           onClick={() => setActiveTab('formulas')}
-          className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+          className={`flex-1 min-w-[140px] px-4 py-2.5 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 ${
             activeTab === 'formulas'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              ? 'bg-white text-blue-600 shadow-sm border border-gray-200'
+              : 'text-gray-500 hover:text-gray-700'
           }`}
         >
-          <FlaskConical className="w-4 h-4" />
-          Formulaciones
+          <FlaskConical className="w-3.5 h-3.5" />
+          Fórmulas
         </button>
         <button
           onClick={() => setActiveTab('permissions')}
-          className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+          className={`flex-1 min-w-[140px] px-4 py-2.5 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 ${
             activeTab === 'permissions'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              ? 'bg-white text-blue-600 shadow-sm border border-gray-200'
+              : 'text-gray-500 hover:text-gray-700'
           }`}
         >
-          <ShieldCheck className="w-4 h-4" />
-          Permisos Dinámicos
+          <ShieldCheck className="w-3.5 h-3.5" />
+          Permisos
+        </button>
+        <button
+          onClick={() => setActiveTab('salaries')}
+          className={`flex-1 min-w-[140px] px-4 py-2.5 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 ${
+            activeTab === 'salaries'
+              ? 'bg-white text-blue-600 shadow-sm border border-gray-200'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          <Briefcase className="w-3.5 h-3.5" />
+          Salarios
+        </button>
+        <button
+          onClick={() => setActiveTab('counters')}
+          className={`flex-1 min-w-[140px] px-4 py-2.5 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 ${
+            activeTab === 'counters'
+              ? 'bg-white text-blue-600 shadow-sm border border-gray-200'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          <Hash className="w-3.5 h-3.5" />
+          Contadores
         </button>
         <button
           onClick={() => setActiveTab('danger')}
-          className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+          className={`flex-1 min-w-[140px] px-4 py-2.5 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 ${
             activeTab === 'danger'
-              ? 'border-red-600 text-red-600'
-              : 'border-transparent text-red-400 hover:text-red-700 hover:border-red-300'
+              ? 'bg-red-600 text-white shadow-md shadow-red-200'
+              : 'text-red-400 hover:text-red-700 hover:bg-red-50'
           }`}
         >
-          <AlertTriangle className="w-4 h-4" />
-          Zona de Config.
+          <AlertTriangle className="w-3.5 h-3.5" />
+          Config. Avanzada
         </button>
       </div>
 
@@ -942,6 +998,8 @@ export function AdminPanel() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <SQLMappingEditor />
         </div>
+      ) : activeTab === 'counters' ? (
+        <CounterControl />
       ) : activeTab === 'shifts' ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-6">
@@ -2111,7 +2169,7 @@ export function AdminPanel() {
             <div>
               <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4 flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4" />
-                Usuarios con Acceso Habilitado (Sin Registro)
+                Habilitaciones Pendientes de Registro ({allowedUsers.length})
               </h3>
               {allowedUsers.length > 0 ? (
                 <div className="overflow-x-auto">
@@ -2121,6 +2179,7 @@ export function AdminPanel() {
                         <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Email</th>
                         <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Rol Pre-definido</th>
                         <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Sector</th>
+                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Fecha Invit.</th>
                         <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-widest">Acciones</th>
                       </tr>
                     </thead>
@@ -2132,10 +2191,14 @@ export function AdminPanel() {
                             <span className="px-2 py-1 text-[10px] font-black uppercase bg-amber-100 text-amber-700 rounded-full">{au.role}</span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{au.sector || 'Cualquiera'}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-400">
+                             {au.createdAt ? new Date(au.createdAt).toLocaleDateString() : '-'}
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap text-right">
                             <button 
                               onClick={() => handleDeleteAllowedUser(au.id)}
-                              className="text-red-500 hover:text-red-700"
+                              className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-full transition-colors"
+                              title="Revocar acceso"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -2146,76 +2209,105 @@ export function AdminPanel() {
                   </table>
                 </div>
               ) : (
-                <div className="text-center py-8 border-2 border-dashed border-gray-100 rounded-2xl">
-                  <p className="text-gray-400 text-sm italic">No hay invitaciones pendientes</p>
+                <div className="text-center py-8 border-2 border-dashed border-gray-100 rounded-2xl bg-gray-50/50">
+                  <p className="text-gray-400 text-sm italic font-medium">No hay invitaciones pendientes</p>
                 </div>
               )}
             </div>
 
             <div>
-              <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                <Users className="w-4 h-4" />
-                Usuarios Registrados
-              </h3>
-              <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Usuario</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Email</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Rol</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Sector</th>
-                  <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-widest">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {users.map(u => (
-                  <tr key={u.uid} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center font-bold text-blue-600">
-                          {u.displayName?.substring(0, 1)}
-                        </div>
-                        <span className="text-sm font-bold text-gray-900">{u.displayName}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{u.email}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <select
-                        value={u.role}
-                        onChange={(e) => handleUpdateUser({ ...u, role: e.target.value as UserRole })}
-                        className="text-xs font-bold uppercase tracking-widest bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                      >
-                        <option value="admin">Admin General</option>
-                        <option value="jefe_produccion">Jefe Producción</option>
-                        <option value="produccion">Producción</option>
-                        <option value="calidad">Calidad</option>
-                      </select>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <select
-                        value={u.sector || ''}
-                        onChange={(e) => handleUpdateUser({ ...u, sector: e.target.value })}
-                        className="text-xs font-bold uppercase tracking-widest bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                      >
-                        <option value="">Sin Sector</option>
-                        <option value="Producción">Producción</option>
-                        <option value="Elaboración">Elaboración</option>
-                        <option value="Calidad">Calidad</option>
-                        <option value="Administración">Administración</option>
-                      </select>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right">
-                      <button className="text-blue-600 hover:text-blue-800 font-bold text-xs uppercase tracking-widest">
-                        LOGS
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
+                <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                  <Users className="w-4 h-4" />
+                  Usuarios Registrados en Sistema ({users.length})
+                </h3>
+                <div className="relative w-full sm:w-64">
+                   <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                   <input 
+                     type="text"
+                     placeholder="Buscar por nombre o email..."
+                     value={userSearch}
+                     onChange={e => setUserSearch(e.target.value)}
+                     className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-sm"
+                   />
+                </div>
+              </div>
+              {filteredUsers.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Usuario</th>
+                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Email</th>
+                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Rol</th>
+                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-widest">Sector</th>
+                        <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-widest">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {filteredUsers.map(u => (
+                        <tr key={u.uid} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center gap-3">
+                              {u.photoURL ? (
+                                <img src={u.photoURL} className="w-8 h-8 rounded-full border border-gray-200" alt="" />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center font-bold text-blue-600 border border-blue-200">
+                                  {u.displayName?.substring(0, 1) || 'U'}
+                                </div>
+                              )}
+                              <span className="text-sm font-bold text-gray-900">{u.displayName}</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{u.email}</td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <select
+                              value={u.role}
+                              onChange={(e) => handleUpdateUser({ ...u, role: e.target.value as UserRole })}
+                              className="text-[10px] font-black uppercase tracking-widest bg-white border border-gray-200 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-sm"
+                            >
+                              <option value="admin">Admin General</option>
+                              <option value="jefe_produccion">Jefe Producción</option>
+                              <option value="produccion">Producción</option>
+                              <option value="calidad">Calidad</option>
+                            </select>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <select
+                              value={u.sector || ''}
+                              onChange={(e) => handleUpdateUser({ ...u, sector: e.target.value })}
+                              className="text-[10px] font-black uppercase tracking-widest bg-white border border-gray-200 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-sm"
+                            >
+                              <option value="">Sin Sector</option>
+                              <option value="Producción">Producción</option>
+                              <option value="Elaboración">Elaboración</option>
+                              <option value="Calidad">Calidad</option>
+                              <option value="Administración">Administración</option>
+                            </select>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right">
+                            <div className="flex items-center justify-end gap-2">
+                               {u.email === 'fraed.fordrinks@gmail.com' && (
+                                  <span className="px-2 py-0.5 bg-gray-900 text-white text-[8px] font-black rounded italic">ROOT</span>
+                               )}
+                               <button className="text-blue-600 hover:text-blue-800 font-bold text-[10px] uppercase tracking-widest bg-blue-50 px-2 py-1 rounded">
+                                 LOGS
+                               </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-8 border-2 border-dashed border-gray-100 rounded-2xl bg-gray-50/50">
+                  <p className="text-gray-400 text-sm italic font-medium">
+                    {userSearch ? `No se encontraron usuarios que coincidan con "${userSearch}"` : 'No hay usuarios registrados'}
+                  </p>
+                </div>
+              )}
+            </div>
       </div>
     </div>
   )}
@@ -2367,7 +2459,8 @@ export function AdminPanel() {
                       viewDowntime: 'Reporte: Paradas',
                       viewEfficiency: 'Reporte: Eficiencia',
                       viewGantt: 'Reporte: Gantt',
-                      viewAdmin: 'Acceso Admin Panel'
+                      viewAdmin: 'Acceso Admin Panel',
+                      viewPersonnelPayroll: 'Ver Nómina (Personal)'
                     };
                     const label = labelMap[perm] || perm.replace(/([A-Z])/g, ' $1').trim();
                     return (
@@ -2389,6 +2482,57 @@ export function AdminPanel() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'salaries' && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-2 text-gray-900">
+              <Briefcase className="w-6 h-6" />
+              <h2 className="text-xl font-bold">Escalas Salariales por Rango</h2>
+            </div>
+            <button
+              onClick={saveConfig}
+              disabled={saving}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+            >
+              {saving ? <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" /> : <Save className="w-4 h-4" />}
+              Guardar Cambios
+            </button>
+          </div>
+          <p className="text-xs text-gray-500 font-bold uppercase tracking-widest mb-6">Valores de salario base en $ para cada rango/categoría. Guarde los cambios al finalizar (Icono arriba a la derecha).</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {RANGOS_MIXTO.map(rango => {
+              const currentSalary = config?.salariosPorRango?.[rango] || 0;
+              return (
+                <div key={rango} className="bg-gray-50 rounded-xl p-4 border border-gray-100 flex flex-col justify-between h-full">
+                  <h3 className="font-black text-gray-800 text-sm mb-3 tracking-tighter uppercase">{rango}</h3>
+                  <div className="relative mt-auto">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={currentSalary || ''}
+                      onChange={(e) => {
+                        if (!config) return;
+                        setConfig({
+                          ...config,
+                          salariosPorRango: {
+                            ...(config.salariosPorRango || {}),
+                            [rango]: Number(e.target.value)
+                          }
+                        });
+                      }}
+                      className="w-full bg-white border border-gray-200 rounded-lg pl-8 pr-4 py-2 text-sm font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

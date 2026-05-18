@@ -266,24 +266,48 @@ export function HistoricalImporter() {
             }
 
             // Paletas / Paquetes
-            let paquetesCalculados = Number(row['Paquetes'] || 0);
-            if (paquetesCalculados === 0 && botellasCalc > 0) {
+            let packagesThisShift = Number(row['Paquetes'] || row['PAQUETES'] || 0);
+            if (packagesThisShift === 0 && botellasCalc > 0) {
               const botellasPorPack = config?.botellasPorPack?.[tamanoVal] || BOTELLAS_POR_PACK[tamanoVal] || 6;
-              paquetesCalculados = Math.floor(botellasCalc / botellasPorPack);
+              packagesThisShift = Math.floor(botellasCalc / botellasPorPack);
             }
 
-            let paletasTerm = Number(row['Paletas Term.'] ?? row['Paletizado'] ?? row['Paletas'] ?? row['PALETIZADO'] ?? row['PALETAS'] ?? row['Total Paletas'] ?? 0);
+            const parcialAnterior = Number(row['Parcial Anterior'] ?? row['PARCIAL ANTERIOR'] ?? 0);
+            const ajusteParcial = Number(row['Ajuste Parcial'] ?? row['AJUSTE PARCIAL'] ?? 0);
+            
+            // Detection of "Paletas Term." or "Tickets"
+            let paletasTerm = Number(row['Tickets (Total Paletas)'] ?? row['Paletas Term.'] ?? row['Tickets'] ?? row['TICKETS'] ?? row['Paletizado'] ?? row['Paletas'] ?? row['PALETIZADO'] ?? row['PALETAS'] ?? row['Total Paletas'] ?? 0);
+            
+            // Detection of leftovers (parcial actual)
+            let parcialActual = Number(row['Paquetes Sobrantes (Parcial Actual)'] ?? row['Parcial Actual'] ?? row['PARCIAL ACTUAL'] ?? row['Paquetes (no entraron completar paleta)'] ?? 0);
+            
+            // Detection of separators
             let separadoresTerm = Number(row['Separadores'] ?? row['SEPARADORES'] ?? 0);
 
-            if (paletasTerm === 0 && paquetesCalculados > 0) {
-              const packsPorPaleta = config?.packsPorPaleta?.[tamanoVal] || PACKS_POR_PALETA[tamanoVal] || 1;
-              paletasTerm = Math.floor(paquetesCalculados / packsPorPaleta);
-              
-              if (separadoresTerm === 0 && paletasTerm > 0) {
+            const packsPorPaleta = config?.packsPorPaleta?.[tamanoVal] || PACKS_POR_PALETA[tamanoVal] || 1;
+
+            // Recalculate if missing or 0
+            const totalPacks = packagesThisShift + parcialAnterior + ajusteParcial;
+            
+            if (paletasTerm === 0 && totalPacks > 0) {
+               // If paletasTerm is tickets (based on totalPacks)
+               paletasTerm = Math.floor(totalPacks / packsPorPaleta);
+            }
+            
+            if (parcialActual === 0 && totalPacks > 0) {
+               parcialActual = totalPacks % packsPorPaleta;
+            }
+
+            // Calculation for this shift only (for paletasDeEsteParte)
+            let paletasDeEsteParte = Number(row['Paletas de este Parte'] ?? 0);
+            if (paletasDeEsteParte === 0) {
+               paletasDeEsteParte = Math.floor(packagesThisShift / packsPorPaleta);
+            }
+
+            if (separadoresTerm === 0 && paletasDeEsteParte > 0) {
                 const separadoresBase = SEPARADORES_POR_PALETA[tamanoVal] || 0;
-                const sombrero = Math.floor(paletasTerm / 2);
-                separadoresTerm = (paletasTerm * separadoresBase) + sombrero;
-              }
+                const sombrero = Math.floor(paletasDeEsteParte / 2);
+                separadoresTerm = (paletasDeEsteParte * separadoresBase) + sombrero;
             }
 
             const report: Omit<ProductionReport, 'id'> = {
@@ -301,9 +325,13 @@ export function HistoricalImporter() {
               contInicial: contInicial,
               contFinal: contFinal,
               botellas: botellasTotales,
-              paquetes: paquetesCalculados,
+              paquetes: packagesThisShift,
+              parcialAnterior: parcialAnterior,
+              ajusteParcial: ajusteParcial,
+              tickets: paletasTerm, // In the system 'tickets' is the total pallets (including partials)
+              parcialActual: parcialActual,
               botRotas: Number(row['Botellas Rotas'] || 0),
-              paletasDeEsteParte: paletasTerm,
+              paletasDeEsteParte: paletasDeEsteParte,
               totalSeparadores: separadoresTerm,
               velocidad: Number(row['Velocidad Nominal'] || 0),
               tiempoTurno: Number(row['Tiempo Turno'] || 0),

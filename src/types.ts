@@ -137,6 +137,7 @@ export interface RolePermissions {
   viewEfficiency?: boolean;
   viewGantt?: boolean;
   viewAdmin: boolean;
+  viewPersonnelPayroll?: boolean;
 }
 
 export interface UserProfile {
@@ -158,6 +159,8 @@ export interface Employee {
   active: boolean;
   type?: 'Efectivo' | 'Temporario';
   sector?: string;
+  rango?: string;
+  convenio?: string;
   hireDate?: string;
   terminationDate?: string;
   vacationAdjustment?: number;

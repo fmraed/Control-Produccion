@@ -41,6 +41,7 @@ const DEFAULT_PERMISSIONS: Record<UserRole, RolePermissions> = {
     viewAnalytics: true,
     ...analyticsDefaultsTrue,
     viewAdmin: true,
+    viewPersonnelPayroll: true,
   },
   jefe_produccion: {
     viewReports: true,
@@ -55,6 +56,7 @@ const DEFAULT_PERMISSIONS: Record<UserRole, RolePermissions> = {
     viewAnalytics: true,
     ...analyticsDefaultsTrue,
     viewAdmin: false,
+    viewPersonnelPayroll: true,
   },
   produccion: {
     viewReports: true,
@@ -69,6 +71,7 @@ const DEFAULT_PERMISSIONS: Record<UserRole, RolePermissions> = {
     viewAnalytics: false,
     ...analyticsDefaultsFalse,
     viewAdmin: false,
+    viewPersonnelPayroll: false,
   },
   calidad: {
     viewReports: true,
@@ -83,6 +86,7 @@ const DEFAULT_PERMISSIONS: Record<UserRole, RolePermissions> = {
     viewAnalytics: false,
     ...analyticsDefaultsFalse,
     viewAdmin: false,
+    viewPersonnelPayroll: false,
   },
 };
 
@@ -99,6 +103,7 @@ const GUEST_PERMISSIONS: RolePermissions = {
   viewAnalytics: false,
   ...analyticsDefaultsFalse,
   viewAdmin: false,
+  viewPersonnelPayroll: false,
 };
 
 export function useRolePermissions(role: UserRole | undefined) {

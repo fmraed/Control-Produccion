@@ -42,6 +42,7 @@ interface AppConfig {
     showHistoricalGlobal: boolean;
     historicalStartDate?: string;
   };
+  salariosPorRango?: Record<string, number>;
 }
 
 export function useAppConfig() {
@@ -80,6 +81,7 @@ export function useAppConfig() {
           shiftConfig: data.shiftConfig,
           historicalSettings: data.historicalSettings || { showHistoricalGlobal: false },
           saboresSinJarabe: data.saboresSinJarabe || SABORES_SIN_JARABE,
+          salariosPorRango: data.salariosPorRango || {},
           co2Volumes: (() => {
             const defaultVols = { ...CO2_VOLUMES };
             if (data.co2Volumes) {

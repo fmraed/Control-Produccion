@@ -172,6 +172,8 @@ service cloud.firestore {
              isValidOptionalString('position', 0, 100) &&
              isValidOptionalString('type', 0, 50) &&
              isValidOptionalString('sector', 0, 50) &&
+             isValidOptionalString('rango', 0, 100) &&
+             isValidOptionalString('convenio', 0, 100) &&
              isValidOptionalString('hireDate', 0, 50) &&
              isValidOptionalString('terminationDate', 0, 50) &&
              isValidOptionalNumber('vacationAdjustment') &&

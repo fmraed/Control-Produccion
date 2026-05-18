@@ -18,6 +18,26 @@ export const CO2_VOLUMES: Record<string, Record<string, number>> = {
 
 export const SUPERVISORES = ['Sosa', 'Camaño', 'Medina', 'Gianfrancisco'];
 export const TURNOS = ['Mañana', 'Tarde', 'Noche'];
+
+export const RANGOS_PRODUCCION = [
+  'Operario de Producción Interno',
+  'Operario Práctico (Producción)',
+  'Operario Calificado',
+  'Operario Múltiple',
+  'Ingresante sin Formación (Producción)'
+];
+
+export const RANGOS_MANTENIMIENTO = [
+  'Operario Práctico (Mantenimiento)',
+  'Medio oficial',
+  'Oficial',
+  'Oficial especializado',
+  'Oficial técnico',
+  'Ingresante sin Formación (Mantenimiento)'
+];
+
+export const RANGOS_MIXTO = Array.from(new Set([...RANGOS_PRODUCCION, ...RANGOS_MANTENIMIENTO]));
+
 export const LINEAS = ['1', '2', '3'];
 export const MARCAS = ['Torasso'];
 export const SABORES = ['Manzana', 'Naranja', 'Cola', 'Lima Limon', 'Pomelo', 'Agua Tónica', 'Pomelo Blanco', 'Citrus', 'Granadina', 'Limonada', 'Soda', 'Soda Sifon', 'Agua'];
