@@ -171,8 +171,10 @@ export function StockControl() {
 
       const goal = goals.find(g => g.marca === p.marca && g.sabor === p.sabor && g.tamano === p.tamano)?.quantity || 0;
       
-      const mappingKey = `${p.sabor}-${p.tamano}`;
-      const sqlCode = sqlMappings[mappingKey];
+      const mappingKey = `${p.marca}-${p.sabor}-${p.tamano}`;
+      const legacyKey = `${p.sabor}-${p.tamano}`;
+      const sqlCode = sqlMappings[mappingKey] || sqlMappings[legacyKey];
+      
       const sqlData = sqlStock.find(s => s.codigo === sqlCode) || { stock_actual: 0, salida_acumulada: 0, stock_inicial: 0 };
       
       const requiresQC = (config.qualityControlFlavors || ['Agua']).includes(p.sabor);

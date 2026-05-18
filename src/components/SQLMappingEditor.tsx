@@ -90,7 +90,14 @@ export function SQLMappingEditor() {
     availableBrands.forEach(brand => {
       availableSizes.forEach(size => {
         const sizeStr = size.toString();
-        const allowedFlavors = config?.activeProducts?.[brand]?.[sizeStr] || config?.brandFlavorCombinations[brand] || availableFlavors;
+        const brandActive = config?.activeProducts?.[brand];
+        const hasBrandConfig = brandActive && Object.keys(brandActive).length > 0;
+        const hasSizeConfig = brandActive && sizeStr in brandActive;
+        
+        const allowedFlavors = hasSizeConfig
+          ? brandActive[sizeStr]
+          : (hasBrandConfig ? [] : (config?.brandFlavorCombinations[brand] || []));
+
         allowedFlavors.forEach(flavor => {
           if (config?.enabledFlavors?.[flavor] !== false) {
             keys.push(`${brand}-${flavor}-${size}`);
@@ -124,9 +131,8 @@ export function SQLMappingEditor() {
 
   const activeMappings = activeTab === 'products' ? productMappings : syrupMappings;
   
-  // Use generated keys but also include any keys that might be in the database but not in our generated list (migration/legacy)
+  // Only show keys that are currently active in the configuration
   const sourceKeysSet = new Set<string>(activeTab === 'products' ? generatedProductKeys : generatedSyrupKeys);
-  Object.keys(activeMappings).forEach(key => sourceKeysSet.add(key));
   const sourceKeys = Array.from(sourceKeysSet);
 
   const filteredKeys = sourceKeys.filter(key => 
