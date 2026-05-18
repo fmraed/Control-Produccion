@@ -175,13 +175,15 @@ export function StockControl() {
       const legacyKey = `${p.sabor}-${p.tamano}`;
       const sqlCode = sqlMappings[mappingKey] || sqlMappings[legacyKey];
       
-      const sqlData = sqlStock.find(s => s.codigo === sqlCode) || { stock_actual: 0, salida_acumulada: 0, stock_inicial: 0 };
+      const sqlData = sqlStock.find(s => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim()) || { stock_actual: 0, salida_acumulada: 0, stock_inicial: 0 };
       
-      const requiresQC = (config.qualityControlFlavors || ['Agua']).includes(p.sabor);
+      const requiresQC = (config.qualityControlFlavors || ['Agua']).some(f => f.trim() === p.sabor.trim());
       const isExternal = (config.externalProducts?.[p.marca]?.[p.tamano.toString()] || []).includes(p.sabor);
       
-      const pendingData = requiresQC ? sqlPending.find(s => s.codigo === sqlCode) : undefined;
-      const pendingQuantity = pendingData?.cantidad_pendiente || 0;
+      const pendingData = requiresQC 
+        ? sqlPending.find(s => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim()) 
+        : undefined;
+      const pendingQuantity = pendingData?.nu_Cantidad || 0;
 
       // For external products, we use income instead of production if available
       // For now, income is 0, but we can display the column

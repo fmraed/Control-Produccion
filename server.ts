@@ -190,7 +190,7 @@ async function startServer() {
       const pendingQuery = `
         SELECT 
             a.[co_codAbre] AS codigo,
-            SUM(c.[nu_cantidadPendiente]) as cantidad_pendiente
+            SUM(c.[nu_Cantidad]) as nu_Cantidad
         FROM [forDrink].[dbo].[pr_ca_control] c
         JOIN [forDrink].[dbo].[fc_articulos] a
             ON c.id_articulo = a.id_articulo
