@@ -49,7 +49,7 @@ import { HistoricalElaboracionExporter } from './components/HistoricalElaboracio
 import { Auth } from './components/Auth';
 import { ProductionReport, ElaboracionReport, UserProfile, UserRole } from './types';
 import { useRolePermissions } from './hooks/useRolePermissions';
-import { Settings, Beaker, PieChart, ShieldCheck, TrendingUp } from 'lucide-react';
+import { Settings, Beaker, PieChart, ShieldCheck, TrendingUp, ShieldAlert, AlertCircle } from 'lucide-react';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -111,6 +111,45 @@ export default function App() {
 
   const { permissions, loading: permissionsLoading } = useRolePermissions(userProfile?.role);
 
+  useEffect(() => {
+    if (userProfile && permissions) {
+      const allowedViews = {
+        dashboard: permissions.viewReports,
+        elaboracion_history: permissions.viewElaboracion || permissions.editElaboracion,
+        personnel: permissions.viewPersonnel || permissions.editPersonnel,
+        scheduler: permissions.viewScheduler || permissions.editScheduler,
+        admin: permissions.viewAdmin,
+        live: permissions.viewLiveMonitor,
+        management_summary: permissions.viewManagementSummary,
+        consolidated: permissions.viewConsolidated,
+        waste: permissions.viewWaste,
+        syrup: permissions.viewSyrup,
+        goal_fulfillment: permissions.viewGoalFulfillment,
+        stock_control: permissions.viewStockControl,
+        efficiency: permissions.viewEfficiency,
+        gantt: permissions.viewGantt,
+        downtime: permissions.viewAnalytics,
+        pareto: permissions.viewAnalytics,
+        new: permissions.editReports,
+        elaboracion: permissions.editElaboracion,
+        historical_report: true,
+        historical_importer: permissions.viewAnalytics,
+        historical_exporter: permissions.viewAnalytics,
+        historical_elab_importer: permissions.viewAnalytics,
+        historical_elab_exporter: permissions.viewAnalytics,
+        profile: true
+      };
+
+      // If current view is restricted, redirect to first available
+      if (currentView !== 'profile' && !allowedViews[currentView as keyof typeof allowedViews]) {
+        if (permissions.viewReports) setCurrentView('dashboard');
+        else if (permissions.viewElaboracion || permissions.editElaboracion) setCurrentView('elaboracion_history');
+        else if (permissions.viewPersonnel || permissions.editPersonnel) setCurrentView('personnel');
+        else setCurrentView('profile');
+      }
+    }
+  }, [userProfile, permissions, currentView]); // Added currentView to dependencies
+
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   useEffect(() => {
@@ -146,52 +185,87 @@ export default function App() {
         // Fetch user profile
         try {
           const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-          const isAdminEmail = currentUser.email === 'fraed.fordrinks@gmail.com';
+          let profileToSet: UserProfile | null = null;
+          const email = currentUser.email?.toLowerCase().trim();
 
           if (userDoc.exists()) {
-            const data = userDoc.data() as UserProfile;
+            profileToSet = userDoc.data() as UserProfile;
+          }
+
+          // Even if profile exists, check if there's a new "allowed_user" invitation to sync
+          if (email) {
+            const allowedDoc = await getDoc(doc(db, 'allowed_users', email));
+            if (allowedDoc.exists()) {
+              const allowedData = allowedDoc.data();
+              const isAdminEmail = email === 'fraed.fordrinks@gmail.com';
+              
+              const baseProfile = profileToSet || {
+                uid: currentUser.uid,
+                email: currentUser.email || '',
+                displayName: currentUser.displayName || 'Usuario',
+                createdAt: new Date().toISOString()
+              };
+              
+              if (currentUser.photoURL) {
+                (baseProfile as any).photoURL = currentUser.photoURL;
+              }
+
+              // Build profile correctly without updating role if not allowed
+              const updatedProfile: UserProfile = {
+                ...baseProfile,
+                uid: currentUser.uid,
+                sector: allowedData?.sector || baseProfile.sector || '',
+                updatedAt: new Date().toISOString()
+              };
+
+              // Only assign role if it's new (to prevent permission denied on update)
+              if (!profileToSet) {
+                updatedProfile.role = isAdminEmail ? 'admin' : (allowedData?.role || 'produccion');
+              } else if (isAdminEmail) {
+                 updatedProfile.role = 'admin';
+              } else {
+                 updatedProfile.role = profileToSet.role;
+              }
+
+              try {
+                await setDoc(doc(db, 'users', currentUser.uid), updatedProfile, { merge: true });
+                await deleteDoc(doc(db, 'allowed_users', email));
+                profileToSet = updatedProfile;
+              } catch (e) {
+                console.error("Error synchronizing allowed_users", e);
+                // Even if deletion fails (perms or UI), use profile
+                profileToSet = profileToSet || updatedProfile;
+              }
+            }
+          }
+
+          if (profileToSet) {
+            const isAdminEmail = currentUser.email === 'fraed.fordrinks@gmail.com';
             // Force admin role for the main admin email if not already set
-            if (isAdminEmail && data.role !== 'admin') {
-              const updatedProfile = { ...data, role: 'admin' as UserRole };
+            if (isAdminEmail && profileToSet.role !== 'admin') {
+              const updatedProfile = { ...profileToSet, role: 'admin' as UserRole };
               await setDoc(doc(db, 'users', currentUser.uid), updatedProfile, { merge: true });
               setUserProfile(updatedProfile);
             } else {
-              setUserProfile(data);
+              setUserProfile(profileToSet);
             }
           } else {
-            // Check if user is in allowed_users whitelist
-            const email = currentUser.email?.toLowerCase().trim();
-            if (email) {
-              const allowedDoc = await getDoc(doc(db, 'allowed_users', email));
-              
-              if (allowedDoc.exists() || isAdminEmail) {
-                const allowedData = allowedDoc.data();
-                // Create profile from whitelist or defaults for main admin
-                const newProfile: UserProfile = {
-                  uid: currentUser.uid,
-                  email: currentUser.email || '',
-                  displayName: currentUser.displayName || 'Usuario',
-                  role: isAdminEmail ? 'admin' : (allowedData?.role || 'produccion'),
-                  sector: allowedData?.sector || undefined,
-                  photoURL: currentUser.photoURL || undefined,
-                  createdAt: new Date().toISOString(),
-                  updatedAt: new Date().toISOString()
-                };
-                await setDoc(doc(db, 'users', currentUser.uid), newProfile);
-                
-                // Clean up whitelist if it was used
-                if (allowedDoc.exists()) {
-                  await deleteDoc(doc(db, 'allowed_users', email));
-                }
-                
-                setUserProfile(newProfile);
-              } else {
-                // Not on whitelist - block access
-                console.warn("User not on whitelist:", email);
-                setUserProfile(undefined); // undefined means unauthorized
-              }
+            // No profile and no whitelist entry
+            const isAdminEmail = currentUser.email === 'fraed.fordrinks@gmail.com';
+            if (isAdminEmail) {
+              // Special case: Root admin always allowed
+              const newProfile: UserProfile = {
+                uid: currentUser.uid,
+                email: currentUser.email || '',
+                displayName: currentUser.displayName || 'Usuario',
+                role: 'admin',
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+              };
+              await setDoc(doc(db, 'users', currentUser.uid), newProfile);
+              setUserProfile(newProfile);
             } else {
-              setUserProfile(undefined);
+              setUserProfile(undefined); // Restricted
             }
           }
         } catch (error) {
@@ -254,10 +328,16 @@ export default function App() {
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
         <div className="bg-white p-8 rounded-3xl shadow-xl border border-red-100 max-w-md w-full text-center">
           <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
-            <ShieldCheck className="w-10 h-10 text-red-500" />
+            <ShieldAlert className="w-10 h-10 text-red-500" />
           </div>
           <h2 className="text-2xl font-black text-gray-900 mb-2 uppercase tracking-tighter">Acceso Restringido</h2>
-          <p className="text-gray-500 mb-8">Tu cuenta ({user?.email}) no ha sido habilitada para acceder a este sistema. Por favor, contacta al administrador.</p>
+          <p className="text-gray-500 mb-2">Tu cuenta no ha sido habilitada en el sistema.</p>
+          <div className="bg-gray-100 p-4 rounded-xl mb-8 text-left">
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Información para el Administrador:</p>
+            <p className="text-xs font-mono text-gray-600 break-all"><b>Email:</b> {user?.email}</p>
+            <p className="text-xs font-mono text-gray-600 break-all"><b>UID:</b> {user?.uid}</p>
+          </div>
+          <p className="text-sm text-gray-500 mb-6 italic">Envíale estos datos al administrador para que habilite tu acceso dándote de alta.</p>
           <button
             onClick={() => logout()}
             className="flex items-center justify-center gap-2 w-full bg-gray-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest hover:bg-gray-800 transition-all shadow-lg"
@@ -352,57 +432,8 @@ export default function App() {
           </h1>
           
           <div className="flex flex-wrap items-center gap-2 bg-white rounded-xl shadow-sm border border-gray-200 p-1.5 w-full lg:w-auto">
-            {/* GRUPO: DATOS CARGADOS */}
-            {(permissions.viewReports && permissions.viewElaboracion) ? (
-              <div className="relative">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setActiveMenu(activeMenu === 'data' ? null : 'data');
-                  }}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
-                    ['dashboard', 'elaboracion_history'].includes(currentView)
-                      ? 'bg-blue-600 text-white shadow-md shadow-blue-200'
-                      : 'text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  <ClipboardList className="w-4 h-4" />
-                  <span className="hidden sm:inline">Datos</span>
-                  <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${activeMenu === 'data' ? 'rotate-180' : ''}`} />
-                </button>
-                
-                <AnimatePresence>
-                  {activeMenu === 'data' && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      transition={{ duration: 0.15, ease: "easeOut" }}
-                      className="absolute top-full left-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-30 overflow-hidden"
-                    >
-                      <button
-                        onClick={() => { setCurrentView('dashboard'); setActiveMenu(null); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === 'dashboard' ? 'bg-blue-50 text-blue-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        <FileText className="w-4 h-4" />
-                        Datos Prod.
-                      </button>
-                      <button
-                        onClick={() => { setCurrentView('elaboracion_history'); setActiveMenu(null); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === 'elaboracion_history' ? 'bg-blue-50 text-blue-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        <Beaker className="w-4 h-4" />
-                        Datos Elab.
-                      </button>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            ) : permissions.viewReports ? (
+            {/* SECCIÓN 1: DATOS Y CONSULTAS */}
+            {(permissions.viewReports || permissions.editReports) && (
               <button
                 onClick={() => { setCurrentView('dashboard'); setActiveMenu(null); }}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
@@ -410,9 +441,12 @@ export default function App() {
                 }`}
               >
                 <ClipboardList className="w-4 h-4" />
-                <span className="hidden sm:inline">Datos Prod.</span>
+                <span className="hidden sm:inline">Prod.</span>
+                <span className="sm:hidden">Prod</span>
               </button>
-            ) : permissions.viewElaboracion ? (
+            )}
+
+            {(permissions.viewElaboracion || permissions.editElaboracion) && (
               <button
                 onClick={() => { setCurrentView('elaboracion_history'); setActiveMenu(null); }}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
@@ -420,12 +454,9 @@ export default function App() {
                 }`}
               >
                 <Beaker className="w-4 h-4" />
-                <span className="hidden sm:inline">Datos Elab.</span>
+                <span className="hidden sm:inline">Elab.</span>
+                <span className="sm:hidden">Elab</span>
               </button>
-            ) : null}
-
-            {((permissions.viewReports || permissions.viewElaboracion) && permissions.viewAnalytics) && (
-              <div className="w-px h-6 bg-gray-200 mx-0.5" />
             )}
 
             {permissions.viewAnalytics && (
@@ -436,7 +467,7 @@ export default function App() {
                     setActiveMenu(activeMenu === 'reports' ? null : 'reports');
                   }}
                   className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
-                    ['consolidated', 'waste', 'downtime', 'pareto', 'efficiency', 'gantt', 'syrup', 'goal_fulfillment'].includes(currentView)
+                    ['consolidated', 'waste', 'downtime', 'pareto', 'efficiency', 'gantt', 'syrup', 'goal_fulfillment', 'management_summary', 'stock_control', 'historical_report'].includes(currentView)
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200'
                       : 'text-gray-600 hover:bg-gray-100'
                   }`}
@@ -462,7 +493,7 @@ export default function App() {
                             currentView === 'management_summary' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
                           }`}
                         >
-                          <PieChart className="w-4 h-4" />
+                          <Activity className="w-4 h-4" />
                           Resumen Gerencial
                         </button>
                       )}
@@ -618,33 +649,34 @@ export default function App() {
               </div>
             )}
 
-            {(permissions.viewAnalytics && (permissions.viewPersonnel || permissions.viewScheduler || permissions.viewLiveMonitor)) && (
-              <div className="w-px h-6 bg-gray-200 mx-0.5" />
+            {/* SECCIÓN 2: GESTIÓN Y PERSONAS */}
+            {((permissions.viewReports || permissions.editReports || permissions.viewElaboracion || permissions.editElaboracion || permissions.viewAnalytics) && (permissions.viewPersonnel || permissions.editPersonnel || permissions.viewScheduler || permissions.editScheduler || permissions.viewLiveMonitor)) && (
+              <div className="hidden lg:block w-px h-6 bg-gray-200 mx-1" />
             )}
 
-            {/* ACCIONES DIRECTAS */}
-            {permissions.viewPersonnel && (
+            {(permissions.viewPersonnel || permissions.editPersonnel) && (
               <button
                 onClick={() => { setCurrentView('personnel'); setActiveMenu(null); }}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
-                  currentView === 'personnel' ? 'bg-blue-600 text-white shadow-md shadow-blue-200' : 'text-gray-600 hover:bg-gray-100'
+                  currentView === 'personnel' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' : 'text-gray-600 hover:bg-gray-100'
                 }`}
               >
                 <Users className="w-4 h-4" />
-                <span className="hidden md:inline">Personal</span>
+                <span className="hidden sm:inline">Personal</span>
+                <span className="sm:hidden">Pers.</span>
               </button>
             )}
 
-            {permissions.viewScheduler && (
+            {(permissions.viewScheduler || permissions.editScheduler) && (
               <button
                 onClick={() => { setCurrentView('scheduler'); setActiveMenu(null); }}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
-                  currentView === 'scheduler' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' : 'text-gray-600 hover:bg-gray-100'
+                  currentView === 'scheduler' ? 'bg-blue-600 text-white shadow-md shadow-blue-200' : 'text-gray-600 hover:bg-gray-100'
                 }`}
               >
                 <DraftingCompass className="w-4 h-4" />
-                <span className="hidden md:inline">Planificación</span>
-                <span className="md:hidden">Plani.</span>
+                <span className="hidden sm:inline">Planificación</span>
+                <span className="sm:hidden">Plani.</span>
               </button>
             )}
 
@@ -656,13 +688,13 @@ export default function App() {
                 }`}
               >
                 <Activity className="w-4 h-4" />
-                <span className="hidden md:inline">Monitor en Vivo</span>
-                <span className="md:hidden">Monitor</span>
+                <span className="hidden sm:inline">En Vivo</span>
               </button>
             )}
 
-            {(permissions.editElaboracion || permissions.editReports || permissions.viewAdmin) && (permissions.viewPersonnel || permissions.viewScheduler || permissions.viewLiveMonitor) && (
-              <div className="w-px h-6 bg-gray-200 mx-0.5" />
+            {/* SECCIÓN 3: ACCIONES Y ADMIN */}
+            {((permissions.viewReports || permissions.editReports || permissions.viewElaboracion || permissions.editElaboracion || permissions.viewAnalytics || permissions.viewPersonnel || permissions.editPersonnel || permissions.viewScheduler || permissions.editScheduler || permissions.viewLiveMonitor) && (permissions.editElaboracion || permissions.editReports || permissions.viewAdmin)) && (
+              <div className="hidden lg:block w-px h-6 bg-gray-200 mx-1" />
             )}
 
             {permissions.editElaboracion && (
@@ -673,8 +705,8 @@ export default function App() {
                 }`}
               >
                 <Beaker className="w-4 h-4" />
-                <span className="hidden md:inline">Cargar Elab.</span>
-                <span className="md:hidden">Elab.</span>
+                <span className="hidden sm:inline">Cargar Elab.</span>
+                <span className="sm:hidden">Elab+</span>
               </button>
             )}
             
@@ -686,26 +718,22 @@ export default function App() {
                 }`}
               >
                 <PlusCircle className="w-4 h-4" />
-                <span className="hidden md:inline">Nuevo Parte</span>
-                <span className="md:hidden">Nuevo</span>
+                <span className="hidden sm:inline">Cargar Prod.</span>
+                <span className="sm:hidden">Prod+</span>
               </button>
             )}
 
             {permissions.viewAdmin && (
-              <>
-                {(permissions.editElaboracion || permissions.editReports || permissions.viewPersonnel || permissions.viewScheduler || permissions.viewLiveMonitor) && (
-                   <div className="w-px h-6 bg-gray-200 mx-0.5" />
-                )}
-                <button
-                  onClick={() => { setCurrentView('admin'); setActiveMenu(null); }}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
-                    currentView === 'admin' ? 'bg-gray-800 text-white shadow-md' : 'text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  <Settings className="w-4 h-4" />
-                  <span className="hidden lg:inline">Admin</span>
-                </button>
-              </>
+              <button
+                onClick={() => { setCurrentView('admin'); setActiveMenu(null); }}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
+                  currentView === 'admin' ? 'bg-gray-800 text-white shadow-md' : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <Settings className="w-4 h-4" />
+                <span className="hidden sm:inline">Admin</span>
+                <span className="sm:hidden">Admin</span>
+              </button>
             )}
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment } from 'react';
+import { useState, useEffect, Fragment, useMemo } from 'react';
 import { collection, query, orderBy, onSnapshot, doc, getDoc, setDoc, addDoc, deleteDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, CO2_VOLUMES, SABORES_SIN_JARABE, RANGOS_MIXTO } from '../constants';
@@ -87,9 +87,18 @@ export function AdminPanel() {
 
   const [userSearch, setUserSearch] = useState('');
   
+  const trulyPendingAllowedUsers = useMemo(() => {
+    const registeredEmails = new Set(users.map(u => (u.email || '').toLowerCase().trim()));
+    return allowedUsers.filter(au => {
+      const emailMatch = (au.email || '').toLowerCase().trim();
+      const idMatch = (au.id || '').toLowerCase().trim();
+      return !registeredEmails.has(emailMatch) && !registeredEmails.has(idMatch);
+    });
+  }, [allowedUsers, users]);
+
   const filteredUsers = users.filter(u => 
-    u.displayName?.toLowerCase().includes(userSearch.toLowerCase()) || 
-    u.email?.toLowerCase().includes(userSearch.toLowerCase())
+    ((u.displayName || '').toLowerCase().includes(userSearch.toLowerCase()) || 
+    (u.email || '').toLowerCase().includes(userSearch.toLowerCase()))
   );
 
   useEffect(() => {
@@ -307,8 +316,29 @@ export function AdminPanel() {
         console.error("Error loading users:", error);
         setMessage({ type: 'error', text: 'Error al cargar usuarios registrados' });
       });
-      const unsubAllowed = onSnapshot(collection(db, 'allowed_users'), (snap) => {
+      const unsubAllowed = onSnapshot(collection(db, 'allowed_users'), async (snap) => {
         const allowedList = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+        
+        // Auto-normalize any legacy uppercase/spaced emails in background
+        const batch = writeBatch(db);
+        let hasChanges = false;
+        for (const docSnap of snap.docs) {
+          const originalId = docSnap.id;
+          const normalizedId = originalId.toLowerCase().trim();
+          if (originalId !== normalizedId && !allowedList.some(a => a.id === normalizedId)) {
+            batch.set(doc(db, 'allowed_users', normalizedId), { ...docSnap.data(), email: normalizedId });
+            batch.delete(docSnap.ref);
+            hasChanges = true;
+          } else if (originalId !== normalizedId) {
+            // Normalized already exists, delete the duplicate uppercase one
+            batch.delete(docSnap.ref);
+            hasChanges = true;
+          }
+        }
+        if (hasChanges) {
+          try { await batch.commit(); } catch (e) { console.error('Failed normalizing allowed users', e); }
+        }
+
         allowedList.sort((a, b) => {
           const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
           const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
@@ -395,18 +425,35 @@ export function AdminPanel() {
     setIsAddingUser(true);
     try {
       const email = newUserEmail.toLowerCase().trim();
-      await setDoc(doc(db, 'allowed_users', email), {
-        email,
-        role: newUserRole,
-        sector: newUserSector,
-        createdAt: new Date().toISOString()
-      });
+      
+      // Check if user is already registered in 'users'
+      const existingRegisteredUser = users.find(u => (u.email || '').toLowerCase().trim() === email);
+      
+      if (existingRegisteredUser) {
+        // Update existing user directly
+        await setDoc(doc(db, 'users', existingRegisteredUser.uid), {
+          ...existingRegisteredUser,
+          role: newUserRole,
+          sector: newUserSector || existingRegisteredUser.sector,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+        setMessage({ type: 'success', text: `Usuario ${email} ya estaba registrado. Se actualizó su rol y sector directamente.` });
+      } else {
+        // Not registered yet, add to whitelist
+        await setDoc(doc(db, 'allowed_users', email), {
+          email,
+          role: newUserRole,
+          sector: newUserSector,
+          createdAt: new Date().toISOString()
+        });
+        setMessage({ type: 'success', text: 'Usuario habilitado correctamente. Podrá entrar cuando se registre.' });
+      }
+      
       setNewUserEmail('');
       setNewUserSector('');
-      setMessage({ type: 'success', text: 'Usuario habilitado correctamente' });
     } catch (error) {
       console.error("Error adding allowed user:", error);
-      setMessage({ type: 'error', text: 'Error al habilitar usuario' });
+      setMessage({ type: 'error', text: 'Error al habilitar/actualizar usuario' });
     } finally {
       setIsAddingUser(false);
     }
@@ -2169,9 +2216,9 @@ export function AdminPanel() {
             <div>
               <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4 flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4" />
-                Habilitaciones Pendientes de Registro ({allowedUsers.length})
+                Habilitaciones Pendientes de Registro ({trulyPendingAllowedUsers.length})
               </h3>
-              {allowedUsers.length > 0 ? (
+              {trulyPendingAllowedUsers.length > 0 ? (
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
@@ -2184,7 +2231,7 @@ export function AdminPanel() {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {allowedUsers.map(au => (
+                      {trulyPendingAllowedUsers.map(au => (
                         <tr key={au.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-blue-600">{au.email}</td>
                           <td className="px-6 py-4 whitespace-nowrap">
@@ -2196,11 +2243,11 @@ export function AdminPanel() {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-right">
                             <button 
-                              onClick={() => handleDeleteAllowedUser(au.id)}
-                              className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-full transition-colors"
-                              title="Revocar acceso"
+                               onClick={() => handleDeleteAllowedUser(au.id)}
+                               className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-full transition-colors"
+                               title="Revocar acceso"
                             >
-                              <Trash2 className="w-4 h-4" />
+                               <Trash2 className="w-4 h-4" />
                             </button>
                           </td>
                         </tr>
@@ -2232,6 +2279,21 @@ export function AdminPanel() {
                    />
                 </div>
               </div>
+
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-6">
+                <div className="flex gap-3">
+                  <AlertCircle className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="text-sm font-bold text-blue-900 mb-1">¿Un usuario se registró pero no aparece aquí?</h4>
+                    <p className="text-xs text-blue-700 leading-relaxed">
+                      Para que un usuario aparezca en esta lista, primero debe estar en <b>Habilitaciones Pendientes</b> con su email exacto. 
+                      Una vez que el usuario inicia sesión por primera vez con ese email, el sistema crea su perfil y pasará automáticamente a esta lista de <b>Usuarios Registrados</b>.
+                      Si el usuario ya se registró en Firebase pero no fue habilitado previamente, verá un mensaje de "Acceso Restringido" hasta que usted lo habilite arriba y el usuario vuelva a entrar.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               {filteredUsers.length > 0 ? (
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
