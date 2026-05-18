@@ -86,7 +86,15 @@ export function GoalFulfillment() {
     
     availableBrands.forEach(brand => {
       availableSizes.forEach(size => {
-        const allowedFlavors = config.activeProducts?.[brand]?.[size.toString()] || config.brandFlavorCombinations[brand] || [];
+        const sizeStr = size.toString();
+        const brandActive = config.activeProducts?.[brand];
+        const hasBrandConfig = brandActive && Object.keys(brandActive).length > 0;
+        const hasSizeConfig = brandActive && sizeStr in brandActive;
+
+        const allowedFlavors = hasSizeConfig
+          ? brandActive[sizeStr]
+          : (hasBrandConfig ? [] : (config.brandFlavorCombinations[brand] || []));
+
         allowedFlavors.forEach(flavor => {
           if (config.enabledFlavors?.[flavor] !== false) {
             const key = `${brand}|${flavor}|${size}`;
@@ -101,34 +109,10 @@ export function GoalFulfillment() {
       });
     });
 
-    filteredReportsByMonth.forEach(r => {
-      if (r.marca && r.sabor && r.tamano) {
-        const key = `${r.marca}|${r.sabor}|${r.tamano}`;
-        if (!productMap.has(key)) {
-          productMap.set(key, {
-            marca: r.marca,
-            sabor: r.sabor,
-            tamano: r.tamano,
-            key
-          });
-        }
-      }
-    });
-
-    goals.filter(g => g.month === selectedMonth).forEach(g => {
-      if (g.marca && g.sabor && g.tamano) {
-        const key = `${g.marca}|${g.sabor}|${g.tamano}`;
-        if (!productMap.has(key)) {
-          productMap.set(key, {
-            marca: g.marca,
-            sabor: g.sabor,
-            tamano: g.tamano,
-            key
-          });
-        }
-      }
-    });
-
+    // We strictly use the configuration to define the active products list.
+    // Combinations from reports or goals that are not in the current active configuration
+    // will be ignored to respect the "only enabled combinations" requirement.
+    
     return Array.from(productMap.values()).sort((a, b) => {
       if (a.marca !== b.marca) return a.marca.localeCompare(b.marca);
       if (a.tamano !== b.tamano) return b.tamano - a.tamano;
@@ -624,7 +608,14 @@ export function GoalFulfillment() {
                   {group.products.map((p: any) => (
                     <tr key={p.key} className="hover:bg-gray-50 transition-colors group">
                       <td className="px-6 py-4 text-sm font-black text-gray-900 border-r border-gray-100 italic">{p.marca}</td>
-                      <td className="px-6 py-4 text-sm font-bold text-gray-600 border-r border-gray-100">{p.sabor}</td>
+                      <td className="px-6 py-4 text-sm font-bold text-gray-600 border-r border-gray-100 uppercase">
+                        <div className="flex flex-col">
+                          <span className="truncate">{p.sabor}</span>
+                          {(config?.externalProducts?.[p.marca]?.[p.tamano.toString()] || []).includes(p.sabor) && (
+                            <span className="text-[7px] bg-purple-100 text-purple-700 px-1 py-0.5 rounded w-fit font-black mt-0.5 tracking-tighter">EXTERNO</span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-6 py-4 text-sm font-mono font-bold text-gray-500 border-r border-gray-100">{p.tamano}</td>
                       <td className="px-6 py-4 border-r border-gray-100 bg-gray-50/50">
                         {isEditingGoals ? (
