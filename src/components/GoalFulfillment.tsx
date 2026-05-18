@@ -114,6 +114,10 @@ export function GoalFulfillment() {
     // will be ignored to respect the "only enabled combinations" requirement.
     
     return Array.from(productMap.values()).sort((a, b) => {
+      const isExternalA = (config?.externalProducts?.[a.marca]?.[a.tamano.toString()] || []).includes(a.sabor);
+      const isExternalB = (config?.externalProducts?.[b.marca]?.[b.tamano.toString()] || []).includes(b.sabor);
+      
+      if (isExternalA !== isExternalB) return isExternalA ? 1 : -1;
       if (a.marca !== b.marca) return a.marca.localeCompare(b.marca);
       if (a.tamano !== b.tamano) return b.tamano - a.tamano;
       const priorityA = FLAVOR_PRIORITY[a.sabor] || 999;

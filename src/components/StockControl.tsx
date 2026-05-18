@@ -452,35 +452,36 @@ export function StockControl() {
                           {p.pending > 0 ? p.pending.toLocaleString('es-AR') : '-'}
                         </td>
                         <td className="px-4 py-3 text-xs font-bold text-gray-600 border-r border-gray-100 italic">
-                          {p.isExternal ? <span className="text-gray-300">N/A</span> : p.totalProducedMonth.toLocaleString('es-AR')}
+                          {p.isExternal ? (
+                            <div className="flex flex-col">
+                              <span className="text-gray-400 line-through text-[10px]">{p.totalProducedMonth.toLocaleString('es-AR')}</span>
+                              <span className="text-[7px] text-purple-500 font-black">EXTERNO</span>
+                            </div>
+                          ) : p.totalProducedMonth.toLocaleString('es-AR')}
                         </td>
-                        <td className="px-4 py-3 text-xs font-bold text-gray-600 border-r border-gray-100 opacity-50">
-                          {p.isExternal ? <span className="text-gray-300">N/A</span> : p.avgDailyExit.toLocaleString('es-AR', { maximumFractionDigits: 0 })}
+                        <td className="px-4 py-3 text-xs font-bold text-gray-600 border-r border-gray-100 italic">
+                          {p.avgDailyExit.toLocaleString('es-AR', { maximumFractionDigits: 0 })}
                         </td>
                         <td className={`px-6 py-3 border-r border-gray-200 text-center ${
-                          p.isExternal ? 'bg-gray-50' :
                           p.coverageDays < 5 ? 'bg-red-500 shadow-inner' :
                           p.coverageDays < 10 ? 'bg-yellow-400 shadow-inner' :
                           'bg-green-500 shadow-inner'
                         }`}>
                           <div className="flex flex-col items-center">
-                            <span className={`text-lg font-black drop-shadow-sm leading-none ${p.isExternal ? 'text-gray-300' : 'text-white'}`}>
-                              {p.isExternal ? '-' : p.coverageDays}
+                            <span className="text-lg font-black text-white drop-shadow-sm leading-none">
+                              {p.coverageDays}
                             </span>
-                            {!p.isExternal && (
-                              <span className="text-[8px] font-black text-white/90 uppercase tracking-tighter">
-                                Días
-                              </span>
-                            )}
+                            <span className="text-[8px] font-black text-white/90 uppercase tracking-tighter">
+                              Días
+                            </span>
                           </div>
                         </td>
                         <td className={`px-3 py-3 text-xs font-bold border-r border-gray-100 text-center ${
-                          p.isExternal ? 'text-gray-300' :
                           p.fulfillment >= 100 ? 'text-green-700 bg-green-50/30' : 
                           p.fulfillment >= 80 ? 'text-blue-700 bg-blue-50/30' : 
                           p.fulfillment >= 50 ? 'text-orange-700 bg-orange-50/30' : 'text-red-700 bg-red-50/30'
                         }`}>
-                          {p.isExternal ? '-' : `${p.fulfillment.toFixed(0)}%`}
+                          {p.fulfillment.toFixed(0)}%
                         </td>
                         <td className="px-4 py-3 text-xs font-bold text-gray-500 border-r border-gray-100 italic">
                           {p.initialStock.toLocaleString('es-AR')}
@@ -496,10 +497,14 @@ export function StockControl() {
                       <td className="px-4 py-2 text-sm">{group.ordered.toLocaleString('es-AR')}</td>
                       <td className="px-4 py-2 text-sm">{group.stock.toLocaleString('es-AR')}</td>
                       <td className="px-4 py-2 text-sm">{group.pending > 0 ? group.pending.toLocaleString('es-AR') : '-'}</td>
-                      <td className="px-4 py-2 text-sm">{isExternalGroup ? '-' : group.products.reduce((sum, p) => sum + p.totalProducedMonth, 0).toLocaleString('es-AR')}</td>
-                      <td className="px-4 py-2 text-sm opacity-50">{isExternalGroup ? '-' : group.avgExit.toLocaleString('es-AR', { maximumFractionDigits: 0 })}</td>
+                      <td className="px-4 py-2 text-sm">
+                        {isExternalGroup ? (
+                           <span className="opacity-50 line-through">{group.products.reduce((sum: number, p: any) => sum + p.totalProducedMonth, 0).toLocaleString('es-AR')}</span>
+                        ) : group.products.reduce((sum: number, p: any) => sum + p.totalProducedMonth, 0).toLocaleString('es-AR')}
+                      </td>
+                      <td className="px-4 py-2 text-sm opacity-80">{group.avgExit.toLocaleString('es-AR', { maximumFractionDigits: 0 })}</td>
                       <td className={`px-4 py-2 border-r ${isExternalGroup ? 'border-purple-500 bg-purple-700' : 'border-cyan-400 bg-cyan-600'} text-center`}></td>
-                      <td className={`px-4 py-2 text-sm ${isExternalGroup ? 'text-purple-100 border-purple-500' : 'text-cyan-100 border-r border-cyan-400'} text-center`}>{isExternalGroup ? '-' : `${group.fulfillment.toFixed(0)}%`}</td>
+                      <td className={`px-4 py-2 text-sm ${isExternalGroup ? 'text-purple-100 border-purple-500' : 'text-cyan-100 border-r border-cyan-400'} text-center`}>{group.fulfillment.toFixed(0)}%</td>
                       <td className={`px-4 py-2 text-sm italic opacity-80 border-r ${isExternalGroup ? 'border-purple-500' : 'border-cyan-400'}`}>{group.initialStock.toLocaleString('es-AR')}</td>
                       <td className={`px-4 py-2 text-sm ${isExternalGroup ? 'bg-black/10' : 'bg-gray-800/20'}`}>{group.accumulatedExit.toLocaleString('es-AR')}</td>
                     </tr>
