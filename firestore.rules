@@ -79,12 +79,12 @@ service cloud.firestore {
     }
     
     function uidUnchanged() {
-      return !('authorId' in request.resource.data) ||
+      return isAdmin() || !('authorId' in request.resource.data) ||
         request.resource.data.authorId == request.auth.uid;
     }
     
     function uidNotModified() {
-      return !('authorId' in request.resource.data) ||
+      return isAdmin() || !('authorId' in request.resource.data) ||
         request.resource.data.authorId == resource.data.authorId;
     }
     
@@ -122,7 +122,7 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isAuthenticated() && (request.auth.token.email == "fraed.fordrinks@gmail.com");
+      return isAuthenticated() && (request.auth.token.email.lower() == "fraed.fordrinks@gmail.com".lower());
     }
 
     // Domain Validators

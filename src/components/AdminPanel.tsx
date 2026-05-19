@@ -1,8 +1,8 @@
 import { useState, useEffect, Fragment, useMemo } from 'react';
 import { collection, query, orderBy, onSnapshot, doc, getDoc, setDoc, addDoc, deleteDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
-import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, CO2_VOLUMES, SABORES_SIN_JARABE, RANGOS_MIXTO } from '../constants';
-import { Settings, Save, CheckCircle2, XCircle, AlertCircle, Plus, Trash2, Users, Database, FlaskConical, Link2, Clock, Calendar, ShieldCheck, UserCog, Briefcase, AlertTriangle, Hash, Package, TrendingUp } from 'lucide-react';
+import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, CO2_VOLUMES, SABORES_SIN_JARABE, RANGOS_MIXTO, WASTE_WEIGHTS } from '../constants';
+import { Settings, Save, CheckCircle2, XCircle, AlertCircle, Plus, Trash2, Users, Database, FlaskConical, Link2, Clock, Calendar, ShieldCheck, UserCog, Briefcase, AlertTriangle, Hash, Package, TrendingUp, Scale } from 'lucide-react';
 import { UserProfile, UserRole, RolePermissions } from '../types';
 import { SQLIntegration } from './SQLIntegration';
 import { SQLMappingEditor } from './SQLMappingEditor';
@@ -49,6 +49,7 @@ interface AppConfig {
   warehousePositions?: number;
   stackableFlavors?: string[];
   externalProducts?: Record<string, Record<string, string[]>>;
+  wasteWeights?: Record<string, { etiq: number; tapa: number; termo: number }>;
 }
 
 export function AdminPanel() {
@@ -56,7 +57,7 @@ export function AdminPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
-  const [activeTab, setActiveTab] = useState<'config' | 'sql' | 'mappings' | 'shifts' | 'users' | 'permissions' | 'formulas' | 'danger' | 'salaries' | 'counters'>('config');
+  const [activeTab, setActiveTab] = useState<'config' | 'sql' | 'mappings' | 'shifts' | 'users' | 'permissions' | 'formulas' | 'danger' | 'salaries' | 'counters' | 'waste'>('config');
   const [isPurging, setIsPurging] = useState(false);
   const [confirmPurge, setConfirmPurge] = useState(false);
 
@@ -70,6 +71,33 @@ export function AdminPanel() {
   const [newUserRole, setNewUserRole] = useState<UserRole>('produccion');
   const [newUserSector, setNewUserSector] = useState('');
   const [isAddingUser, setIsAddingUser] = useState(false);
+
+  const filteredSizesForWaste = useMemo(() => {
+    if (!config) return [];
+    return config.sizes.filter(size => {
+      const sizeStr = size.toString();
+      if (config.enabledSizes?.[sizeStr] === false) return false;
+
+      return config.brands.some(brand => {
+        if (config.enabledBrands?.[brand] === false) return false;
+        
+        const brandActive = config.activeProducts?.[brand];
+        const hasBrandConfig = brandActive && Object.keys(brandActive).length > 0;
+        const brandCombos = config.brandFlavorCombinations?.[brand] || [];
+
+        const hasSizeConfig = brandActive && sizeStr in brandActive;
+        const flavors = hasSizeConfig 
+          ? (brandActive as any)[sizeStr]
+          : (hasBrandConfig ? [] : (brandCombos || []));
+        
+        const externalForSize = config.externalProducts?.[brand]?.[sizeStr] || [];
+        
+        return flavors.some((sabor: string) => 
+          config?.enabledFlavors?.[sabor] !== false && !externalForSize.includes(sabor)
+        );
+      });
+    });
+  }, [config]);
 
   // Permission states
   const [rolePermissions, setRolePermissions] = useState<Record<UserRole, RolePermissions> | null>(null);
@@ -199,7 +227,8 @@ export function AdminPanel() {
           qualityControlFlavors: Array.isArray(data.qualityControlFlavors) ? data.qualityControlFlavors : ['Agua'],
           warehousePositions: data.warehousePositions || 2300,
           stackableFlavors: Array.isArray(data.stackableFlavors) ? data.stackableFlavors : (data.flavors || SABORES).filter((s: string) => s !== 'Soda Sifon' && s !== 'Soda'),
-          externalProducts: data.externalProducts || {}
+          externalProducts: data.externalProducts || {},
+          wasteWeights: data.wasteWeights || WASTE_WEIGHTS
         };
         setConfig(mergedConfig);
       } else {
@@ -1063,6 +1092,17 @@ export function AdminPanel() {
         >
           <Hash className="w-3.5 h-3.5" />
           Contadores
+        </button>
+        <button
+          onClick={() => setActiveTab('waste')}
+          className={`flex-1 min-w-[140px] px-4 py-2.5 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 ${
+            activeTab === 'waste'
+              ? 'bg-white text-blue-600 shadow-sm border border-gray-200'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          <Scale className="w-3.5 h-3.5" />
+          Desperdicio
         </button>
         <button
           onClick={() => setActiveTab('danger')}
@@ -2730,6 +2770,115 @@ export function AdminPanel() {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'waste' && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-2">
+              <Scale className="w-6 h-6 text-blue-600" />
+              <h2 className="text-xl font-bold text-gray-900">Referencia de Desperdicio</h2>
+            </div>
+            <button
+              onClick={saveConfig}
+              disabled={saving}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+            >
+              <Save className="w-4 h-4" />
+              {saving ? 'Guardando...' : 'Guardar Cambios'}
+            </button>
+          </div>
+          
+          <p className="text-xs text-gray-500 font-bold uppercase tracking-widest mb-6 border-b pb-4">
+            Valores de referencia para el cálculo de desperdicio. Solo se muestran calibres con productos locales (no externos) activos.
+          </p>
+          
+          <div className="overflow-x-auto">
+            <table className="w-full border-separate border-spacing-0">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="px-6 py-4 text-left text-xs font-black text-gray-400 uppercase tracking-widest border-b border-gray-200 first:rounded-tl-xl">Calibre</th>
+                  <th className="px-6 py-4 text-left text-xs font-black text-gray-400 uppercase tracking-widest border-b border-gray-200">Peso Etiqueta (g)</th>
+                  <th className="px-6 py-4 text-left text-xs font-black text-gray-400 uppercase tracking-widest border-b border-gray-200">Peso Tapa (g)</th>
+                  <th className="px-6 py-4 text-left text-xs font-black text-gray-400 uppercase tracking-widest border-b border-gray-200 last:rounded-tr-xl">Peso Termo (kg/pack)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {filteredSizesForWaste.length > 0 ? (
+                  filteredSizesForWaste.map(size => {
+                    const sizeStr = size.toString();
+                    const weights = config.wasteWeights?.[sizeStr] || { etiq: 0, tapa: 0, termo: 0 };
+                    return (
+                      <tr key={size} className="hover:bg-blue-50/20 transition-colors group">
+                        <td className="px-6 py-5 text-sm font-black text-gray-900 font-mono bg-gray-50/30 group-hover:bg-blue-50/50 transition-colors">{size} cc</td>
+                        <td className="px-6 py-5">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={weights.etiq}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setConfig({
+                                ...config,
+                                wasteWeights: {
+                                  ...(config.wasteWeights || {}),
+                                  [sizeStr]: { ...weights, etiq: val }
+                                }
+                              });
+                            }}
+                            className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none transition-all focus:bg-white"
+                          />
+                        </td>
+                        <td className="px-6 py-5">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={weights.tapa}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setConfig({
+                                ...config,
+                                wasteWeights: {
+                                  ...(config.wasteWeights || {}),
+                                  [sizeStr]: { ...weights, tapa: val }
+                                }
+                              });
+                            }}
+                            className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none transition-all focus:bg-white"
+                          />
+                        </td>
+                        <td className="px-6 py-5">
+                          <input
+                            type="number"
+                            step="0.0001"
+                            value={weights.termo}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setConfig({
+                                ...config,
+                                wasteWeights: {
+                                  ...(config.wasteWeights || {}),
+                                  [sizeStr]: { ...weights, termo: val }
+                                }
+                              });
+                            }}
+                            className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none transition-all focus:bg-white"
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={4} className="px-6 py-12 text-center text-gray-400 italic text-sm">
+                      No hay calibres locales habilitados para configurar.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

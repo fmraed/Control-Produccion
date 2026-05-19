@@ -5,12 +5,12 @@ import { ProductionReport, ElaboracionReport } from '../types';
 import { FileText, Calendar, Filter, Trash2, BarChart3, Wind } from 'lucide-react';
 import { format, parseISO, getDaysInMonth } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { SABORES, TAMANOS, LINEAS, WASTE_WEIGHTS } from '../constants';
+import { SABORES, TAMANOS, LINEAS } from '../constants';
 import { useAppConfig } from '../hooks/useAppConfig';
 import { getLogicalDate } from '../utils';
 
 export function WasteReport() {
-  const { getFilteredSizes, availableLines, shouldShowReport } = useAppConfig();
+  const { config, getFilteredSizes, availableLines, availableBrands, shouldShowReport } = useAppConfig();
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [elaboracionReports, setElaboracionReports] = useState<ElaboracionReport[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,7 +87,30 @@ export function WasteReport() {
   // Calculations
   const wasteData = useMemo(() => {
     const filteredLines = availableLines;
-    const filteredSizes = getFilteredSizes();
+    
+    // Filter sizes: only show if they have at least one local (non-external) enabled product
+    const initialFilteredSizes = getFilteredSizes();
+    const filteredSizes = initialFilteredSizes.filter(size => {
+      const sizeStr = size.toString();
+      
+      // Check if ANY enabled brand has ANY enabled flavor for this size that is NOT external
+      return availableBrands.some(brand => {
+        const brandActive = config?.activeProducts?.[brand];
+        const hasBrandConfig = brandActive && Object.keys(brandActive).length > 0;
+        const brandCombos = config?.brandFlavorCombinations?.[brand] || [];
+
+        const hasSizeConfig = brandActive && sizeStr in brandActive;
+        const flavors = hasSizeConfig 
+          ? (brandActive as any)[sizeStr] 
+          : (hasBrandConfig ? [] : (brandCombos || []));
+        
+        const externalForSize = config?.externalProducts?.[brand]?.[sizeStr] || [];
+        
+        return flavors.some((sabor: string) => 
+          config?.enabledFlavors?.[sabor] !== false && !externalForSize.includes(sabor)
+        );
+      });
+    });
 
     // 1. Scrap Preformas by Line and Caliber
     const scrapByLineAndSize: Record<string, Record<number, number>> = {};
@@ -165,7 +188,8 @@ export function WasteReport() {
       // For caps, we weight by production that uses caps (no sifon)
       const ponderadorTapas = totalUnitsProducedNoSifon > 0 ? unitsProducedNoSifonBySize[size] / totalUnitsProducedNoSifon : 0;
       
-      const weights = WASTE_WEIGHTS[size];
+      const weights = config?.wasteWeights?.[size.toString()];
+      if (!weights) return;
 
       const kgTapasSize = totalKgTapas * ponderadorTapas;
       const kgEtiquetasSize = totalKgEtiquetas * ponderadorGeneral;
@@ -197,7 +221,7 @@ export function WasteReport() {
       filteredLines,
       filteredSizes
     };
-  }, [filteredReports, availableLines, getFilteredSizes]);
+  }, [filteredReports, availableLines, availableBrands, getFilteredSizes, config]);
 
   const co2Data = useMemo(() => {
     // Group production reports by date and shift
@@ -374,7 +398,7 @@ export function WasteReport() {
       if (tapasTeorico > 0) {
         Object.entries(unitsNoSifonBySize).forEach(([sizeStr, units]) => {
           const size = Number(sizeStr);
-          const weight = WASTE_WEIGHTS[size]?.tapa || 0;
+          const weight = config?.wasteWeights?.[size.toString()]?.tapa || 0;
           if (weight > 0) {
             const proportion = units / tapasTeorico;
             const kgForSize = kgTapas * proportion;
@@ -783,12 +807,12 @@ export function WasteReport() {
             <div className="font-bold">g Etiq</div>
             <div className="font-bold">g Tapa</div>
             <div className="font-bold">k Termo</div>
-            {TAMANOS.map(s => (
+            {wasteData.filteredSizes.map(s => (
               <div key={s} className="contents">
                 <div>{s}</div>
-                <div>{WASTE_WEIGHTS[s].etiq}</div>
-                <div>{WASTE_WEIGHTS[s].tapa || '-'}</div>
-                <div>{WASTE_WEIGHTS[s].termo}</div>
+                <div>{config?.wasteWeights?.[s.toString()]?.etiq || '-'}</div>
+                <div>{config?.wasteWeights?.[s.toString()]?.tapa || '-'}</div>
+                <div>{config?.wasteWeights?.[s.toString()]?.termo || '-'}</div>
               </div>
             ))}
           </div>

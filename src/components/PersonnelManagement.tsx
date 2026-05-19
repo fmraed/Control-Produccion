@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, orderBy, onSnapshot, doc, setDoc, addDoc, deleteDoc, where, getDocs, writeBatch } from 'firebase/firestore';
-import { db, auth } from '../firebase';
+import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { ProductionReport, ElaboracionReport, UserProfile, Employee, AttendanceRecord, ShiftAssignment } from '../types';
 import { Users, UserPlus, Calendar, CheckCircle2, XCircle, Clock, Search, Filter, Save, Trash2, ChevronLeft, ChevronRight, LayoutGrid, List as ListIcon, AlertCircle, Edit2, X, BarChart3, FileText, DollarSign } from 'lucide-react';
 import { format, startOfWeek, addDays, parseISO, isSameDay, startOfDay, endOfDay, getDay, eachDayOfInterval } from 'date-fns';
@@ -49,7 +49,11 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
   const [rangeStart, setRangeStart] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [rangeEnd, setRangeEnd] = useState(format(addDays(new Date(), 14), 'yyyy-MM-dd'));
   const [isProcessingRange, setIsProcessingRange] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [operationMessage, setOperationMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+  const [detectedRange, setDetectedRange] = useState<{ start: string; end: string } | null>(null);
   const [appConfig, setAppConfig] = useState<any>(null);
+  const [editingVacation, setEditingVacation] = useState<{ id?: string; employee: Employee; start: string; end: string } | null>(null);
   
   // Permissions
   const isAdmin = userProfile?.role === 'admin' || userProfile?.role === 'jefe_produccion';
@@ -555,36 +559,96 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
     }
   };
 
-  const handleSaveVacationRange = async () => {
+  const handleDeleteVacationRange = async () => {
     if (!showVacationRangeModal) return;
     
     if (isDateRestricted(rangeStart)) {
-      alert("No tiene permisos para cargar licencias o vacaciones en fechas anteriores a la semana actual.");
+      setOperationMessage({ type: 'error', text: "No tiene permisos para modificar registros de semanas anteriores." });
       return;
     }
 
     setIsProcessingRange(true);
+    setOperationMessage(null);
+    try {
+      const q = query(
+        collection(db, 'attendance_records'), 
+        where('employeeId', '==', showVacationRangeModal.id),
+        where('date', '>=', rangeStart),
+        where('date', '<=', rangeEnd),
+        where('status', '==', 'Vacaciones')
+      );
+      
+      const snap = await getDocs(q);
+      const batch = writeBatch(db);
+      
+      let count = 0;
+      snap.forEach(d => {
+        batch.delete(d.ref);
+        count++;
+      });
+      
+      if (count > 0) {
+        await batch.commit();
+        setOperationMessage({ type: 'success', text: `Se eliminaron ${count} registros de vacaciones.` });
+        setTimeout(() => setShowVacationRangeModal(null), 1500);
+      } else {
+        setOperationMessage({ type: 'error', text: "No se encontraron registros de vacaciones en el rango seleccionado." });
+      }
+    } catch (error) {
+      console.error("Error deleting vacation range:", error);
+      setOperationMessage({ type: 'error', text: "Error al eliminar el rango: " + error });
+    } finally {
+      setIsProcessingRange(false);
+      setShowDeleteConfirm(false);
+    }
+  };
+
+  const handleSaveVacationRange = async () => {
+    if (!showVacationRangeModal) return;
+    
+    if (isDateRestricted(rangeStart)) {
+      setOperationMessage({ type: 'error', text: "No tiene permisos para cargar registros en fechas anteriores a la semana actual." });
+      return;
+    }
+
+    setIsProcessingRange(true);
+    setOperationMessage(null);
     try {
       const start = parseISO(rangeStart);
       const end = parseISO(rangeEnd);
       
       if (start > end) {
-        alert("La fecha de inicio debe ser anterior a la de fin.");
+        setOperationMessage({ type: 'error', text: "La fecha de inicio debe ser anterior a la de fin." });
+        setIsProcessingRange(false);
         return;
+      }
+
+      const batch = writeBatch(db);
+
+      // If we are editing (we have a detectedRange), we should clear the OLD range first
+      // to avoid orphaned days if the range was shortened.
+      if (detectedRange) {
+        const qOld = query(
+          collection(db, 'attendance_records'), 
+          where('employeeId', '==', showVacationRangeModal.id),
+          where('date', '>=', detectedRange.start),
+          where('date', '<=', detectedRange.end),
+          where('status', '==', 'Vacaciones')
+        );
+        const snapOld = await getDocs(qOld);
+        snapOld.forEach(d => batch.delete(d.ref));
       }
       
       const interval = eachDayOfInterval({ start, end });
-      const batch = writeBatch(db);
+      const generalHolidays = appConfig?.shiftConfig?.holidays || [];
       
       interval.forEach(day => {
         const dateStr = format(day, 'yyyy-MM-dd');
-        // Check if there's already an attendance record for this day and employee
-        // In this system attendance is tied to shift, we'll put vacations in 'Mañana' as default
-        // or check if there's any existing record for that day to update it instead of creating a new one
+        // We still check local attendance for shift if available, but for the new range
         const existing = attendance.find(a => a.employeeId === showVacationRangeModal.id && a.date === dateStr);
         
-        // Skip if this day is already recorded as a holiday (Feriado)
-        if (existing?.status === 'Feriado') return;
+        const isGeneralHoliday = generalHolidays.includes(dateStr);
+        if (existing?.status === 'Feriado' || isGeneralHoliday) return;
 
         const data: any = {
           employeeId: showVacationRangeModal.id!,
@@ -594,27 +658,23 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
           shift: existing?.shift || 'Mañana',
           status: 'Vacaciones',
           overtimeHours: 0,
-          updatedAt: new Date().toISOString(),
-          authorId: auth.currentUser?.uid || 'system'
+          updatedAt: new Date().toISOString()
         };
 
-        if (existing?.id) {
-          batch.update(doc(db, 'attendance_records', existing.id), data);
-        } else {
-          const newRef = doc(collection(db, 'attendance_records'));
-          batch.set(newRef, {
-            ...data,
-            createdAt: new Date().toISOString()
-          });
-        }
+        const newRef = doc(collection(db, 'attendance_records'));
+        batch.set(newRef, {
+          ...data,
+          authorId: auth.currentUser?.uid || 'system',
+          createdAt: new Date().toISOString()
+        });
       });
       
       await batch.commit();
-      setShowVacationRangeModal(null);
-      alert("Rango de vacaciones cargado exitosamente.");
+      setOperationMessage({ type: 'success', text: "Rango de vacaciones guardado exitosamente." });
+      setTimeout(() => setShowVacationRangeModal(null), 1500);
     } catch (error) {
       console.error("Error saving vacation range:", error);
-      alert("Error al cargar el rango de vacaciones.");
+      setOperationMessage({ type: 'error', text: "Error al guardar el rango: " + error });
     } finally {
       setIsProcessingRange(false);
     }
@@ -837,6 +897,41 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
       </div>
 
       {/* Content */}
+      {(activeTab === 'list' || activeTab === 'benefits') && (
+        <div className="flex justify-between items-center gap-4 mb-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Buscar por nombre o legajo..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+            />
+          </div>
+          {activeTab === 'list' && (
+            <button
+              onClick={() => {
+                setEditingEmployee(null);
+                setNewEmployee({ 
+                  name: '', 
+                  legajo: '', 
+                  position: '', 
+                  active: true,
+                  type: 'Efectivo',
+                  hireDate: format(new Date(), 'yyyy-MM-dd')
+                });
+                setShowEmployeeForm(true);
+              }}
+              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200"
+            >
+              <UserPlus className="w-4 h-4" />
+              Nuevo Empleado
+            </button>
+          )}
+        </div>
+      )}
+
       {activeTab === 'list' && (
         <div className="space-y-4">
           <div className="flex justify-between items-center gap-4">
@@ -861,7 +956,7 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                 <span className="text-xs font-black uppercase tracking-widest">Sector: {userProfile.sector}</span>
               </div>
             )}
-            <div className="relative flex-1">
+            <div className="relative flex-1 hidden">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
                 type="text"
@@ -1726,6 +1821,78 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                       </div>
                     </div>
 
+                    {/* Historial de Vacaciones Recientes */}
+                    {(() => {
+                      const empVacations = attendance
+                        .filter(a => a.employeeId === emp.id && a.status === 'Vacaciones')
+                        .sort((a, b) => b.date.localeCompare(a.date));
+                      
+                      // Identify ranges
+                      const ranges: { start: string; end: string }[] = [];
+                      if (empVacations.length > 0) {
+                        let currentRange: { start: string; end: string } | null = null;
+                        
+                        // We need all dates, including holidays in the middle, to identify ranges correctly
+                        // But since we only have 'Vacaciones' records, we might have gaps if there's a holiday.
+                        // Let's assume a range is contiguous if there's no more than 3 days gap (weekends + maybe a holiday)
+                        // Or better, let's just group them by month for simplicity if finding ranges is too complex
+                        // No, let's try to find ranges.
+                        
+                        const sortedDates = empVacations.map(v => v.date).sort();
+                        if (sortedDates.length > 0) {
+                          let start = sortedDates[0];
+                          let prev = sortedDates[0];
+                          
+                          for (let i = 1; i <= sortedDates.length; i++) {
+                            const current = sortedDates[i];
+                            const prevDate = parseISO(prev);
+                            const currDate = current ? parseISO(current) : null;
+                            
+                            // If gap is more than 4 days, consider it a new range
+                            // (This handles weekends and single holidays)
+                            const diffDays = currDate ? (currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24) : 999;
+                            
+                            if (diffDays > 4) {
+                              ranges.push({ start, end: prev });
+                              if (current) start = current;
+                            }
+                            prev = current;
+                          }
+                        }
+                      }
+
+                      if (ranges.length === 0) return null;
+
+                      return (
+                        <div className="pt-2 border-t border-gray-100">
+                          <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest block mb-2">Rangos Registrados</span>
+                          <div className="space-y-1.5 max-h-[80px] overflow-y-auto pr-1">
+                            {ranges.slice(0, 3).map((range, idx) => (
+                              <div key={idx} className="flex items-center justify-between bg-gray-50 p-2 rounded-lg">
+                                <div className="text-[10px] font-bold text-gray-700">
+                                  {format(parseISO(range.start), 'dd/MM')} al {format(parseISO(range.end), 'dd/MM/yy')}
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    setShowVacationRangeModal(emp);
+                                    setRangeStart(range.start);
+                                    setRangeEnd(range.end);
+                                    setDetectedRange(range);
+                                    setOperationMessage(null);
+                                    setShowDeleteConfirm(false);
+                                  }}
+                                  className="p-1 text-blue-600 hover:bg-blue-100 rounded transition-colors"
+                                  title="Editar este rango"
+                                >
+                                  <Edit2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     {/* Leaves / Licencias */}
                     <div className="pt-2 border-t border-gray-100">
                       <div className="flex justify-between items-center mb-2">
@@ -1958,26 +2125,68 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                 </p>
               </div>
 
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowVacationRangeModal(null)}
-                  className="flex-1 px-4 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm hover:bg-gray-200 transition-all"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={handleSaveVacationRange}
-                  disabled={isProcessingRange}
-                  className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  {isProcessingRange ? (
-                    <Clock className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="w-4 h-4" />
-                  )}
-                  {isProcessingRange ? 'Cargando...' : 'Confirmar'}
-                </button>
-              </div>
+              {operationMessage && (
+                <div className={`mt-4 p-3 rounded-xl flex items-center gap-2 text-xs font-bold uppercase tracking-wider ${
+                  operationMessage.type === 'success' ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-red-50 text-red-700 border border-red-100'
+                }`}>
+                  {operationMessage.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                  {operationMessage.text}
+                </div>
+              )}
+
+              {showDeleteConfirm ? (
+                <div className="mt-6 bg-red-50 p-4 rounded-xl border border-red-100 animate-in zoom-in-95 duration-200">
+                  <p className="text-xs font-black text-red-700 uppercase tracking-widest text-center mb-3">
+                    ¿Confirmar eliminación de este rango?
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setShowDeleteConfirm(false)}
+                      className="flex-1 px-4 py-2 bg-white text-gray-500 rounded-lg font-bold text-[10px] uppercase border border-red-100 transition-all hover:bg-gray-50"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={handleDeleteVacationRange}
+                      disabled={isProcessingRange}
+                      className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg font-bold text-[10px] uppercase shadow-sm transition-all hover:bg-red-700 disabled:bg-red-300"
+                    >
+                      {isProcessingRange ? 'Eliminando...' : 'Confirmar'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex gap-3 mt-6">
+                  <div className="flex-1 flex gap-2">
+                    <button
+                      onClick={() => {
+                        setShowVacationRangeModal(null);
+                        setDetectedRange(null);
+                      }}
+                      className="flex-1 px-4 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm hover:bg-gray-200 transition-all uppercase tracking-widest"
+                    >
+                      Cerrar
+                    </button>
+                    {detectedRange && (
+                      <button
+                        onClick={() => setShowDeleteConfirm(true)}
+                        disabled={isProcessingRange}
+                        className="px-4 py-3 bg-red-50 text-red-600 rounded-xl font-bold text-sm hover:bg-red-100 transition-all border border-red-100"
+                        title="Borrar todos los registros de vacaciones en este rango"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleSaveVacationRange}
+                    disabled={isProcessingRange}
+                    className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 disabled:bg-blue-300 uppercase tracking-widest"
+                  >
+                    {isProcessingRange ? 'PROCESANDO...' : detectedRange ? 'ACTUALIZAR' : 'GUARDAR'}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

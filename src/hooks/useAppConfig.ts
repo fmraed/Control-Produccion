@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
-import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, SABORES_SIN_JARABE, CO2_VOLUMES } from '../constants';
+import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, SABORES_SIN_JARABE, CO2_VOLUMES, WASTE_WEIGHTS } from '../constants';
 
 interface AppConfig {
   flavors: string[];
@@ -47,6 +47,7 @@ interface AppConfig {
   warehousePositions?: number;
   stackableFlavors?: string[];
   externalProducts?: Record<string, Record<string, string[]>>;
+  wasteWeights?: Record<string, { etiq: number; tapa: number; termo: number }>;
 }
 
 export function useAppConfig() {
@@ -90,6 +91,7 @@ export function useAppConfig() {
           warehousePositions: data.warehousePositions || 2300,
           stackableFlavors: Array.isArray(data.stackableFlavors) ? data.stackableFlavors : (data.flavors || SABORES).filter((s: string) => s !== 'Soda Sifon' && s !== 'Soda'),
           externalProducts: data.externalProducts || {},
+          wasteWeights: data.wasteWeights || WASTE_WEIGHTS,
           co2Volumes: (() => {
             const defaultVols = { ...CO2_VOLUMES };
             if (data.co2Volumes) {
@@ -155,7 +157,8 @@ export function useAppConfig() {
           co2Volumes: CO2_VOLUMES,
           warehousePositions: 2300,
           stackableFlavors: SABORES.filter(s => s !== 'Soda Sifon' && s !== 'Soda'),
-          externalProducts: {}
+          externalProducts: {},
+          wasteWeights: WASTE_WEIGHTS
         });
       }
       setLoading(false);
