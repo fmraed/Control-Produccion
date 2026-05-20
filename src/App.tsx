@@ -36,6 +36,7 @@ import { ElaboracionForm } from './components/ElaboracionForm';
 import { ElaboracionHistory } from './components/ElaboracionHistory';
 import { LiveMonitor } from './components/LiveMonitor';
 import { ManagementSummary } from './components/ManagementSummary';
+import { ManagementComparison } from './components/ManagementComparison';
 import { PersonnelManagement } from './components/PersonnelManagement';
 import { ProductionScheduler } from './components/ProductionScheduler';
 import { SyrupReport } from './components/SyrupReport';
@@ -55,7 +56,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null | undefined>(null);
   const [loading, setLoading] = useState(true);
-  const [currentView, setCurrentView] = useState<'dashboard' | 'new' | 'consolidated' | 'waste' | 'downtime' | 'pareto' | 'efficiency' | 'gantt' | 'admin' | 'elaboracion' | 'elaboracion_history' | 'profile' | 'live' | 'management_summary' | 'personnel' | 'scheduler' | 'syrup' | 'goal_fulfillment' | 'stock_control' | 'historical_report' | 'historical_importer' | 'historical_exporter' | 'historical_elab_importer' | 'historical_elab_exporter'>('dashboard');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'new' | 'consolidated' | 'waste' | 'downtime' | 'pareto' | 'efficiency' | 'gantt' | 'admin' | 'elaboracion' | 'elaboracion_history' | 'profile' | 'live' | 'management_summary' | 'management_comparison' | 'personnel' | 'scheduler' | 'syrup' | 'goal_fulfillment' | 'stock_control' | 'historical_report' | 'historical_importer' | 'historical_exporter' | 'historical_elab_importer' | 'historical_elab_exporter'>('dashboard');
   const [editingReport, setEditingReport] = useState<ProductionReport | undefined>(undefined);
   const [editingElabReport, setEditingElabReport] = useState<ElaboracionReport | undefined>(undefined);
   const [paretoLine, setParetoLine] = useState<string>('');
@@ -65,6 +66,7 @@ export default function App() {
   // Persistent Dashboard Filters
   const [dbFilters, setDbFilters] = useState({
     selectedMonth: '',
+    selectedGestion: 'all',
     selectedLinea: '',
     selectedSupervisor: '',
     selectedTamano: '',
@@ -77,6 +79,7 @@ export default function App() {
   // Persistent Elaboration History Filters
   const [elabFilters, setElabFilters] = useState({
     selectedMonth: '',
+    selectedGestion: 'all',
     selectedLinea: '',
     selectedMarca: '',
     selectedSabor: '',
@@ -90,6 +93,7 @@ export default function App() {
     if (!dataViews.includes(currentView)) {
       setDbFilters({
         selectedMonth: '',
+        selectedGestion: 'all',
         selectedLinea: '',
         selectedSupervisor: '',
         selectedTamano: '',
@@ -100,6 +104,7 @@ export default function App() {
       });
       setElabFilters({
         selectedMonth: '',
+        selectedGestion: 'all',
         selectedLinea: '',
         selectedMarca: '',
         selectedSabor: '',
@@ -121,6 +126,7 @@ export default function App() {
         admin: permissions.viewAdmin,
         live: permissions.viewLiveMonitor,
         management_summary: permissions.viewManagementSummary,
+        management_comparison: permissions.viewManagementSummary,
         consolidated: permissions.viewConsolidated,
         waste: permissions.viewWaste,
         syrup: permissions.viewSyrup,
@@ -497,6 +503,18 @@ export default function App() {
                           Resumen Gerencial
                         </button>
                       )}
+
+                      {permissions.viewManagementSummary !== false && (
+                        <button
+                          onClick={() => { setCurrentView('management_comparison'); setActiveMenu(null); }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                            currentView === 'management_comparison' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          <Activity className="w-4 h-4" />
+                          Comparación Gestiones
+                        </button>
+                      )}
                       
                       {permissions.viewConsolidated !== false && (
                         <button
@@ -792,6 +810,9 @@ export default function App() {
         )}
         {currentView === 'management_summary' && (
           <ManagementSummary />
+        )}
+        {currentView === 'management_comparison' && (
+          <ManagementComparison />
         )}
         {currentView === 'gantt' && (
           <GanttChart onBack={() => setCurrentView('dashboard')} />

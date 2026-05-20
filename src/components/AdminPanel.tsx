@@ -42,6 +42,10 @@ interface AppConfig {
     showHistoricalGlobal: boolean;
     historicalStartDate?: string;
   };
+  managementSettings?: {
+    showPreviousManagementGlobal: boolean;
+    managementStartDate?: string;
+  };
   saboresSinJarabe?: string[];
   co2Volumes?: Record<string, Record<string, number>>;
   salariosPorRango?: Record<string, number>;
@@ -221,6 +225,7 @@ export function AdminPanel() {
           lineOperators: data.lineOperators || {},
           shiftConfig: shiftConfig,
           historicalSettings: data.historicalSettings || { showHistoricalGlobal: false },
+          managementSettings: data.managementSettings || { showPreviousManagementGlobal: true },
           saboresSinJarabe: Array.isArray(data.saboresSinJarabe) ? data.saboresSinJarabe : SABORES_SIN_JARABE,
           co2Volumes: data.co2Volumes || CO2_VOLUMES,
           salariosPorRango: data.salariosPorRango || {},
@@ -1887,6 +1892,41 @@ export function AdminPanel() {
                   <p className="mt-3 text-[10px] text-indigo-500 font-medium bg-indigo-50 p-2 rounded border border-indigo-100 flex items-start gap-2">
                     <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
                     <span>Los reportes manuales (Parte Diario) se muestran siempre. Los históricos se ocultan si son anteriores a esta fecha <strong>Y</strong> el toggle de la izquierda está apagado.</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Corte de Gestión */}
+          <section className="bg-emerald-50 p-6 rounded-xl border border-emerald-100 lg:col-span-2 shadow-sm">
+            <h3 className="text-lg font-bold text-emerald-900 mb-4 border-b border-emerald-200 pb-2 flex items-center gap-2">
+              <Database className="w-5 h-5 text-emerald-600" />
+              Hito de Cambio de Gestión
+            </h3>
+            <p className="text-sm text-emerald-700 mb-6 font-medium">
+              Define una fecha de hito o cambio de gestión. Al establecerla, se habilitarán filtros en los reportes (Dashboard, Resumen Gerencial, etc.) para comparar la gestión anterior con la actual.
+            </p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="space-y-4">
+                <div className="p-4 bg-white rounded-xl border border-emerald-200 shadow-sm transition-all hover:border-emerald-400">
+                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Fecha de Inicio de Gestión Actual</label>
+                  <input
+                    type="date"
+                    value={config.managementSettings?.managementStartDate || ''}
+                    onChange={(e) => setConfig({
+                      ...config,
+                      managementSettings: {
+                        ...(config.managementSettings || { showPreviousManagementGlobal: true }),
+                        managementStartDate: e.target.value
+                      }
+                    })}
+                    className="w-full rounded-lg border-gray-300 shadow-sm focus:border-emerald-500 focus:ring-emerald-500 text-sm border p-2 bg-emerald-50/20 font-bold"
+                  />
+                  <p className="mt-3 text-[10px] text-emerald-600 font-medium bg-emerald-50 p-2 rounded border border-emerald-100 flex items-start gap-2">
+                    <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                    <span>Los reportes permitirán filtrar por "Gestión Actual" o "Gestión Anterior" en base a esta fecha.</span>
                   </p>
                 </div>
               </div>

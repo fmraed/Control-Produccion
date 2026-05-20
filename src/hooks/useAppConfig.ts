@@ -42,6 +42,10 @@ interface AppConfig {
     showHistoricalGlobal: boolean;
     historicalStartDate?: string;
   };
+  managementSettings?: {
+    showPreviousManagementGlobal: boolean;
+    managementStartDate?: string;
+  };
   salariosPorRango?: Record<string, number>;
   qualityControlFlavors?: string[];
   warehousePositions?: number;
@@ -85,6 +89,7 @@ export function useAppConfig() {
           calibreDefaults: data.calibreDefaults || {},
           shiftConfig: data.shiftConfig,
           historicalSettings: data.historicalSettings || { showHistoricalGlobal: false },
+          managementSettings: data.managementSettings || { showPreviousManagementGlobal: true },
           saboresSinJarabe: data.saboresSinJarabe || SABORES_SIN_JARABE,
           salariosPorRango: data.salariosPorRango || {},
           qualityControlFlavors: Array.isArray(data.qualityControlFlavors) ? data.qualityControlFlavors : ['Agua'],
@@ -153,6 +158,7 @@ export function useAppConfig() {
           botellasPorPack: BOTELLAS_POR_PACK,
           lineOperators: {},
           historicalSettings: { showHistoricalGlobal: false },
+          managementSettings: { showPreviousManagementGlobal: true },
           saboresSinJarabe: SABORES_SIN_JARABE,
           co2Volumes: CO2_VOLUMES,
           warehousePositions: 2300,
@@ -280,6 +286,7 @@ export function useAppConfig() {
 
   const shouldShowReport = (report: any, forceShow?: boolean) => {
     if (forceShow) return true;
+    
     if (!config?.historicalSettings) return true;
     
     // Determine origin

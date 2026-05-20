@@ -16,6 +16,7 @@ interface DashboardProps {
   isAdmin?: boolean;
   filters: {
     selectedMonth: string;
+    selectedGestion: string;
     selectedLinea: string;
     selectedSupervisor: string;
     selectedTamano: string;
@@ -29,6 +30,7 @@ interface DashboardProps {
 
 export function Dashboard({ onNewReport, onEditReport, isAdmin, filters, onFiltersChange }: DashboardProps) {
   const { 
+    config,
     availableFlavors, 
     availableSizes, 
     availableLines, 
@@ -48,6 +50,7 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin, filters, onFilte
 
   const {
     selectedMonth,
+    selectedGestion,
     selectedLinea,
     selectedSupervisor,
     selectedTamano,
@@ -120,6 +123,9 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin, filters, onFilte
   const tamanos = availableSizes;
   const sabores = availableFlavors;
 
+  // Acceder a la config de gestión
+  const managementStartDate = config?.managementSettings?.managementStartDate || null;
+
   // Apply filters
   const sortedReports = useMemo(() => {
     const filtered = reports.filter(r => {
@@ -128,6 +134,13 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin, filters, onFilte
 
       const logicalDate = getLogicalDate(r);
       if (selectedMonth && logicalDate && !logicalDate.startsWith(selectedMonth)) return false;
+      
+      // Management Cutoff Filter
+      if (selectedGestion !== 'all' && managementStartDate) {
+        if (selectedGestion === 'current' && r.fecha < managementStartDate) return false;
+        if (selectedGestion === 'previous' && r.fecha >= managementStartDate) return false;
+      }
+      
       if (selectedLinea && r.linea !== selectedLinea) return false;
       if (selectedSupervisor && r.supervisor !== selectedSupervisor) return false;
       if (selectedTamano && r.tamano?.toString() !== selectedTamano) return false;
@@ -157,7 +170,18 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin, filters, onFilte
       }
       return sortDirection === 'asc' ? comparison : -comparison;
     });
-  }, [reports, selectedMonth, selectedLinea, selectedSupervisor, selectedTamano, selectedSabor, selectedMarca, sortField, sortDirection]);
+  }, [reports, selectedMonth, selectedGestion, selectedLinea, selectedSupervisor, selectedTamano, selectedSabor, selectedMarca, sortField, sortDirection, shouldShowReport, managementStartDate]);
+
+  // Auto-fetch more if active filters reduce the visible list too much
+  useEffect(() => {
+    if (sortedReports.length < 15 && hasMore && !loading && !loadingMore) {
+      // Pequeno timeout para no saturar firebase
+      const timer = setTimeout(() => {
+        fetchReports(true);
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [sortedReports.length, hasMore, loading, loadingMore, fetchReports]);
 
   const handleDelete = async () => {
     if (!reportToDelete) return;
@@ -218,6 +242,20 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin, filters, onFilte
           <h2>Filtros</h2>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-4">
+          {managementStartDate && (
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Gestión</label>
+              <select
+                value={selectedGestion || 'all'}
+                onChange={(e) => setFilter('selectedGestion', e.target.value)}
+                className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+              >
+                <option value="all">Todas</option>
+                <option value="current">Actual</option>
+                <option value="previous">Anterior</option>
+              </select>
+            </div>
+          )}
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Mes</label>
             <select

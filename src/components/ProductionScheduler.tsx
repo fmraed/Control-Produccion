@@ -565,10 +565,11 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
                                   layout
                                   key={plan.id}
                                   style={{ 
-                                    backgroundColor: bgColor,
-                                    height: plan.duration === 0.5 ? '80px' : 'auto'
+                                    backgroundColor: bgColor
                                   }}
                                   className={`group/item relative rounded-xl border p-2 transition-all shadow-sm hover:shadow-md ${
+                                    plan.duration === 0.5 ? 'border-dashed opacity-90' : ''
+                                  } ${
                                     isDraft 
                                       ? 'border-amber-400 border-2' 
                                       : 'border-transparent'
@@ -739,19 +740,29 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
                             <div key={di} className="flex gap-2">
                               {SHIFTS.map(shift => {
                                 const dateStr = format(day, 'yyyy-MM-dd');
-                                const plan = displayPlans.find(p => p.date === dateStr && p.shift === shift && p.linea === linea);
+                                const slotPlans = displayPlans.filter(p => p.date === dateStr && p.shift === shift && p.linea === linea);
                                 return (
-                                  <div key={shift} className="w-[240px] relative rounded h-full overflow-hidden bg-gray-50/50 border border-gray-100 transition-all shadow-inner">
-                                    {plan ? (
-                                      <div 
-                                        className="absolute inset-0 flex items-center justify-center"
-                                        style={{ backgroundColor: FLAVOR_COLORS[plan.sabor] || '#cbd5e1' }}
-                                      >
-                                        <div className="absolute inset-0 bg-white/10" />
-                                        <span className="relative text-[7px] font-black text-white uppercase truncate px-1 drop-shadow-sm">
-                                          {plan.sabor}
-                                        </span>
-                                      </div>
+                                  <div key={shift} className="w-[240px] relative rounded h-full overflow-hidden bg-gray-50/50 border border-gray-100 transition-all shadow-inner flex">
+                                    {slotPlans.length > 0 ? (
+                                      slotPlans.map(plan => {
+                                        const widthPercent = (plan.duration || 1) * 100;
+                                        return (
+                                          <div 
+                                            key={plan.id}
+                                            className="h-full flex items-center justify-center relative border-r border-white/10 last:border-r-0 shrink-0"
+                                            style={{ 
+                                              backgroundColor: FLAVOR_COLORS[plan.sabor] || '#cbd5e1',
+                                              width: `${widthPercent}%`
+                                            }}
+                                            title={`${plan.sabor} (${plan.duration === 0.5 ? 'Medio' : 'Total'}): ${plan.plannedPacks?.toLocaleString() || 0} packs`}
+                                          >
+                                            <div className="absolute inset-0 bg-white/10" />
+                                            <span className="relative text-[7px] font-black text-white uppercase truncate px-1 drop-shadow-sm">
+                                              {plan.sabor} {plan.duration === 0.5 ? '½' : ''}
+                                            </span>
+                                          </div>
+                                        );
+                                      })
                                     ) : (
                                       <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:4px_4px]" />
                                     )}

@@ -16,7 +16,12 @@ export function ManagementSummary() {
   const [plans, setPlans] = useState<ProductionPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
+  const [selectedGestion, setSelectedGestion] = useState<'all' | 'current' | 'previous'>('all');
   const [snapshot, setSnapshot] = useState<MonthlySnapshot | null>(null);
+
+  // Acceder a la config de gestión
+  const managementStartDate = config?.managementSettings?.managementStartDate || null;
+
   const [isSnapshotLoading, setIsSnapshotLoading] = useState(false);
   const [isSavingSnapshot, setIsSavingSnapshot] = useState(false);
 
@@ -133,10 +138,17 @@ export function ManagementSummary() {
   const filteredReports = useMemo(() => {
     return reports.filter(r => {
       if (!shouldShowReport(r)) return false;
+
+      // Management Cutoff Filter
+      if (selectedGestion !== 'all' && managementStartDate) {
+        if (selectedGestion === 'current' && r.fecha < managementStartDate) return false;
+        if (selectedGestion === 'previous' && r.fecha >= managementStartDate) return false;
+      }
+
       const logicalDate = getLogicalDate(r);
       return logicalDate && logicalDate.startsWith(selectedMonth);
     });
-  }, [reports, selectedMonth, shouldShowReport]);
+  }, [reports, selectedMonth, selectedGestion, managementStartDate, shouldShowReport]);
 
   const filteredAttendance = useMemo(() => {
     return attendance.filter(a => {
@@ -971,6 +983,20 @@ export function ManagementSummary() {
           <h2 className="text-lg font-bold">Resumen Gerencial de Producción</h2>
         </div>
         <div className="flex items-center gap-4">
+          {managementStartDate && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-widest">Gestión:</label>
+              <select
+                value={selectedGestion}
+                onChange={(e) => setSelectedGestion(e.target.value as any)}
+                className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+              >
+                <option value="all">Todas</option>
+                <option value="current">Actual</option>
+                <option value="previous">Anterior</option>
+              </select>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <Calendar className="w-4 h-4 text-gray-400" />
             <select
