@@ -199,13 +199,13 @@ export function GoalFulfillment() {
     return productsMap;
   }, [activeProducts, filteredReportsByMonth, goals, selectedMonth]);
 
-  const pendingMonthlyShifts = useMemo(() => {
-    if (!config || !config.shiftConfig) return 0;
+  const { pendingMonthlyShifts, pendingMonthlyLineShifts } = useMemo(() => {
+    if (!config || !config.shiftConfig) return { pendingMonthlyShifts: 0, pendingMonthlyLineShifts: 0 };
     
     const todayStr = format(new Date(), 'yyyy-MM-dd');
     const currentMonthStr = format(new Date(), 'yyyy-MM');
     
-    if (selectedMonth !== currentMonthStr) return 0;
+    if (selectedMonth !== currentMonthStr) return { pendingMonthlyShifts: 0, pendingMonthlyLineShifts: 0 };
     
     const startDate = startOfMonth(parseISO(`${selectedMonth}-01`));
     const endDate = endOfMonth(startDate);
@@ -213,6 +213,7 @@ export function GoalFulfillment() {
     
     const shiftConfig = config.shiftConfig;
     let shiftsCount = 0;
+    let lineShiftsCount = 0;
     
     daysInMonth.forEach(day => {
       const dateStr = format(day, 'yyyy-MM-dd');
@@ -224,26 +225,38 @@ export function GoalFulfillment() {
       
       const dayPlan = shiftConfig.weeklyPlan?.[dayKey] || {};
       
-      // Calculate shifts for this day
+      // Calculate shifts for this day (representing general shifts: Mañana, Tarde, Noche)
       // Mañana/Tarde
       if (!isHoliday) {
-        shiftsCount += ((dayPlan['Mañana']?.count || 0) * (dayPlan['Mañana']?.duration || 480)) / 480;
-        shiftsCount += ((dayPlan['Tarde']?.count || 0) * (dayPlan['Tarde']?.duration || 480)) / 480;
+        if ((dayPlan['Mañana']?.count || 0) > 0) {
+          shiftsCount += 1;
+        }
+        if ((dayPlan['Tarde']?.count || 0) > 0) {
+          shiftsCount += 1;
+        }
+        
+        lineShiftsCount += ((dayPlan['Mañana']?.count || 0) * (dayPlan['Mañana']?.duration || 480)) / 480;
+        lineShiftsCount += ((dayPlan['Tarde']?.count || 0) * (dayPlan['Tarde']?.duration || 480)) / 480;
       }
       
       // Noche (affected by next day holiday)
       if (!isNextDayHoliday) {
         const n = dayPlan['Noche'];
-        let dur = n?.duration || 480;
-        if (isHoliday) {
-          const nextDay = addDays(day, 1);
-          dur = (getDay(nextDay) === 6 ? 5 : 6) * 60;
+        if ((n?.count || 0) > 0) {
+          shiftsCount += 1;
         }
-        shiftsCount += ((n?.count || 0) * dur) / 480;
       }
+      
+      const n = dayPlan['Noche'];
+      let dur = n?.duration || 480;
+      if (isHoliday) {
+        const nextDay = addDays(day, 1);
+        dur = (getDay(nextDay) === 6 ? 5 : 6) * 60;
+      }
+      lineShiftsCount += ((n?.count || 0) * dur) / 480;
     });
     
-    return shiftsCount;
+    return { pendingMonthlyShifts: shiftsCount, pendingMonthlyLineShifts: lineShiftsCount };
   }, [selectedMonth, config]);
 
   const calibreSummary = useMemo(() => {
@@ -258,6 +271,9 @@ export function GoalFulfillment() {
     }> = {};
 
     Object.values(dataByProduct).forEach((p: any) => {
+      const isExternal = (config?.externalProducts?.[p.marca]?.[p.tamano.toString()] || []).includes(p.sabor);
+      if (isExternal) return;
+
       if (!summary[p.tamano]) {
         summary[p.tamano] = { 
           tamano: p.tamano, 
@@ -276,7 +292,7 @@ export function GoalFulfillment() {
     });
 
     return Object.values(summary).sort((a, b) => b.tamano - a.tamano);
-  }, [dataByProduct]);
+  }, [dataByProduct, config]);
 
   const groupTotals = useMemo(() => {
     const groups: Record<string, {
@@ -316,15 +332,18 @@ export function GoalFulfillment() {
     let totalOrdered = 0;
     let totalProduced = 0;
     Object.values(dataByProduct).forEach((p: any) => {
-      totalOrdered += p.totalOrdered;
-      totalProduced += p.totalProduced;
+      const isExternal = (config?.externalProducts?.[p.marca]?.[p.tamano.toString()] || []).includes(p.sabor);
+      if (!isExternal) {
+        totalOrdered += p.totalOrdered;
+        totalProduced += p.totalProduced;
+      }
     });
     return {
       totalOrdered,
       totalProduced,
       fulfillment: totalOrdered > 0 ? (totalProduced / totalOrdered) * 100 : 0
     };
-  }, [dataByProduct]);
+  }, [dataByProduct, config]);
 
   const handleStartEditing = () => {
     const initialValues: Record<string, number> = {};
@@ -502,11 +521,15 @@ export function GoalFulfillment() {
               <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mt-1">Total de turnos necesarios para completar los objetivos del mes</p>
             </div>
             {pendingMonthlyShifts > 0 && (
-              <div className="bg-blue-600 px-4 py-2 rounded-xl text-white shadow-sm flex items-center gap-3">
+              <div className="bg-blue-600 px-4 py-2 rounded-xl text-white shadow-sm flex items-center gap-4">
                 <Clock className="w-5 h-5 text-blue-200" />
+                <div className="flex flex-col border-r border-blue-500 pr-4">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-blue-100">Turnos Restantes</span>
+                  <span className="text-xl font-black leading-none">{pendingMonthlyShifts.toFixed(0)} <span className="text-[10px] font-bold uppercase">Turnos</span></span>
+                </div>
                 <div className="flex flex-col">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-blue-100">Turnos Hábiles Restantes</span>
-                  <span className="text-xl font-black leading-none">{pendingMonthlyShifts.toFixed(1)} <span className="text-[10px] font-bold uppercase">Turno-Línea</span></span>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-blue-100">Líneas Restantes</span>
+                  <span className="text-xl font-black leading-none">{pendingMonthlyLineShifts.toFixed(1)} <span className="text-[10px] font-bold uppercase">Turno-Línea</span></span>
                 </div>
               </div>
             )}
@@ -564,7 +587,7 @@ export function GoalFulfillment() {
                     <td className="px-6 py-4 border-r border-gray-200 bg-blue-50/50">
                       <div className="flex flex-col">
                         <span className="text-xl font-mono font-black tracking-tight text-blue-700">{calibreSummary.reduce((acc, i) => acc + i.turnsNeededGoal, 0).toFixed(1)} <span className="text-xs font-sans uppercase">Turnos</span></span>
-                        {pendingMonthlyShifts > 0 && calibreSummary.reduce((acc, i) => acc + i.turnsNeededGoal, 0) > pendingMonthlyShifts && (
+                        {pendingMonthlyLineShifts > 0 && calibreSummary.reduce((acc, i) => acc + i.turnsNeededGoal, 0) > pendingMonthlyLineShifts && (
                           <span className="text-[9px] text-red-500 flex items-center gap-1 font-bold mt-1">
                             <XCircle className="w-2.5 h-2.5" /> Supera capacidad restante
                           </span>
@@ -574,7 +597,7 @@ export function GoalFulfillment() {
                     <td className="px-6 py-4 bg-orange-50/50">
                       <div className="flex flex-col">
                         <span className="text-xl font-mono font-black tracking-tight text-orange-700">{calibreSummary.reduce((acc, i) => acc + i.turnsNeededAvg, 0).toFixed(1)} <span className="text-xs font-sans uppercase">Turnos</span></span>
-                        {pendingMonthlyShifts > 0 && calibreSummary.reduce((acc, i) => acc + i.turnsNeededAvg, 0) > pendingMonthlyShifts && (
+                        {pendingMonthlyLineShifts > 0 && calibreSummary.reduce((acc, i) => acc + i.turnsNeededAvg, 0) > pendingMonthlyLineShifts && (
                           <span className="text-[9px] text-red-500 flex items-center gap-1 font-bold mt-1">
                             <XCircle className="w-2.5 h-2.5" /> Supera capacidad restante
                           </span>

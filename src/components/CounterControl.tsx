@@ -5,6 +5,7 @@ import { ProductionReport } from '../types';
 import { format, parseISO, startOfDay, endOfDay } from 'date-fns';
 import { Search, AlertTriangle, CheckCircle2, ChevronRight, Hash, Calendar, Layers } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useAppConfig } from '../hooks/useAppConfig';
 
 interface CoherenceError {
   reportId: string;
@@ -22,43 +23,84 @@ interface CoherenceError {
 }
 
 export function CounterControl() {
+  const { availableLines } = useAppConfig();
   const [startDate, setStartDate] = useState(format(new Date(), 'yyyy-MM-01'));
   const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [selectedLine, setSelectedLine] = useState('L1');
+  const [selectedLine, setSelectedLine] = useState('');
+  
+  React.useEffect(() => {
+    if (availableLines.length > 0 && !selectedLine) {
+      setSelectedLine(availableLines[0]);
+    }
+  }, [availableLines, selectedLine]);
+
   const [results, setResults] = useState<CoherenceError[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const checkCoherence = async () => {
     setLoading(true);
-    setHasSearched(true);
+    setHasSearched(false);
+    setError(null);
     setResults([]);
 
     try {
       const reportsRef = collection(db, 'production_reports');
+      // Simple query that only filters on date range (built-in single field index)
       const q = query(
         reportsRef,
-        where('linea', '==', selectedLine),
         where('fecha', '>=', startDate),
-        where('fecha', '<=', endDate),
-        orderBy('fecha', 'asc'),
-        orderBy('planilla', 'asc') // Secondary sort to help chronological order
+        where('fecha', '<=', endDate)
       );
 
       const snap = await getDocs(q);
-      const reports = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductionReport));
+      const allReports = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductionReport));
 
-      // Re-sort in memory more robustly if needed, but Firestore handles most of it.
-      // Sometimes planilla numbers don't perfectly match time, but usually they do.
-      // We rely on fecha + createdAt if planilla isn't enough, but usually fecha + turno/planilla works.
+      // Filter by selected line in-memory
+      const lineReports = allReports.filter(r => r.linea === selectedLine);
+
+      // Sort in-memory chronologically
+      // 1. By date ascending
+      // 2. By Shift Order (Noche -> Mañana -> Tarde)
+      // 3. By Planilla Code ascending
+      // 4. By creation time (createdAt) ascending
+      const shiftOrder: Record<string, number> = {
+        'Noche': 1,
+        'Mañana': 2,
+        'Tarde': 3
+      };
+
+      const sortedReports = lineReports.sort((a, b) => {
+        const dateCompare = a.fecha.localeCompare(b.fecha);
+        if (dateCompare !== 0) return dateCompare;
+
+        const shiftA = shiftOrder[a.turno] || 99;
+        const shiftB = shiftOrder[b.turno] || 99;
+        if (shiftA !== shiftB) {
+          return shiftA - shiftB;
+        }
+
+        const planillaA = parseInt(a.planilla) || 0;
+        const planillaB = parseInt(b.planilla) || 0;
+        if (planillaA !== planillaB) {
+          return planillaA - planillaB;
+        }
+
+        return (a.createdAt || '').localeCompare(b.createdAt || '');
+      });
       
       const discrepancies: CoherenceError[] = [];
 
-      for (let i = 0; i < reports.length - 1; i++) {
-        const current = reports[i];
-        const next = reports[i + 1];
+      for (let i = 0; i < sortedReports.length - 1; i++) {
+        const current = sortedReports[i];
+        const next = sortedReports[i + 1];
 
-        if (current.contFinal !== next.contInicial) {
+        // Ensure both final and initial counters are numbers before comparing
+        const finalVal = current.contFinal || 0;
+        const initialVal = next.contInicial || 0;
+
+        if (finalVal !== initialVal) {
           discrepancies.push({
             reportId: current.id!,
             nextReportId: next.id!,
@@ -66,10 +108,10 @@ export function CounterControl() {
             line: current.linea,
             planilla: current.planilla,
             nextPlanilla: next.planilla,
-            finalCounter: current.contFinal || 0,
-            expectedInitialCounter: current.contFinal || 0,
-            actualInitialCounter: next.contInicial || 0,
-            diff: (next.contInicial || 0) - (current.contFinal || 0),
+            finalCounter: finalVal,
+            expectedInitialCounter: finalVal,
+            actualInitialCounter: initialVal,
+            diff: initialVal - finalVal,
             turno: current.turno,
             nextTurno: next.turno
           });
@@ -77,8 +119,10 @@ export function CounterControl() {
       }
 
       setResults(discrepancies);
-    } catch (error) {
-      console.error("Error checking counter coherence:", error);
+      setHasSearched(true);
+    } catch (err: any) {
+      console.error("Error checking counter coherence:", err);
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -134,11 +178,10 @@ export function CounterControl() {
                 onChange={(e) => setSelectedLine(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 appearance-none transition-all"
               >
-                <option value="L1">Línea 1</option>
-                <option value="L2">Línea 2</option>
-                <option value="L3">Línea 3</option>
-                <option value="L4">Línea 4</option>
-                <option value="L5">Línea 5</option>
+                {availableLines.length === 0 && <option value="">Cargando...</option>}
+                {availableLines.map(line => (
+                  <option key={line} value={line}>{line}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -157,6 +200,16 @@ export function CounterControl() {
           </button>
         </div>
       </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3 animate-in fade-in duration-200">
+          <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+          <div>
+            <h4 className="text-sm font-bold text-red-900">Error en la consulta de contadores</h4>
+            <p className="text-xs text-red-700 mt-1">{error}</p>
+          </div>
+        </div>
+      )}
 
       <AnimatePresence mode="wait">
         {hasSearched && (
