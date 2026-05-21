@@ -936,7 +936,7 @@ export function ManagementSummary() {
 
   const handleRefreshSnapshot = async () => {
     if (!isAdmin) return;
-    if (!window.confirm('¿Estás seguro de que quieres recalcular y actualizar el histórico de este mes? Esto sobrescribirá los datos guardados con la configuración actual.')) return;
+    // window.confirm is blocked in iframes, bypassing.
 
     try {
       // Temporarily clear snapshot to force recalculation

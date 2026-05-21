@@ -63,6 +63,7 @@ interface MappingResult {
   status: 'pending' | 'success' | 'error';
   error?: string;
   originalRow: ExcelRow;
+  importType?: 'new' | 'update' | 'checking';
 }
 
 export function HistoricalElaboracionImporter() {
@@ -74,6 +75,44 @@ export function HistoricalElaboracionImporter() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [successCount, setSuccessCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const checkExistingRecords = async (currentMappings: MappingResult[]) => {
+    const updated = [...currentMappings];
+    const pendingIndexes = updated
+      .map((m, idx) => ({ m, idx }))
+      .filter(({ m }) => m.status === 'pending');
+
+    const batchSize = 10;
+    for (let i = 0; i < pendingIndexes.length; i += batchSize) {
+      const batch = pendingIndexes.slice(i, i + batchSize);
+      await Promise.all(
+        batch.map(async ({ m, idx }) => {
+          try {
+            const q = query(
+              collection(db, 'elaboracion_reports'),
+              where('fecha', '==', m.report.fecha),
+              where('linea', '==', m.report.linea),
+              where('turno', '==', m.report.turno),
+              where('sabor', '==', m.report.sabor),
+              where('tamano', '==', m.report.tamano)
+            );
+            const existing = await getDocs(q);
+            updated[idx] = {
+              ...m,
+              importType: existing.empty ? 'new' : 'update'
+            };
+          } catch (err) {
+            console.error("Error checking record in background:", err);
+            updated[idx] = {
+              ...m,
+              importType: 'new'
+            };
+          }
+        })
+      );
+      setMappings([...updated]);
+    }
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -225,6 +264,7 @@ export function HistoricalElaboracionImporter() {
             return {
               report,
               status: 'pending',
+              importType: 'checking',
               originalRow: row
             };
           } catch (err: any) {
@@ -239,6 +279,7 @@ export function HistoricalElaboracionImporter() {
 
         setMappings(newMappings);
         setIsProcessing(false);
+        checkExistingRecords(newMappings);
       };
       reader.readAsArrayBuffer(file);
     } catch (error) {
@@ -425,6 +466,7 @@ export function HistoricalElaboracionImporter() {
               <thead className="bg-gray-100 text-gray-500 uppercase font-black sticky top-0 z-10">
                 <tr>
                   <th className="px-4 py-3">Estado</th>
+                  <th className="px-4 py-3 text-center">Operación</th>
                   <th className="px-4 py-3">Fecha</th>
                   <th className="px-4 py-3">Turno</th>
                   <th className="px-4 py-3">Línea</th>
@@ -439,6 +481,23 @@ export function HistoricalElaboracionImporter() {
                       {m.status === 'success' ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> :
                        m.status === 'error' ? <AlertCircle className="w-4 h-4 text-rose-500" title={m.error} /> :
                        <div className="w-4 h-4 rounded-full border-2 border-gray-200" />}
+                    </td>
+                    <td className="px-4 py-3 text-center whitespace-nowrap">
+                      {m.importType === 'checking' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500 animate-pulse border border-gray-200">
+                          <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Verificando
+                        </span>
+                      )}
+                      {m.importType === 'new' && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          Nuevo
+                        </span>
+                      )}
+                      {m.importType === 'update' && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                          Actualización
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 font-medium text-gray-900">{m.report.fecha || '-'}</td>
                     <td className="px-4 py-3">{m.report.turno}</td>

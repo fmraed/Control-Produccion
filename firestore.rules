@@ -319,6 +319,11 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
     }
 
+    match /production_plans_v2/{planId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAuthenticated();
+    }
+
     match /schedule_audit_logs/{logId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidScheduleAuditLog(request.resource.data) && uidUnchanged();

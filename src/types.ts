@@ -246,3 +246,35 @@ export interface MonthlySnapshot {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface ProductionPlanV2 {
+  id?: string;
+  date: string; // YYYY-MM-DD
+  linea: string; // "1", "2", "3"
+  orderIndex: number; // For sequencing sequence
+  type: 'production' | 'flavor_change' | 'transformation' | 'other';
+  duration: number; // calculated or custom duration in minutes
+  
+  // Custom timeline overrides
+  isChained?: boolean;
+  customStartTime?: string;
+  calculationBasis?: 'theoretical' | 'default' | 'historical' | 'manual';
+
+  // Specific fields for production runs
+  marca?: string;
+  sabor?: string;
+  tamano?: number;
+  plannedPacks?: number;
+  velocidad?: number; // Target BPM speed
+  isNoSyrup?: boolean; // Soda, water, or similar (cannot be constrained by syrup batches)
+
+  // Specific fields for other event blocks
+  label?: string; // e.g. "Mantenimiento", "Calentando jarabe"
+  notes?: string;
+
+  status: 'Draft' | 'Published';
+  createdAt: string;
+  authorId: string;
+  authorName?: string;
+}
+

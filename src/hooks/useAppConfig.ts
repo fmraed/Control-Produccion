@@ -45,6 +45,8 @@ interface AppConfig {
   managementSettings?: {
     showPreviousManagementGlobal: boolean;
     managementStartDate?: string;
+    previousStartDate?: string;
+    currentEndDate?: string;
   };
   salariosPorRango?: Record<string, number>;
   qualityControlFlavors?: string[];

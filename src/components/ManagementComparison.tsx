@@ -1,9 +1,11 @@
 import { useState, useMemo, useEffect } from 'react';
-import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, query, onSnapshot, orderBy, doc, updateDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAppConfig } from '../hooks/useAppConfig';
-import { ArrowUp, ArrowDown, Activity, Droplets, Target, Wind, Factory } from 'lucide-react';
+import { ArrowUp, ArrowDown, Activity, Droplets, Target, Wind, Factory, Clock } from 'lucide-react';
 import { ProductionReport, ElaboracionReport } from '../types';
+import { format, parseISO, getDay, addDays } from 'date-fns';
+import { getLogicalDate } from '../utils';
 
 interface MetricComparison {
   label: string;
@@ -23,9 +25,67 @@ export function ManagementComparison() {
 
   const [previousStartDate, setPreviousStartDate] = useState<string>('');
   const [currentEndDate, setCurrentEndDate] = useState<string>('');
+  const [hasInitializedDates, setHasInitializedDates] = useState(false);
 
   // Acceso a la fecha de cambio de gestión
   const managementStartDate = config?.managementSettings?.managementStartDate || null;
+
+  // Cargar valores iniciales desde la configuración remota una vez que esté cargada
+  useEffect(() => {
+    if (config && !hasInitializedDates) {
+      if (config.managementSettings?.previousStartDate) {
+        setPreviousStartDate(config.managementSettings.previousStartDate);
+      }
+      if (config.managementSettings?.currentEndDate) {
+        setCurrentEndDate(config.managementSettings.currentEndDate);
+      }
+      setHasInitializedDates(true);
+    }
+  }, [config, hasInitializedDates]);
+
+  const handleSavePreviousStartDate = async (date: string) => {
+    setPreviousStartDate(date);
+    try {
+      const configRef = doc(db, 'config', 'production');
+      await updateDoc(configRef, {
+        'managementSettings.previousStartDate': date
+      });
+    } catch (err) {
+      console.error("Error saving previousStartDate via updateDoc, trying setDoc fallback: ", err);
+      try {
+        const configRef = doc(db, 'config', 'production');
+        await setDoc(configRef, {
+          managementSettings: {
+            previousStartDate: date
+          }
+        }, { merge: true });
+      } catch (innerErr) {
+        console.error("Fallback setDoc also failed: ", innerErr);
+      }
+    }
+  };
+
+  const handleSaveCurrentEndDate = async (date: string) => {
+    setCurrentEndDate(date);
+    try {
+      const configRef = doc(db, 'config', 'production');
+      await updateDoc(configRef, {
+        'managementSettings.currentEndDate': date
+      });
+    } catch (err) {
+      console.error("Error saving currentEndDate via updateDoc, trying setDoc fallback: ", err);
+      try {
+        const configRef = doc(db, 'config', 'production');
+        await setDoc(configRef, {
+          managementSettings: {
+            currentEndDate: date
+          }
+        }, { merge: true });
+      } catch (innerErr) {
+        console.error("Fallback setDoc also failed: ", innerErr);
+      }
+    }
+  };
 
   useEffect(() => {
     const q1 = query(collection(db, 'production_reports'), orderBy('fecha', 'desc'));
@@ -87,11 +147,88 @@ export function ManagementComparison() {
     let jarabeReal = 0;
     let jarabeTeorico = 0;
 
+    // Normalización de la planificación de turnos (shiftConfig) para el cálculo de horas extras
+    const rawShiftConfig = config?.shiftConfig;
+    let shiftConfig = {
+      standardShiftDuration: rawShiftConfig?.standardShiftDuration || 480,
+      shiftDurations: rawShiftConfig?.shiftDurations || { Mañana: 480, Tarde: 480, Noche: 480 },
+      weeklyPlan: rawShiftConfig?.weeklyPlan || {
+        monday: { Mañana: { count: 3, duration: 480 }, Tarde: { count: 3, duration: 480 }, Noche: { count: 3, duration: 480 } },
+        tuesday: { Mañana: { count: 3, duration: 480 }, Tarde: { count: 3, duration: 480 }, Noche: { count: 3, duration: 480 } },
+        wednesday: { Mañana: { count: 3, duration: 480 }, Tarde: { count: 3, duration: 480 }, Noche: { count: 3, duration: 480 } },
+        thursday: { Mañana: { count: 3, duration: 480 }, Tarde: { count: 3, duration: 480 }, Noche: { count: 3, duration: 480 } },
+        friday: { Mañana: { count: 3, duration: 480 }, Tarde: { count: 3, duration: 480 }, Noche: { count: 3, duration: 420 } },
+        saturday: { Mañana: { count: 3, duration: 480 }, Tarde: { count: 0, duration: 480 }, Noche: { count: 0, duration: 480 } },
+        sunday: { Mañana: { count: 0, duration: 480 }, Tarde: { count: 0, duration: 480 }, Noche: { count: 3, duration: 360 } }
+      },
+      holidays: rawShiftConfig?.holidays || []
+    };
+
+    if (shiftConfig.weeklyPlan) {
+      const normalizedWeeklyPlan: any = {};
+      const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+      const daysEs = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
+      
+      days.forEach((day, idx) => {
+        const dayEs = daysEs[idx];
+        const rawDayPlan = (shiftConfig.weeklyPlan as any)[day] || 
+                           (shiftConfig.weeklyPlan as any)[day.charAt(0).toUpperCase() + day.slice(1)] ||
+                           (shiftConfig.weeklyPlan as any)[dayEs] ||
+                           (shiftConfig.weeklyPlan as any)[dayEs.charAt(0).toUpperCase() + dayEs.slice(1)] ||
+                           {};
+        
+        normalizedWeeklyPlan[day] = {};
+        ['Mañana', 'Tarde', 'Noche'].forEach(shift => {
+          const shiftKeys = Object.keys(rawDayPlan);
+          const targetKey = shiftKeys.find(k => 
+            k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 
+            shift.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+          );
+          
+          const val = targetKey ? rawDayPlan[targetKey] : null;
+
+          if (Array.isArray(rawDayPlan) && rawDayPlan.some(s => s.toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === shift.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
+            normalizedWeeklyPlan[day][shift] = { count: 3, duration: 480 };
+          } else if (val && typeof val === 'object') {
+            normalizedWeeklyPlan[day][shift] = {
+              count: typeof val.count === 'number' ? val.count : 0,
+              duration: typeof val.duration === 'number' ? val.duration : 480
+            };
+          } else {
+            normalizedWeeklyPlan[day][shift] = { count: 0, duration: 480 };
+          }
+        });
+      });
+      shiftConfig.weeklyPlan = normalizedWeeklyPlan;
+    }
+
+    let holidayExtraHours = 0;
+    let weekendExtraHours = 0;
+    let weekdayExtraHours = 0;
+    const reportsByDayAndShift: Record<string, Record<string, any[]>> = {};
+
     datasetRaw.forEach(r => {
       packs += Number(r.paquetes) || 0;
       botellas += Number(r.botellas) || 0;
 
-      const bruta = Number(r.tiempoTurno) || 0;
+      // Group/Overtime logic preparation & shift duration calculations
+      const logicalDate = getLogicalDate(r);
+      const entraParts = r.entraTurno?.split(':') || ['0', '0'];
+      const saleParts = r.saleTurno?.split(':') || ['0', '0'];
+      const start = parseInt(entraParts[0]) * 60 + parseInt(entraParts[1]);
+      let end = parseInt(saleParts[0]) * 60 + parseInt(saleParts[1]);
+      if (end < start) end += 1440; // Next day
+      const duration = end - start;
+
+      // Real or calculated duration in minutes
+      let bruta = Number(r.tiempoTurno) || 0;
+      if (bruta === 0 && r.entraTurno && r.saleTurno) {
+        bruta = duration;
+      }
+      if (bruta === 0) {
+        bruta = config?.shiftConfig?.standardShiftDuration || 480;
+      }
+
       const neta = (r.botellas && r.velocidad) ? (r.botellas / r.velocidad) : 0;
       
       let paradaMec = 0;
@@ -127,6 +264,10 @@ export function ManagementComparison() {
       if (config?.saboresSinJarabe && r.sabor && !config.saboresSinJarabe.includes(r.sabor)) {
         jarabeTeorico += liters / 6; // approx 1 part syrup, 5 parts water = 1/6 yield
       } // Not exactly perfect but gives a proportional theoretical baseline
+
+      if (!reportsByDayAndShift[logicalDate]) reportsByDayAndShift[logicalDate] = {};
+      if (!reportsByDayAndShift[logicalDate][r.turno]) reportsByDayAndShift[logicalDate][r.turno] = [];
+      reportsByDayAndShift[logicalDate][r.turno].push({ ...r, duration });
     });
 
     elabDataset.forEach(e => {
@@ -145,6 +286,68 @@ export function ManagementComparison() {
       .sort((a, b) => b.eff - a.eff)
       .slice(0, 5); // top 5 lines/sizes
 
+    // Calcular las Horas de Producción (basado en tiempoTurno total reportado)
+    const totalProductionHours = totalBruta / 60;
+
+    // Calcular Horas Extras de todas las planificaciones/reportes procesados del dataset
+    Object.keys(reportsByDayAndShift).forEach(dayStr => {
+      const date = parseISO(dayStr);
+      const dayOfWeek = getDay(date);
+      const dayKey = format(date, 'eeee').toLowerCase();
+      const dayPlan = shiftConfig.weeklyPlan[dayKey] || {};
+      const isHoliday = shiftConfig.holidays?.includes(dayStr);
+      const nextDayStr = format(addDays(date, 1), 'yyyy-MM-dd');
+      const isNextDayHoliday = shiftConfig.holidays?.includes(nextDayStr);
+
+      Object.keys(reportsByDayAndShift[dayStr]).forEach(shift => {
+        const reports = reportsByDayAndShift[dayStr][shift];
+        const p = (dayPlan as any)[shift];
+        
+        // Determinar cantidad y duración planificadas
+        let plannedCount = p?.count || 0;
+        let plannedDuration = p?.duration || 480;
+        
+        // Ajustes por feriado
+        if (isHoliday && (shift === 'Mañana' || shift === 'Tarde')) {
+          plannedCount = 0;
+        }
+        if (isHoliday && shift === 'Noche') {
+          const nextDay = addDays(date, 1);
+          const boundary = (getDay(nextDay) === 6) ? 5 : 6;
+          plannedDuration = boundary * 60;
+        }
+        if (shift === 'Noche' && isNextDayHoliday) {
+          plannedCount = 0;
+        }
+
+        const totalActualMinutes = reports.reduce((sum, r) => sum + r.duration, 0);
+        const totalPlannedMinutes = plannedCount * plannedDuration;
+        const extraMinutes = Math.max(0, totalActualMinutes - totalPlannedMinutes);
+
+        if (extraMinutes > 0) {
+          const firstReport = reports[0];
+          const timeParts = firstReport.entraTurno?.split(':') || ['0', '0'];
+          const hour = parseInt(timeParts[0]);
+          
+          // Regla fin de semana: Dom o Sáb después de las 13:00 hs
+          const isWeekendExtra = (dayOfWeek === 0) || (dayOfWeek === 6 && (hour >= 13 || hour < 5));
+          
+          // Regla feriado
+          const isHolidayExtra = (isHoliday && (shift === 'Mañana' || shift === 'Tarde')) ||
+                                 (isNextDayHoliday && shift === 'Noche') ||
+                                 (isHoliday && shift === 'Noche');
+
+          const extraVal = extraMinutes / 60; // HORAS
+          
+          if (isHolidayExtra) holidayExtraHours += extraVal;
+          else if (isWeekendExtra) weekendExtraHours += extraVal;
+          else weekdayExtraHours += extraVal;
+        }
+      });
+    });
+
+    const totalExtraHours = holidayExtraHours + weekendExtraHours + weekdayExtraHours;
+
     return {
       packsPerShift: shiftCount > 0 ? packs / shiftCount : 0,
       totalPacks: packs,
@@ -155,7 +358,9 @@ export function ManagementComparison() {
       desperdicioTapas,
       scarcityCO2: co2Teorico > 0 && co2Real > 0 ? ((co2Real - co2Teorico) / co2Teorico) * 100 : 0,
       scarcityJarabe: jarabeTeorico > 0 && jarabeReal > 0 ? ((jarabeReal - jarabeTeorico) / jarabeTeorico) * 100 : 0,
-      shiftCount
+      shiftCount,
+      totalProductionHours,
+      totalExtraHours
     };
   };
 
@@ -216,7 +421,7 @@ export function ManagementComparison() {
         <div className="flex flex-col items-center justify-center">
           {hideDiff ? (
             <span className="text-gray-400 text-xs">-</span>
-          ) : previous !== 0 && current !== 0 ? (
+          ) : previous !== 0 ? (
             <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full ${bgClass} ${colorClass} font-bold text-sm shadow-sm`}>
               <Icon className="w-4 h-4" />
               {Math.abs(percentDiff).toFixed(1)}%
@@ -248,7 +453,7 @@ export function ManagementComparison() {
             <input
               type="date"
               value={previousStartDate}
-              onChange={(e) => setPreviousStartDate(e.target.value)}
+              onChange={(e) => handleSavePreviousStartDate(e.target.value)}
               max={managementStartDate}
               className="mt-1 text-xs px-2 py-1 border border-gray-300 rounded font-normal bg-white"
               title="Desde esta fecha"
@@ -260,7 +465,7 @@ export function ManagementComparison() {
             <input
               type="date"
               value={currentEndDate}
-              onChange={(e) => setCurrentEndDate(e.target.value)}
+              onChange={(e) => handleSaveCurrentEndDate(e.target.value)}
               min={managementStartDate}
               className="mt-1 text-xs px-2 py-1 border border-blue-200 rounded font-normal bg-blue-50 text-blue-800"
               title="Hasta esta fecha"
@@ -277,6 +482,12 @@ export function ManagementComparison() {
             </div>
             <MetricRow comparison={{ label: "Packs Totales Producidos", previous: previousStats.totalPacks, current: currentStats.totalPacks, unit: "packs", hideDiff: true }} />
             <MetricRow comparison={{ label: "Productividad Promedio", previous: previousStats.packsPerShift, current: currentStats.packsPerShift, unit: "packs/turno", format: "float" }} />
+
+            <div className="bg-slate-100 py-2 px-4 text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mt-4 border-t border-slate-200">
+              <Clock className="w-4 h-4" /> Horas y Jornadas de Trabajo
+            </div>
+            <MetricRow comparison={{ label: "Horas de Producción", previous: previousStats.totalProductionHours, current: currentStats.totalProductionHours, unit: "hs", format: "float" }} />
+            <MetricRow comparison={{ label: "Horas Extras Empleadas", previous: previousStats.totalExtraHours, current: currentStats.totalExtraHours, unit: "hs", format: "float", inverse: true }} />
 
             <div className="bg-slate-100 py-2 px-4 text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mt-4 border-t border-slate-200">
               <Target className="w-4 h-4" /> Desempeño y Eficiencia Principal
