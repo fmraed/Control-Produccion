@@ -119,13 +119,15 @@ export function SchedulerStockProjection() {
         allowedFlavors.forEach(flavor => {
           if (config.enabledFlavors?.[flavor] !== false) {
             const isExternal = (config.externalProducts?.[brand]?.[sizeStr] || []).includes(flavor);
-            products.push({
-              marca: brand,
-              sabor: flavor,
-              tamano: Number(size),
-              key: `${brand}|${flavor}|${size}`,
-              isExternal
-            });
+            if (!isExternal) {
+              products.push({
+                marca: brand,
+                sabor: flavor,
+                tamano: Number(size),
+                key: `${brand}|${flavor}|${size}`,
+                isExternal: false
+              });
+            }
           }
         });
       });

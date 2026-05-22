@@ -70,6 +70,7 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
   // Form states
   const [formType, setFormType] = useState<'production' | 'flavor_change' | 'transformation' | 'other'>('production');
   const [formIsChained, setFormIsChained] = useState<boolean>(true);
+  const [formCustomStartDate, setFormCustomStartDate] = useState<string>('');
   const [formCustomStartTime, setFormCustomStartTime] = useState<string>('06:00');
   const [formCalcBasis, setFormCalcBasis] = useState<'theoretical' | 'default' | 'historical' | 'manual'>('theoretical');
   const [formMarca, setFormMarca] = useState<string>('');
@@ -93,7 +94,10 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
       setTransformationDuration((config as any).v2_transformationDuration);
     }
     if ((config as any).v2_packsPerShiftMatrix !== undefined) {
-      setPacksPerShiftMatrix((config as any).v2_packsPerShiftMatrix);
+      setPacksPerShiftMatrix(prev => ({
+        ...prev,
+        ...(config as any).v2_packsPerShiftMatrix
+      }));
     }
     if ((config as any).v2_defaultCalcBasis !== undefined) {
       setDefaultCalcBasis((config as any).v2_defaultCalcBasis);
@@ -120,18 +124,24 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
 
   // Sync focused date plans and surrounding actual reports
   useEffect(() => {
-    const dateStr = format(focusedDate, 'yyyy-MM-dd');
+    // We load a large window to allow continuous timeline panning
+    const startWindow = format(subDays(focusedDate, 15), 'yyyy-MM-dd');
+    const endWindow = format(addDays(focusedDate, 30), 'yyyy-MM-dd');
 
-    // Subscribe to planned blocks for this date
+    // Subscribe to planned blocks for this window
     const plansQuery = query(
       collection(db, 'production_plans_v2'),
-      where('date', '==', dateStr)
+      where('date', '>=', startWindow),
+      where('date', '<=', endWindow)
     );
 
     const unsubPlans = onSnapshot(plansQuery, (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as ProductionPlanV2));
-      // Sort client-side by orderIndex to keep sequencing strict
-      list.sort((a, b) => a.orderIndex - b.orderIndex);
+      // Sort client-side by date and orderIndex to keep sequencing strict across days
+      list.sort((a, b) => {
+        if (a.date !== b.date) return a.date.localeCompare(b.date);
+        return a.orderIndex - b.orderIndex;
+      });
       setPlannedBlocks(list);
       setLoading(false);
     }, (err) => {
@@ -140,8 +150,8 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
     });
 
     // Query production reports matching around this physical date to catch overnight sequences
-    const prevDateStr = format(subDays(focusedDate, 1), 'yyyy-MM-dd');
-    const nextDateStr = format(addDays(focusedDate, 1), 'yyyy-MM-dd');
+    const prevDateStr = format(subDays(focusedDate, 15), 'yyyy-MM-dd');
+    const nextDateStr = format(addDays(focusedDate, 30), 'yyyy-MM-dd');
 
     const reportsQuery = query(
       collection(db, 'production_reports'),
@@ -284,25 +294,27 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
     availableLines.forEach(line => {
       const linePlans = plannedBlocks.filter(p => p.linea === line);
       const startHourStr = lineStartHours[line] || '06:00';
-      const [sh, sm] = startHourStr.split(':').map(Number);
 
-      const baseDateStr = format(focusedDate, 'yyyy-MM-dd');
-      let currentStartTime = parseISO(`${baseDateStr}T${startHourStr.padStart(5, '0')}`);
+      const windowBaseDateStr = format(subDays(focusedDate, 1), 'yyyy-MM-dd');
+      const windowStart = parseISO(`${windowBaseDateStr}T${startHourStr.padStart(5, '0')}`);
+
+      let currentStartTime = windowStart;
+      if (linePlans.length > 0) {
+        const firstPlanDate = linePlans[0].date || windowBaseDateStr;
+        currentStartTime = parseISO(`${firstPlanDate}T${startHourStr.padStart(5, '0')}`);
+      }
 
       linePlans.forEach((plan, idx) => {
         if (plan.isChained === false && plan.customStartTime) {
-          let customStart = parseISO(`${baseDateStr}T${plan.customStartTime.padStart(5, '0')}`);
-          if (plan.customStartTime < startHourStr) {
-            customStart = addDays(customStart, 1);
-          }
-          currentStartTime = customStart;
+          const pDate = plan.date || windowBaseDateStr;
+          currentStartTime = parseISO(`${pDate}T${plan.customStartTime.padStart(5, '0')}`);
         }
 
-        const startDiffMinutes = differenceInMinutes(currentStartTime, parseISO(`${baseDateStr}T${startHourStr}`));
+        const startDiffMinutes = differenceInMinutes(currentStartTime, windowStart);
         const endDiffMinutes = startDiffMinutes + plan.duration;
 
-        const endTimeStr = format(addMinutes(currentStartTime, plan.duration), 'HH:mm');
-        const startTimeStr = format(currentStartTime, 'HH:mm');
+        const endTimeStr = format(addMinutes(currentStartTime, plan.duration), 'dd/MM HH:mm');
+        const startTimeStr = format(currentStartTime, 'dd/MM HH:mm');
 
         linesData[line].plannedTimeline.push({
           ...plan,
@@ -322,13 +334,13 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
     });
 
     // 2. Map Actual Production Reports (real)
-    // Focused Day physical window boundary (duration is 24 hours starting at custom start hour)
+    // Extended boundary for visual tracking
     availableLines.forEach(line => {
       const startHourStr = lineStartHours[line] || '06:00';
-      const baseDateStr = format(focusedDate, 'yyyy-MM-dd');
+      const windowBaseDateStr = format(subDays(focusedDate, 1), 'yyyy-MM-dd');
       
-      const windowStart = parseISO(`${baseDateStr}T${startHourStr.padStart(5, '0')}`);
-      const windowEnd = addDays(windowStart, 1); // 24 hours later
+      const windowStart = parseISO(`${windowBaseDateStr}T${startHourStr.padStart(5, '0')}`);
+      const windowEnd = addDays(windowStart, 4); // 96 hours later
 
       const lineReports = actualReports.filter(rep => rep.linea === line && rep.entraTurno && rep.saleTurno);
 
@@ -365,8 +377,8 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
           startOffsetMinutes: startOffset,
           endOffsetMinutes: endOffset,
           duration,
-          startTimeStr: format(clampedStart, 'HH:mm'),
-          endTimeStr: format(clampedEnd, 'HH:mm')
+          startTimeStr: format(clampedStart, 'dd/MM HH:mm'),
+          endTimeStr: format(clampedEnd, 'dd/MM HH:mm')
         });
       });
     });
@@ -381,6 +393,7 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
     setFormType('production');
     setFormNotes('');
     setFormLabel('');
+    setFormCustomStartDate(format(focusedDate, 'yyyy-MM-dd'));
 
     // Preload brands
     if (availableBrands.length > 0) {
@@ -413,6 +426,7 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
     setFormLabel(block.label || '');
     
     setFormIsChained(block.isChained !== false);
+    setFormCustomStartDate(block.date || format(focusedDate, 'yyyy-MM-dd'));
     setFormCustomStartTime(block.customStartTime || lineStartHours[block.linea] || '06:00');
     setFormCalcBasis(block.calculationBasis || 'theoretical');
     
@@ -469,10 +483,12 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
     }
 
     const dateStr = format(focusedDate, 'yyyy-MM-dd');
+    const finalDate = !formIsChained && formCustomStartDate ? formCustomStartDate : (editingBlock ? editingBlock.date : dateStr);
 
     if (editingBlock) {
       // Modify existing block
       const updateData: Partial<ProductionPlanV2> = {
+        date: finalDate,
         type: formType,
         duration: durationMinutes,
         notes: formNotes,
@@ -510,7 +526,7 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
       const orderIndex = linePlansCount > 0 ? Math.max(...plannedBlocks.filter(p => p.linea === addingToLine).map(p => p.orderIndex)) + 1 : 0;
 
       const newBlock: Omit<ProductionPlanV2, 'id'> = {
-        date: dateStr,
+        date: finalDate,
         linea: addingToLine,
         orderIndex,
         type: formType,
@@ -929,8 +945,8 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
                     const lineStart = lineStartHours[line] || '06:00';
                     const timeline = processedLinesScheduler[line] || { plannedTimeline: [], actualTimeline: [] };
                     
-                    // Simple grid offsets
-                    const totalMinutesInDay = 24 * 60;
+                    // Simple grid offsets for 96 hours (4 days)
+                    const totalMinutesInWindow = 96 * 60;
 
                     return (
                       <div key={line} className="space-y-2 border-b border-dashed border-slate-100 pb-4 last:border-0 last:pb-0">
@@ -945,21 +961,34 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
                         </div>
 
                         {/* HIGHLY VISUAL GANTT TRACKS ROW CONTAINER */}
-                        <div className="overflow-x-auto rounded-lg border border-slate-200">
-                          <div className="relative bg-slate-50 p-4 h-36 flex flex-col justify-between min-w-[1200px]">
+                        <div 
+                          className="overflow-x-auto rounded-lg border border-slate-200 gantt-scroll-container"
+                          onScroll={(e) => {
+                            const target = e.currentTarget;
+                            const containers = document.querySelectorAll('.gantt-scroll-container');
+                            containers.forEach((container: any) => {
+                              if (container !== target && container.scrollLeft !== target.scrollLeft) {
+                                container.scrollLeft = target.scrollLeft;
+                              }
+                            });
+                          }}
+                        >
+                          <div className="relative bg-slate-50 p-4 h-36 flex flex-col justify-between min-w-[4800px]">
                           
                           {/* GRID TIME LABELS BACKGROUND MARKERS */}
                           <div className="absolute inset-x-0 top-0 bottom-0 pointer-events-none flex justify-between px-4">
-                            {Array.from({ length: 9 }).map((_, i) => {
+                            {Array.from({ length: 33 }).map((_, i) => {
                               const [sh, sm] = lineStart.split(':').map(Number);
                               const totalMins = sh * 60 + sm + (i * 180); // every 3 hours
                               const hrNum = Math.floor((totalMins / 60) % 24);
                               const minNum = Math.floor(totalMins % 60);
                               const timeStr = `${hrNum.toString().padStart(2, '0')}:${minNum.toString().padStart(2, '0')}`;
+                              const isMidnight = hrNum === 0 && minNum === 0;
                               
                               return (
-                                <div key={i} className="flex flex-col items-center h-full border-l border-slate-200/50">
-                                  <span className="text-[9px] text-slate-400 font-mono mt-1 font-bold">
+                                <div key={i} className={`flex flex-col items-center h-full border-l ${isMidnight ? 'border-slate-800/40 border-l-2' : 'border-slate-300'}`}>
+                                  {isMidnight && <span className="absolute -translate-y-4 text-[8px] font-black text-slate-600 bg-slate-100 px-1 rounded uppercase tracking-widest border border-slate-300">MedioNoche</span>}
+                                  <span className={`text-[10px] font-mono mt-1 font-black ${isMidnight ? 'text-slate-800' : 'text-slate-600'}`}>
                                     {timeStr}
                                   </span>
                                 </div>
@@ -972,8 +1001,8 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
                             <span className="absolute left-2 text-[9px] font-bold text-slate-400 pointer-events-none uppercase">Plan</span>
                             
                             {timeline.plannedTimeline.map((block, idx) => {
-                              const pctWidth = (block.duration / totalMinutesInDay) * 100;
-                              const pctLeft = (block.startOffsetMinutes / totalMinutesInDay) * 100;
+                              const pctWidth = (block.duration / totalMinutesInWindow) * 100;
+                              const pctLeft = (block.startOffsetMinutes / totalMinutesInWindow) * 100;
                               const col = block.type === 'production' ? (FLAVOR_COLORS[block.sabor || ''] || '#6366f1') : '#cbd5e1';
 
                               return (
@@ -1007,8 +1036,8 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
                             <span className="absolute left-2 text-[9px] font-bold text-slate-400 pointer-events-none uppercase">Real</span>
 
                             {timeline.actualTimeline.map((act, idx) => {
-                              const pctWidth = (act.duration / totalMinutesInDay) * 100;
-                              const pctLeft = (act.startOffsetMinutes / totalMinutesInDay) * 100;
+                              const pctWidth = (act.duration / totalMinutesInWindow) * 100;
+                              const pctLeft = (act.startOffsetMinutes / totalMinutesInWindow) * 100;
                               const col = FLAVOR_COLORS[act.sabor || ''] || '#14b8a6';
 
                               return (
@@ -1267,13 +1296,21 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
                             </div>
                             {!formIsChained && (
                               <div className="mt-2 flex items-center justify-between gap-2 border-t border-slate-200 pt-2">
-                                <label className="text-[10px] font-bold uppercase text-slate-500">Hora de inicio manual:</label>
-                                <input
-                                  type="time"
-                                  value={formCustomStartTime}
-                                  onChange={(e) => setFormCustomStartTime(e.target.value)}
-                                  className="px-2 py-1 rounded-md border border-slate-300 text-xs font-mono"
-                                />
+                                <label className="text-[10px] font-bold uppercase text-slate-500">Fecha y Hora manual:</label>
+                                <div className="flex gap-2">
+                                  <input
+                                    type="date"
+                                    value={formCustomStartDate}
+                                    onChange={(e) => setFormCustomStartDate(e.target.value)}
+                                    className="px-2 py-1 rounded-md border border-slate-300 text-xs font-mono w-28"
+                                  />
+                                  <input
+                                    type="time"
+                                    value={formCustomStartTime}
+                                    onChange={(e) => setFormCustomStartTime(e.target.value)}
+                                    className="px-2 py-1 rounded-md border border-slate-300 text-xs font-mono"
+                                  />
+                                </div>
                               </div>
                             )}
                           </div>
