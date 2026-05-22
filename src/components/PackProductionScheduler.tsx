@@ -250,10 +250,10 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
     localStorage.setItem('v2_lineStartHours', JSON.stringify(updated));
 
     // Try central store update if user is Admin
-    if (isAdmin) {
-      updateDoc(doc(db, 'config', 'production'), {
+    if (isAdmin || auth.currentUser?.email === 'fraed.fordrinks@gmail.com') {
+      setDoc(doc(db, 'config', 'production'), {
         v2_lineStartHours: updated
-      }).catch(err => console.log('Admin central save skipped', err));
+      }, { merge: true }).catch(err => console.log('Admin central save skipped', err));
     }
   };
 
@@ -628,7 +628,7 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
 
   // Save general preconfigured times
   const handleSaveStandarddurations = async () => {
-    if (isAdmin) {
+    if (isAdmin || auth.currentUser?.email === 'fraed.fordrinks@gmail.com') {
       try {
         await setDoc(doc(db, 'config', 'production'), {
           v2_flavorChangeDuration: flavorChangeDuration,

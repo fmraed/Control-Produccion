@@ -67,7 +67,8 @@ export function useAppConfig() {
       if (docSnap.exists()) {
         const data = docSnap.data() as any;
         // Merge with defaults to ensure all fields exist even if the document is old
-        const mergedConfig: AppConfig = {
+        const mergedConfig: AppConfig | any = {
+          ...data,
           flavors: Array.isArray(data.flavors) ? data.flavors : SABORES,
           enabledFlavors: data.enabledFlavors || {},
           sizes: Array.isArray(data.sizes) ? data.sizes : TAMANOS,

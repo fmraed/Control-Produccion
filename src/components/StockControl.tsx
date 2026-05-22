@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, Fragment } from 'react';
-import { collection, query, where, onSnapshot, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { ProductionReport, MonthlyGoal } from '../types';
-import { format, parseISO, startOfMonth, endOfMonth, subDays } from 'date-fns';
+import { format, parseISO, startOfMonth, endOfMonth, subDays, getDate, getDaysInMonth } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { BarChart3, Database, Search, RefreshCw, AlertCircle, TrendingUp, Package, Clock, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useAppConfig } from '../hooks/useAppConfig';
@@ -31,6 +31,10 @@ export function StockControl() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
   const [sqlMappings, setSqlMappings] = useState<Record<string, string>>(SQL_PRODUCT_MAPPING);
+  const [initialStockOverrides, setInitialStockOverrides] = useState<Record<string, number>>({});
+  const [initialStockLoaded, setInitialStockLoaded] = useState(false);
+  const [editingStockKey, setEditingStockKey] = useState<string | null>(null);
+  const [editingStockValue, setEditingStockValue] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
 
   const isAdmin = auth.currentUser?.email === 'fraed.fordrinks@gmail.com';
@@ -44,6 +48,22 @@ export function StockControl() {
       }
     } catch (err) {
       console.error("Error fetching mappings:", err);
+    }
+  };
+
+  const handleSaveInitialStock = async (key: string) => {
+    if (!isAdmin) return;
+    const numValue = parseInt(editingStockValue, 10);
+    if (isNaN(numValue)) return;
+    
+    try {
+      await setDoc(doc(db, 'monthly_stock_init', selectedMonth), {
+        [key]: numValue
+      }, { merge: true });
+      setEditingStockKey(null);
+    } catch (err) {
+      console.error(err);
+      setError("Error al guardar stock inicial.");
     }
   };
 
@@ -94,11 +114,22 @@ export function StockControl() {
       setLoading(false);
     });
 
+    const initStockRef = doc(db, 'monthly_stock_init', selectedMonth);
+    const unsubInitStock = onSnapshot(initStockRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setInitialStockOverrides(docSnap.data() as Record<string, number>);
+      } else {
+        setInitialStockOverrides({});
+      }
+      setInitialStockLoaded(true);
+    });
+
     fetchSqlStock(selectedMonth);
 
     return () => {
       unsubReports();
       unsubGoals();
+      unsubInitStock();
     };
   }, [selectedMonth]);
 
@@ -145,6 +176,34 @@ export function StockControl() {
     });
   }, [config, availableBrands, availableSizes]);
 
+  useEffect(() => {
+    if (initialStockLoaded && sqlStock.length > 0 && activeProducts.length > 0) {
+      const toSave: Record<string, number> = {};
+      let needsSave = false;
+
+      activeProducts.forEach(p => {
+        if (initialStockOverrides[p.key] === undefined) {
+          const mappingKey = `${p.marca}-${p.sabor}-${p.tamano}`;
+          const legacyKey = `${p.sabor}-${p.tamano}`;
+          const sqlCode = sqlMappings[mappingKey] || sqlMappings[legacyKey];
+          const sqlData = sqlStock.find((s: any) => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim());
+          if (sqlData) {
+            toSave[p.key] = sqlData.stock_actual;
+            needsSave = true;
+          } else {
+            toSave[p.key] = 0;
+            needsSave = true;
+          }
+        }
+      });
+
+      if (needsSave) {
+        setDoc(doc(db, 'monthly_stock_init', selectedMonth), toSave, { merge: true })
+          .catch(err => console.error("Error auto-saving initial stocks:", err));
+      }
+    }
+  }, [initialStockLoaded, sqlStock, activeProducts, selectedMonth, initialStockOverrides, sqlMappings]);
+
   const dataByProduct = useMemo(() => {
     const productsMap: Record<string, any> = {};
     const today = new Date();
@@ -177,6 +236,8 @@ export function StockControl() {
       
       const sqlData = sqlStock.find(s => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim()) || { stock_actual: 0, salida_acumulada: 0, stock_inicial: 0 };
       
+      const initialStock = initialStockOverrides[p.key] !== undefined ? initialStockOverrides[p.key] : sqlData.stock_inicial;
+      
       const requiresQC = (config.qualityControlFlavors || ['Agua']).some(f => f.trim() === p.sabor.trim());
       const isExternal = (config.externalProducts?.[p.marca]?.[p.tamano.toString()] || []).includes(p.sabor);
       
@@ -190,7 +251,7 @@ export function StockControl() {
       const income = 0; 
 
       // Salida calculada = Stock Inicial + Producción/Ingresos - Stock Actual
-      const accumulatedExit = Math.max(0, sqlData.stock_inicial + totalProducedMonth + income - sqlData.stock_actual);
+      const accumulatedExit = Math.max(0, initialStock + totalProducedMonth + income - sqlData.stock_actual);
 
       // Promedio salida diaria = Total Pedido Mes / 21 (días hábiles típicos)
       const avgDailyExit = goal / 21;
@@ -204,6 +265,7 @@ export function StockControl() {
       const positionsUsed = isStackable ? Math.ceil(totalPalettes / 2) : Math.ceil(totalPalettes);
 
       const fulfillment = goal > 0 ? (accumulatedExit / goal) * 100 : 0;
+      const prodFulfillment = goal > 0 ? (totalProducedMonth / goal) * 100 : 0;
 
       productsMap[p.key] = {
         ...p,
@@ -213,7 +275,8 @@ export function StockControl() {
         avgDailyExit,
         coverageDays,
         fulfillment,
-        initialStock: sqlData.stock_inicial,
+        prodFulfillment,
+        initialStock: initialStock,
         accumulatedExit,
         totalProducedMonth,
         pending: pendingQuantity,
@@ -237,6 +300,7 @@ export function StockControl() {
       accumulatedExit: number;
       pending: number;
       positionsUsed: number;
+      prodFulfillment: number;
       products: any[];
     }
     const groups: Record<string, GroupData> = {};
@@ -262,6 +326,7 @@ export function StockControl() {
           yesterday: 0,
           avgExit: 0,
           fulfillment: 0,
+          prodFulfillment: 0,
           initialStock: 0,
           accumulatedExit: 0,
           pending: 0,
@@ -284,6 +349,8 @@ export function StockControl() {
     // Calculate group fulfillment after sums
     Object.values(groups).forEach(g => {
       g.fulfillment = g.ordered > 0 ? (g.accumulatedExit / g.ordered) * 100 : 0;
+      const totalProduced = g.products.reduce((s, p) => s + p.totalProducedMonth, 0);
+      g.prodFulfillment = g.ordered > 0 ? (totalProduced / g.ordered) * 100 : 0;
     });
 
     return groups;
@@ -301,6 +368,28 @@ export function StockControl() {
       percentage: (used / total) * 100
     };
   }, [groupValues, config?.warehousePositions]);
+
+  const overallFulfillment = useMemo(() => {
+    const totalOrdered = groupValues.reduce((sum, g) => sum + g.ordered, 0);
+    const totalExit = groupValues.reduce((sum, g) => sum + g.accumulatedExit, 0);
+    return totalOrdered > 0 ? (totalExit / totalOrdered) * 100 : 0;
+  }, [groupValues]);
+
+  const monthProgress = useMemo(() => {
+    const daysInMonth = getDaysInMonth(parseISO(selectedMonth + '-01'));
+    const currentMonthStr = format(new Date(), 'yyyy-MM');
+    let currentDay = 0;
+    if (selectedMonth === currentMonthStr) {
+      currentDay = getDate(new Date());
+    } else if (selectedMonth < currentMonthStr) {
+      currentDay = daysInMonth;
+    }
+    return {
+      days: daysInMonth,
+      current: currentDay,
+      percentage: (currentDay / daysInMonth) * 100
+    };
+  }, [selectedMonth]);
 
   if (loading) {
     return (
@@ -387,7 +476,30 @@ export function StockControl() {
           <div className="text-3xl font-black">
             {(storageOccupancy.total - storageOccupancy.used).toLocaleString('es-AR')}
           </div>
-          <p className="text-[10px] font-medium text-blue-200 mt-1 uppercase">Libres para nuevos ingresos</p>
+          <p className="text-[10px] font-medium text-blue-200 mt-1 uppercase mb-3">Libres para nuevos ingresos</p>
+
+          <div className="mt-auto border-t border-white/10 pt-2 flex flex-col gap-1.5">
+            <div className="flex justify-between items-center text-[9px] font-bold text-blue-200 uppercase tracking-widest">
+              <span>Mes transcurrido</span>
+              <span>{monthProgress.percentage.toFixed(0)}%</span>
+            </div>
+            <div className="w-full bg-black/20 rounded-full h-1 overflow-hidden">
+              <div 
+                className="bg-cyan-300 h-1 rounded-full transition-all duration-500"
+                style={{ width: `${monthProgress.percentage}%` }}
+              />
+            </div>
+            <div className="flex justify-between items-center text-[9px] font-bold text-blue-200 uppercase tracking-widest mt-1">
+              <span>Despachado vs Objetivo</span>
+              <span>{overallFulfillment.toFixed(0)}%</span>
+            </div>
+            <div className="w-full bg-black/20 rounded-full h-1 overflow-hidden">
+              <div 
+                className={`${overallFulfillment >= monthProgress.percentage ? 'bg-green-400' : 'bg-orange-400'} h-1 rounded-full transition-all duration-500`}
+                style={{ width: `${Math.min(100, overallFulfillment)}%` }}
+              />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -402,19 +514,20 @@ export function StockControl() {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-gray-100/80 border-b border-gray-200">
-                <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Marca</th>
-                <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Sabor</th>
-                <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Calibre</th>
-                <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200 bg-gray-200/30">Total Pedido Mes</th>
-                <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200 bg-blue-50/50">Stock {format(new Date(), 'dd/MM/yyyy')}</th>
-                <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200 bg-orange-50/50">Por Liberar</th>
-                <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Ingresos / Prod.</th>
-                <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Promedio Salida Diaria</th>
-                <th className="px-6 py-3 text-xs font-black text-blue-900 uppercase tracking-widest border-r border-gray-300 bg-blue-50">Días Cover.</th>
-                <th className="px-3 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest border-r border-gray-200 bg-gray-50">% Objet. Mes</th>
-                <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Stock Inicial</th>
-                <th className="px-4 py-3 text-[10px] font-black text-gray-500 uppercase tracking-widest">Salida Acumulada</th>
+              <tr className="bg-gray-100/80 border-y border-gray-300">
+                <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300">Marca</th>
+                <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300">Sabor</th>
+                <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300">Calibre</th>
+                <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300 bg-gray-200/30">Total Pedido Mes</th>
+                <th className="px-4 py-3 text-xs font-black text-gray-700 uppercase tracking-widest border border-gray-300 bg-blue-100/50 text-blue-900">Stock {format(new Date(), 'dd/MM/yyyy')}</th>
+                <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300 bg-orange-50/50">Por Liberar</th>
+                <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300">Ingresos / Prod.</th>
+                <th className="px-3 py-3 text-xs font-bold text-gray-600 uppercase tracking-widest border border-gray-300 bg-gray-50">% Obj. Prod.</th>
+                <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300">Promedio Salida Diaria</th>
+                <th className="px-6 py-3 text-sm font-black text-blue-900 uppercase tracking-widest border border-gray-300 bg-blue-100">Días Cover.</th>
+                <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300">Stock Inicial</th>
+                <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300">Salida Acumulada</th>
+                <th className="px-3 py-3 text-xs font-bold text-gray-600 uppercase tracking-widest border border-gray-300 bg-gray-50">% Obj. Salida</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -424,47 +537,54 @@ export function StockControl() {
                   <Fragment key={index}>
                     {index === 0 && !group.products[0].isExternal && (
                       <tr className="bg-blue-50/50">
-                        <td colSpan={12} className="px-4 py-2 text-[10px] font-black text-blue-800 uppercase tracking-widest text-center border-b border-blue-100">PRODUCCIÓN LOCAL (TUCUMÁN)</td>
+                        <td colSpan={13} className="px-4 py-2 text-[10px] font-black text-blue-800 uppercase tracking-widest text-center border-b border-blue-100">PRODUCCIÓN LOCAL (TUCUMÁN)</td>
                       </tr>
                     )}
                     {group.products[0].isExternal && (index === 0 || !groupValues[index-1].products[0].isExternal) && (
                       <tr className="bg-purple-50/50">
-                        <td colSpan={12} className="px-4 py-2 text-[10px] font-black text-purple-800 uppercase tracking-widest text-center border-b border-purple-100">PRODUCTOS EXTERNOS (OTRAS PLANTAS)</td>
+                        <td colSpan={13} className="px-4 py-2 text-[10px] font-black text-purple-800 uppercase tracking-widest text-center border-b border-purple-100">PRODUCTOS EXTERNOS (OTRAS PLANTAS)</td>
                       </tr>
                     )}
                     {group.products.map((p: any) => (
                       <tr key={p.key} className="hover:bg-gray-50 transition-colors group">
-                        <td className="px-4 py-3 text-xs font-black text-gray-900 border-r border-gray-100 italic">{p.marca}</td>
-                        <td className="px-4 py-3 text-xs font-bold text-gray-600 border-r border-gray-100 uppercase">
+                        <td className="px-4 py-3 text-sm font-black text-gray-900 border border-gray-200 italic">{p.marca}</td>
+                        <td className="px-4 py-3 text-sm font-bold text-gray-700 border border-gray-200 uppercase">
                           <div className="flex flex-col">
                             <span className="truncate">{p.sabor}</span>
                             {p.isExternal && (
-                              <span className="text-[7px] bg-purple-100 text-purple-700 px-1 py-0.5 rounded w-fit font-black mt-0.5 tracking-tighter">EXTERNO</span>
+                              <span className="text-[9px] bg-purple-100 text-purple-700 px-1 py-0.5 rounded w-fit font-black mt-0.5 tracking-tighter">EXTERNO</span>
                             )}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-xs font-mono font-bold text-gray-500 border-r border-gray-100">{p.tamano}</td>
-                        <td className="px-4 py-3 text-xs font-bold text-gray-600 border-r border-gray-100 bg-gray-50/30">
+                        <td className="px-4 py-3 text-sm font-sans font-bold text-gray-600 border border-gray-200">{p.tamano}</td>
+                        <td className="px-4 py-3 text-sm font-bold text-gray-700 border border-gray-200 bg-gray-50/30">
                           {p.totalOrdered.toLocaleString('es-AR')}
                         </td>
-                        <td className="px-4 py-3 text-sm font-black text-blue-700 border-r border-gray-100 bg-blue-50/20">
+                        <td className="px-4 py-3 text-base font-black text-blue-800 border border-gray-200 bg-blue-50/20">
                           {p.currentStock.toLocaleString('es-AR')}
                         </td>
-                        <td className="px-4 py-3 text-sm font-black text-orange-600 border-r border-gray-100 bg-orange-50/10">
+                        <td className="px-4 py-3 text-base font-black text-orange-700 border border-gray-200 bg-orange-50/10">
                           {p.pending > 0 ? p.pending.toLocaleString('es-AR') : '-'}
                         </td>
-                        <td className="px-4 py-3 text-xs font-bold text-gray-600 border-r border-gray-100 italic">
+                        <td className="px-4 py-3 text-sm font-bold text-gray-700 border border-gray-200 italic">
                           {p.isExternal ? (
                             <div className="flex flex-col">
-                              <span className="text-gray-400 line-through text-[10px]">{p.totalProducedMonth.toLocaleString('es-AR')}</span>
-                              <span className="text-[7px] text-purple-500 font-black">EXTERNO</span>
+                              <span className="text-gray-400 line-through text-xs">{p.totalProducedMonth.toLocaleString('es-AR')}</span>
+                              <span className="text-[9px] text-purple-500 font-black">EXTERNO</span>
                             </div>
                           ) : p.totalProducedMonth.toLocaleString('es-AR')}
                         </td>
-                        <td className="px-4 py-3 text-xs font-bold text-gray-600 border-r border-gray-100 italic">
+                        <td className={`px-3 py-3 text-sm font-bold border border-gray-200 text-center ${
+                          p.prodFulfillment >= 100 ? 'text-green-800 bg-green-50/50' : 
+                          p.prodFulfillment >= 80 ? 'text-blue-800 bg-blue-50/50' : 
+                          p.prodFulfillment >= 50 ? 'text-orange-800 bg-orange-50/50' : 'text-red-800 bg-red-50/50'
+                        }`}>
+                          {p.prodFulfillment.toFixed(0)}%
+                        </td>
+                        <td className="px-4 py-3 text-sm font-bold text-gray-700 border border-gray-200 italic">
                           {p.avgDailyExit.toLocaleString('es-AR', { maximumFractionDigits: 0 })}
                         </td>
-                        <td className={`px-6 py-3 border-r border-gray-200 text-center ${
+                        <td className={`px-6 py-3 border border-gray-200 text-center ${
                           p.coverageDays < 5 ? 'bg-red-500 shadow-inner' :
                           p.coverageDays < 10 ? 'bg-yellow-400 shadow-inner' :
                           'bg-green-500 shadow-inner'
@@ -473,23 +593,48 @@ export function StockControl() {
                             <span className="text-lg font-black text-white drop-shadow-sm leading-none">
                               {p.coverageDays}
                             </span>
-                            <span className="text-[8px] font-black text-white/90 uppercase tracking-tighter">
+                            <span className="text-[10px] font-black text-white/90 uppercase tracking-tighter">
                               Días
                             </span>
                           </div>
                         </td>
-                        <td className={`px-3 py-3 text-xs font-bold border-r border-gray-100 text-center ${
-                          p.fulfillment >= 100 ? 'text-green-700 bg-green-50/30' : 
-                          p.fulfillment >= 80 ? 'text-blue-700 bg-blue-50/30' : 
-                          p.fulfillment >= 50 ? 'text-orange-700 bg-orange-50/30' : 'text-red-700 bg-red-50/30'
+                        <td 
+                          className="px-4 py-3 text-sm font-bold text-gray-700 border border-gray-200 italic cursor-pointer hover:bg-gray-100 transition-colors"
+                          onClick={() => {
+                            if (isAdmin) {
+                              setEditingStockKey(p.key);
+                              setEditingStockValue(p.initialStock.toString());
+                            }
+                          }}
+                        >
+                          {editingStockKey === p.key ? (
+                            <input
+                              type="number"
+                              autoFocus
+                              value={editingStockValue}
+                              onChange={(e) => setEditingStockValue(e.target.value)}
+                              onBlur={() => handleSaveInitialStock(p.key)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveInitialStock(p.key);
+                                if (e.key === 'Escape') setEditingStockKey(null);
+                              }}
+                              className="w-[80px] p-1 border border-blue-400 rounded text-right ml-auto block focus:ring focus:ring-blue-200 outline-none"
+                            />
+                          ) : (
+                            <div className="text-right w-[80px] ml-auto border-b border-dashed border-gray-300 pb-0.5">
+                              {p.initialStock.toLocaleString('es-AR')}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-base font-black text-gray-900 border border-gray-200 bg-gray-50/50">
+                          {p.accumulatedExit.toLocaleString('es-AR')}
+                        </td>
+                        <td className={`px-3 py-3 text-sm font-bold border border-gray-200 text-center ${
+                          p.fulfillment >= 100 ? 'text-green-800 bg-green-50/50' : 
+                          p.fulfillment >= 80 ? 'text-blue-800 bg-blue-50/50' : 
+                          p.fulfillment >= 50 ? 'text-orange-800 bg-orange-50/50' : 'text-red-800 bg-red-50/50'
                         }`}>
                           {p.fulfillment.toFixed(0)}%
-                        </td>
-                        <td className="px-4 py-3 text-xs font-bold text-gray-500 border-r border-gray-100 italic">
-                          {p.initialStock.toLocaleString('es-AR')}
-                        </td>
-                        <td className="px-4 py-3 text-xs font-bold text-gray-900 bg-gray-50/50">
-                          {p.accumulatedExit.toLocaleString('es-AR')}
                         </td>
                       </tr>
                     ))}
@@ -504,11 +649,12 @@ export function StockControl() {
                            <span className="opacity-50 line-through">{group.products.reduce((sum: number, p: any) => sum + p.totalProducedMonth, 0).toLocaleString('es-AR')}</span>
                         ) : group.products.reduce((sum: number, p: any) => sum + p.totalProducedMonth, 0).toLocaleString('es-AR')}
                       </td>
+                      <td className={`px-4 py-2 text-sm border-r text-center ${isExternalGroup ? 'text-purple-100 border-purple-500' : 'text-cyan-100 border-cyan-400'}`}>{group.prodFulfillment.toFixed(0)}%</td>
                       <td className="px-4 py-2 text-sm opacity-80">{group.avgExit.toLocaleString('es-AR', { maximumFractionDigits: 0 })}</td>
                       <td className={`px-4 py-2 border-r ${isExternalGroup ? 'border-purple-500 bg-purple-700' : 'border-cyan-400 bg-cyan-600'} text-center`}></td>
-                      <td className={`px-4 py-2 text-sm ${isExternalGroup ? 'text-purple-100 border-purple-500' : 'text-cyan-100 border-r border-cyan-400'} text-center`}>{group.fulfillment.toFixed(0)}%</td>
                       <td className={`px-4 py-2 text-sm italic opacity-80 border-r ${isExternalGroup ? 'border-purple-500' : 'border-cyan-400'}`}>{group.initialStock.toLocaleString('es-AR')}</td>
                       <td className={`px-4 py-2 text-sm ${isExternalGroup ? 'bg-black/10' : 'bg-gray-800/20'}`}>{group.accumulatedExit.toLocaleString('es-AR')}</td>
+                      <td className={`px-4 py-2 text-sm text-center ${isExternalGroup ? 'text-purple-100 border-purple-500' : 'text-cyan-100'}`}>{group.fulfillment.toFixed(0)}%</td>
                     </tr>
                   </Fragment>
                 );
@@ -530,22 +676,29 @@ export function StockControl() {
                 <td className="px-4 py-4 text-base">
                   {groupValues.reduce((sum, g) => sum + g.products.reduce((s, p) => s + p.totalProducedMonth, 0), 0).toLocaleString('es-AR')}
                 </td>
-                <td className="px-4 py-4 text-base">
+                <td className="px-4 py-4 text-base bg-blue-950 text-center text-blue-200 border-r border-blue-900">
+                  {(() => {
+                    const totalOrdered = groupValues.reduce((sum, g) => sum + g.ordered, 0);
+                    const totalProduced = groupValues.reduce((sum, g) => sum + g.products.reduce((s, p) => s + p.totalProducedMonth, 0), 0);
+                    return totalOrdered > 0 ? ((totalProduced / totalOrdered) * 100).toFixed(0) : '0';
+                  })()}%
+                </td>
+                <td className="px-4 py-4 text-base border-r border-blue-900">
                   {groupValues.reduce((sum, g) => sum + g.avgExit, 0).toLocaleString('es-AR', { maximumFractionDigits: 0 })}
                 </td>
-                <td className="px-6 py-4 bg-blue-800"></td>
+                <td className="px-6 py-4 bg-blue-800 border-r border-blue-900"></td>
+                <td className="px-4 py-4 text-base italic opacity-80 border-r border-blue-950">
+                  {groupValues.reduce((sum, g) => sum + g.initialStock, 0).toLocaleString('es-AR')}
+                </td>
+                <td className="px-4 py-4 text-base bg-gray-900/40">
+                  {groupValues.reduce((sum, g) => sum + g.accumulatedExit, 0).toLocaleString('es-AR')}
+                </td>
                 <td className="px-4 py-4 text-base bg-blue-950 text-center text-blue-200">
                   {(() => {
                     const totalOrdered = groupValues.reduce((sum, g) => sum + g.ordered, 0);
                     const totalExit = groupValues.reduce((sum, g) => sum + g.accumulatedExit, 0);
                     return totalOrdered > 0 ? ((totalExit / totalOrdered) * 100).toFixed(0) : '0';
                   })()}%
-                </td>
-                <td className="px-4 py-4 text-base italic opacity-80 border-l border-blue-950">
-                  {groupValues.reduce((sum, g) => sum + g.initialStock, 0).toLocaleString('es-AR')}
-                </td>
-                <td className="px-4 py-4 text-base bg-gray-900/40">
-                  {groupValues.reduce((sum, g) => sum + g.accumulatedExit, 0).toLocaleString('es-AR')}
                 </td>
               </tr>
             </tfoot>
