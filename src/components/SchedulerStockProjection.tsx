@@ -1,17 +1,24 @@
 import { useState, useEffect, useMemo, Fragment } from 'react';
 import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { ProductionPlanV2, MonthlyGoal } from '../types';
+import { ProductionPlan, MonthlyGoal } from '../types';
 import { format, addDays, parseISO, subDays } from 'date-fns';
 import { TrendingUp, Package, RefreshCw, AlertCircle } from 'lucide-react';
 import { SQL_PRODUCT_MAPPING } from '../constants';
 import { useAppConfig } from '../hooks/useAppConfig';
-
 import { es } from 'date-fns/locale';
 
-export function SchedulerStockProjection() {
+interface SchedulerStockProjectionProps {
+  selectedWeek?: Date;
+  weekDays?: Date[];
+}
+
+export function SchedulerStockProjection({
+  selectedWeek = new Date(),
+  weekDays = Array.from({ length: 7 }, (_, i) => addDays(selectedWeek, i))
+}: SchedulerStockProjectionProps) {
   const { config, availableBrands, availableSizes } = useAppConfig();
-  const [plans, setPlans] = useState<ProductionPlanV2[]>([]);
+  const [plans, setPlans] = useState<ProductionPlan[]>([]);
   const [goals, setGoals] = useState<MonthlyGoal[]>([]);
   const [sqlStock, setSqlStock] = useState<any[]>([]);
   const [sqlPending, setSqlPending] = useState<any[]>([]);
@@ -21,11 +28,9 @@ export function SchedulerStockProjection() {
   const [error, setError] = useState<string | null>(null);
 
   const today = new Date();
-  // We project for 10 days starting today
-  const projectedDays = Array.from({ length: 11 }, (_, i) => addDays(today, i));
-
-  // Current month string for goals and stock
+  const todayStr = format(today, 'yyyy-MM-dd');
   const currentMonthStr = format(today, 'yyyy-MM');
+  const selectedMonthStr = format(selectedWeek, 'yyyy-MM');
 
   const fetchMappings = async () => {
     try {
@@ -63,20 +68,23 @@ export function SchedulerStockProjection() {
     }
   };
 
+  const weekStartStr = format(weekDays[0], 'yyyy-MM-dd');
+
   useEffect(() => {
     fetchMappings();
 
-    // Fetch goals for daily exit
+    // Fetch goals for relevant month (fallback to current if needed)
     const qGoals = query(
       collection(db, 'monthly_goals'),
-      where('month', '==', currentMonthStr)
+      where('month', '==', selectedMonthStr)
     );
 
-    // Fetch plans starting from today (to accumulate planned production)
-    const todayStr = format(today, 'yyyy-MM-dd');
+    // Fetch plans from the minimum of today and selected week start
+    const minDateStr = todayStr < weekStartStr ? todayStr : weekStartStr;
+
     const qPlans = query(
-      collection(db, 'production_plans_v2'),
-      where('date', '>=', todayStr)
+      collection(db, 'production_plans'),
+      where('date', '>=', minDateStr)
     );
 
     const unsubGoals = onSnapshot(qGoals, (snap) => {
@@ -84,11 +92,11 @@ export function SchedulerStockProjection() {
     });
 
     const unsubPlans = onSnapshot(qPlans, (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as ProductionPlanV2));
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as ProductionPlan));
       setPlans(list);
       setLoading(false);
     }, (err) => {
-      console.error(err);
+      console.error("Error fetching plans for scheduler:", err);
       setLoading(false);
     });
 
@@ -98,7 +106,7 @@ export function SchedulerStockProjection() {
       unsubGoals();
       unsubPlans();
     };
-  }, []);
+  }, [selectedMonthStr, weekStartStr]);
 
   // Filter Active Products exactly like StockControl
   const activeProducts = useMemo(() => {
@@ -164,42 +172,54 @@ export function SchedulerStockProjection() {
       
       const currentStockWithPending = sqlData.stock_actual + pendingQuantity;
 
-      // Map production per projected day
-      const dailyProduction: Record<string, number> = {};
-      projectedDays.forEach(day => dailyProduction[format(day, 'yyyy-MM-dd')] = 0);
-
-      // Distribute planned production into days
-      plans.forEach(plan => {
-        if (plan.type !== 'production') return;
-        if (plan.marca === p.marca && plan.sabor === p.sabor && plan.tamano === p.tamano) {
-          if (plan.date && dailyProduction[plan.date] !== undefined) {
-             dailyProduction[plan.date] += Number(plan.plannedPacks || 0);
-          }
-        }
-      });
-
-      // Calculate Day by Day coverage
+      // Simulate day-by-day projection
       const daysCoverage: Record<string, number> = {};
+      const daysStock: Record<string, number> = {};
+      const daysPlanned: Record<string, number> = {};
+
       let runningStock = currentStockWithPending;
 
-      projectedDays.forEach((day, index) => {
-        const dateStr = format(day, 'yyyy-MM-dd');
-        // Subtract daily exit based on day of week
-        // Monday=1, ..., Saturday=6, Sunday=0
-        const dayOfWeek = day.getDay();
+      // Projection simulation starts from the minimum of today and selected week start
+      const startSimDate = new Date(todayStr < format(weekDays[0], 'yyyy-MM-dd') ? today : weekDays[0]);
+      startSimDate.setHours(0,0,0,0);
+      
+      const endSimDate = new Date(weekDays[6]);
+      endSimDate.setHours(0,0,0,0);
+
+      let currentSimDate = new Date(startSimDate);
+      let iterations = 0;
+      
+      while (currentSimDate <= endSimDate && iterations < 100) {
+        iterations++;
+        const dateStr = format(currentSimDate, 'yyyy-MM-dd');
+        const dayOfWeek = currentSimDate.getDay();
+        
         let exitFactor = 1.0;
         if (dayOfWeek === 6) exitFactor = 0.5; // Saturday
         if (dayOfWeek === 0) exitFactor = 0.0; // Sunday
 
-        // First day (index 0) we might subtract or not, but generally yes, we subtract if it's the end of day.
-        // Or if 'stock' is from today morning, by today evening we have generated exit.
-        runningStock -= (avgDailyExit * exitFactor);
+        // Only subtract exit and add plans from today onwards
+        const dateStrIsTodayOrFuture = dateStr >= todayStr;
         
-        // Add planned production for that day
-        runningStock += dailyProduction[dateStr];
+        if (dateStrIsTodayOrFuture) {
+          runningStock -= (avgDailyExit * exitFactor);
+          
+          // Add plans of old planner (type ProductionPlan)
+          const plannedForDay = plans
+            .filter(plan => plan.date === dateStr && plan.marca === p.marca && plan.sabor === p.sabor && plan.tamano === p.tamano)
+            .reduce((sum, plan) => sum + Number(plan.plannedPacks || 0), 0);
+          
+          runningStock += plannedForDay;
+          daysPlanned[dateStr] = plannedForDay;
+        } else {
+          daysPlanned[dateStr] = 0;
+        }
 
+        daysStock[dateStr] = runningStock;
         daysCoverage[dateStr] = avgDailyExit > 0 ? (runningStock / avgDailyExit) : 0;
-      });
+
+        currentSimDate = addDays(currentSimDate, 1);
+      }
 
       productsMap[p.key] = {
         ...p,
@@ -207,7 +227,9 @@ export function SchedulerStockProjection() {
         avgDailyExit,
         currentStockWithPending,
         initialStock: sqlData.stock_inicial,
-        daysCoverage
+        daysCoverage,
+        daysStock,
+        daysPlanned
       };
     });
 
@@ -244,17 +266,19 @@ export function SchedulerStockProjection() {
         };
       }
       const pData = productsMap[p.key];
-      groups[groupKey].ordered += pData.totalOrdered;
-      groups[groupKey].stock += pData.currentStockWithPending;
-      groups[groupKey].avgExit += pData.avgDailyExit;
-      groups[groupKey].products.push(pData);
+      if (pData) {
+        groups[groupKey].ordered += pData.totalOrdered;
+        groups[groupKey].stock += pData.currentStockWithPending;
+        groups[groupKey].avgExit += pData.avgDailyExit;
+        groups[groupKey].products.push(pData);
 
-      gOrdered += pData.totalOrdered;
-      gInitialStock += pData.initialStock; // Or currentStock
+        gOrdered += pData.totalOrdered;
+        gInitialStock += pData.initialStock;
+      }
     });
 
     return { groups: Object.values(groups), grandOrdered: gOrdered, grandInitialStock: gInitialStock };
-  }, [activeProducts, goals, sqlStock, sqlPending, plans, projectedDays]);
+  }, [activeProducts, goals, sqlStock, sqlPending, plans, weekDays, todayStr]);
 
   if (loading) {
      return <div className="p-8 text-center text-slate-500">Cargando datos...</div>;
@@ -262,23 +286,24 @@ export function SchedulerStockProjection() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between mb-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
         <div>
           <h2 className="text-lg font-black text-slate-800 uppercase tracking-tighter flex items-center gap-2">
             <Package className="w-5 h-5 text-indigo-600" />
-            Proyección de Cobertura (Días)
+            Proyección de Cobertura de Stock (Días)
           </h2>
           <p className="text-xs text-slate-500">
-            Días de cobertura estimados basados en stock de SQL, salida promedio diaria y producción programada en el Gantt.
+            Días de cobertura estimados basados en stock de SQL, salida promedio diaria y producción programada en el Programa Semanal.
           </p>
         </div>
         <button
           onClick={fetchSqlStock}
           disabled={refreshing}
-          className="p-2.5 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors"
+          className="flex items-center gap-2 px-4 py-2.5 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors"
           title="Actualizar Stock"
         >
-          <RefreshCw className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          <span className="text-xs font-bold uppercase">Sincronizar Stock</span>
         </button>
       </div>
 
@@ -289,20 +314,25 @@ export function SchedulerStockProjection() {
         </div>
       )}
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden overflow-x-auto">
-        <table className="w-full text-left border-collapse text-xs">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-300 overflow-hidden overflow-x-auto">
+        <table className="w-full text-left border-collapse text-sm">
           <thead>
-            <tr className="bg-slate-100 border-b border-slate-200">
-              <th className="px-3 py-2 font-black text-slate-500 uppercase">Marca</th>
-              <th className="px-3 py-2 font-black text-slate-500 uppercase">Sabor</th>
-              <th className="px-3 py-2 font-black text-slate-500 uppercase">Calibre</th>
-              <th className="px-3 py-2 font-black text-slate-500 uppercase border-l border-r border-slate-200 bg-slate-200/50">Stock Actual</th>
-              <th className="px-3 py-2 font-black text-slate-500 uppercase border-r border-slate-200 bg-slate-200/50">Salida Diaria</th>
-              {projectedDays.map((day) => {
-                const dayStr = format(day, "eeee dd/MM", { locale: es });
+            <tr className="bg-slate-100 border-y border-slate-300">
+              <th className="px-3 py-3 font-black text-slate-600 uppercase text-xs border border-slate-300">Marca</th>
+              <th className="px-3 py-3 font-black text-slate-600 uppercase text-xs border border-slate-300">Sabor</th>
+              <th className="px-3 py-3 font-black text-slate-600 uppercase text-xs border border-slate-300">Calibre</th>
+              <th className="px-3 py-3 font-black text-slate-600 uppercase text-xs border border-slate-300 bg-slate-200/50">Stock Actual</th>
+              <th className="px-3 py-3 font-black text-slate-600 uppercase text-xs border border-slate-300 bg-slate-200/50">Salida Diaria</th>
+              {weekDays.map((day) => {
                 const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+                const isDayToday = format(day, 'yyyy-MM-dd') === todayStr;
                 return (
-                  <th key={day.toISOString()} className={`px-2 py-2 text-xs font-black uppercase text-center border border-slate-300 ${isWeekend ? 'bg-yellow-100/80 text-yellow-800' : 'text-slate-700 bg-slate-200'}`}>
+                  <th 
+                    key={day.toISOString()} 
+                    className={`px-2 py-2 text-xs font-black uppercase text-center border border-slate-300 min-w-[100px] ${
+                      isDayToday ? 'bg-indigo-500 text-white' : (isWeekend ? 'bg-yellow-50 text-yellow-800' : 'text-slate-700 bg-slate-200')
+                    }`}
+                  >
                     <div className="flex flex-col">
                       <span>{format(day, "eeee", { locale: es }).substring(0, 3)}</span>
                       <span>{format(day, "dd/MM")}</span>
@@ -312,25 +342,25 @@ export function SchedulerStockProjection() {
               })}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-slate-200">
             {groups.map((group, idx) => {
-              const isExternalGroup = group.products.every(p => p.isExternal);
               return (
                 <Fragment key={idx}>
                   {group.products.map(p => (
-                    <tr key={p.key} className="hover:bg-slate-50">
-                      <td className="px-3 py-2 font-bold text-slate-700">{p.marca}</td>
-                      <td className="px-3 py-2 font-bold text-slate-700">{p.sabor}</td>
-                      <td className="px-3 py-2 font-bold text-slate-500">{p.tamano}</td>
-                      <td className="px-3 py-2 font-black text-indigo-700 border-l border-r border-slate-100 bg-slate-50/50 text-right">
+                    <tr key={p.key} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-3 py-2 font-bold text-slate-700 border border-slate-300">{p.marca}</td>
+                      <td className="px-3 py-2 font-bold text-slate-700 border border-slate-300">{p.sabor}</td>
+                      <td className="px-3 py-2 font-bold text-slate-500 border border-slate-300">{p.tamano}cc</td>
+                      <td className="px-3 py-2 font-black text-indigo-700 border border-slate-300 bg-slate-50/50 text-right text-base">
                         {p.currentStockWithPending.toLocaleString('es-AR')}
                       </td>
-                      <td className="px-3 py-2 font-bold text-slate-600 border-r border-slate-100 bg-slate-50/50 text-right">
+                      <td className="px-3 py-2 font-bold text-slate-600 border border-slate-300 bg-slate-50/50 text-right">
                         {p.avgDailyExit.toLocaleString('es-AR', { maximumFractionDigits: 0 })}
                       </td>
-                      {projectedDays.map(day => {
+                      {weekDays.map(day => {
                         const dateStr = format(day, 'yyyy-MM-dd');
-                        const cov = p.daysCoverage[dateStr];
+                        const cov = p.daysCoverage[dateStr] || 0;
+                        const planned = p.daysPlanned[dateStr] || 0;
                         
                         let bgColor = 'bg-white';
                         let textColor = 'text-slate-800';
@@ -340,18 +370,25 @@ export function SchedulerStockProjection() {
                         else { bgColor = 'bg-slate-50'; }
 
                         return (
-                          <td key={dateStr} className={`px-2 py-2 font-sans text-xs font-black text-center border border-slate-300 ${bgColor} ${textColor}`}>
-                            {cov.toFixed(1)}
+                          <td key={dateStr} className={`px-2 py-2 font-mono text-sm tracking-tight font-black text-center border border-slate-300 ${bgColor} ${textColor}`}>
+                            <div className="flex flex-col items-center justify-center min-h-[36px]">
+                              <span>{cov.toFixed(1)}</span>
+                              {planned > 0 && (
+                                <span className="text-[9px] font-black tracking-tighter text-indigo-700 bg-white border border-indigo-200 px-1 rounded mt-1 shadow-sm whitespace-nowrap">
+                                  +{planned.toLocaleString('es-AR')}
+                                </span>
+                              )}
+                            </div>
                           </td>
                         );
                       })}
                     </tr>
                   ))}
                   <tr className="bg-slate-100 border-t-2 border-slate-200">
-                    <td colSpan={3} className="px-3 py-1 text-[9px] font-black uppercase text-slate-500 text-right">{group.label}</td>
-                    <td className="px-3 py-1 font-black text-slate-800 border-l border-r border-slate-200 text-right">{group.stock.toLocaleString('es-AR')}</td>
-                    <td className="px-3 py-1 font-black text-slate-800 border-r border-slate-200 text-right">{group.avgExit.toLocaleString('es-AR', { maximumFractionDigits: 0 })}</td>
-                    <td colSpan={projectedDays.length} className="bg-slate-100"></td>
+                    <td colSpan={3} className="px-3 py-1.5 text-[9px] font-black uppercase text-slate-500 text-right">{group.label}</td>
+                    <td className="px-3 py-1.5 font-black text-slate-800 border-l border-r border-slate-200 text-right">{group.stock.toLocaleString('es-AR')}</td>
+                    <td className="px-3 py-1.5 font-black text-slate-800 border-r border-slate-200 text-right">{group.avgExit.toLocaleString('es-AR', { maximumFractionDigits: 0 })}</td>
+                    <td colSpan={weekDays.length} className="bg-slate-100"></td>
                   </tr>
                 </Fragment>
               );

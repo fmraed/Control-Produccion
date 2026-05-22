@@ -25,12 +25,13 @@ import { es } from 'date-fns/locale';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 import { useAppConfig } from '../hooks/useAppConfig';
 import { getLogicalDate } from '../utils';
+import { SchedulerStockProjection } from './SchedulerStockProjection';
 
 const SHIFTS = ['Mañana', 'Tarde', 'Noche'] as const;
 
 export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) {
   const { config, availableBrands, availableLines, availableFlavors, availableSizes, getFilteredFlavors, getFilteredSizes } = useAppConfig();
-  const [activeTab, setActiveTab] = useState<'scheduler' | 'config'>('scheduler');
+  const [activeTab, setActiveTab] = useState<'scheduler' | 'projection' | 'config'>('scheduler');
   const [selectedWeek, setSelectedWeek] = useState(new Date());
   const [plans, setPlans] = useState<ProductionPlan[]>([]);
   const [actualReports, setActualReports] = useState<ProductionReport[]>([]);
@@ -462,6 +463,18 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
           </div>
           {activeTab === 'scheduler' && <motion.div layoutId="tab-underline" className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-600" />}
         </button>
+        <button
+          onClick={() => setActiveTab('projection')}
+          className={`pb-4 text-sm font-bold transition-all relative ${
+            activeTab === 'projection' ? 'text-indigo-600' : 'text-gray-400 hover:text-gray-600'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Package className="w-4 h-4" />
+            Stock y Cobertura
+          </div>
+          {activeTab === 'projection' && <motion.div layoutId="tab-underline" className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-600" />}
+        </button>
           {isAdmin && (
             <button
               onClick={() => setActiveTab('config')}
@@ -479,7 +492,7 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
       </div>
 
       <AnimatePresence mode="wait">
-        {activeTab === 'scheduler' ? (
+        {activeTab === 'scheduler' && (
           <motion.div
             key="scheduler"
             initial={{ opacity: 0, x: -10 }}
@@ -832,7 +845,21 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
               </div>
             </div>
           </motion.div>
-        ) : (
+        )}
+        {activeTab === 'projection' && (
+          <motion.div
+            key="projection"
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -10 }}
+          >
+            <SchedulerStockProjection 
+              selectedWeek={selectedWeek}
+              weekDays={weekDays}
+            />
+          </motion.div>
+        )}
+        {activeTab === 'config' && (
           <motion.div
             key="config"
             initial={{ opacity: 0, x: 10 }}

@@ -191,9 +191,25 @@
         "changes": { "type": "array" }
       },
       "required": ["planId", "action", "datePlan", "timestamp", "authorId"]
+    },
+    "DailyStock": {
+      "title": "Daily Stock",
+      "description": "Stock snapshot for a specific day",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "format": "date" },
+        "stocks": { "type": "object", "description": "Map of product key to stock quantity" },
+        "savedAt": { "type": "string", "format": "date-time" },
+        "savedBy": { "type": "string" }
+      },
+      "required": ["date", "stocks", "savedAt", "savedBy"]
     }
   },
   "firestore": {
+    "daily_stocks/{dateId}": {
+      "schema": { "$ref": "#/entities/DailyStock" },
+      "description": "Stores daily stock snapshots."
+    },
     "schedule_audit_logs/{logId}": {
       "schema": { "$ref": "#/entities/ScheduleAuditLog" },
       "description": "Stores logs of changes to production plans."

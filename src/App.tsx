@@ -40,7 +40,6 @@ import { ManagementSummary } from './components/ManagementSummary';
 import { ManagementComparison } from './components/ManagementComparison';
 import { PersonnelManagement } from './components/PersonnelManagement';
 import { ProductionScheduler } from './components/ProductionScheduler';
-import { PackProductionScheduler } from './components/PackProductionScheduler';
 import { SyrupReport } from './components/SyrupReport';
 import { GoalFulfillment } from './components/GoalFulfillment';
 import { StockControl } from './components/StockControl';
@@ -58,7 +57,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null | undefined>(null);
   const [loading, setLoading] = useState(true);
-  const [currentView, setCurrentView] = useState<'dashboard' | 'new' | 'consolidated' | 'waste' | 'downtime' | 'pareto' | 'efficiency' | 'gantt' | 'admin' | 'elaboracion' | 'elaboracion_history' | 'profile' | 'live' | 'management_summary' | 'management_comparison' | 'personnel' | 'scheduler' | 'scheduler_v2' | 'syrup' | 'goal_fulfillment' | 'stock_control' | 'historical_report' | 'historical_importer' | 'historical_exporter' | 'historical_elab_importer' | 'historical_elab_exporter'>('dashboard');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'new' | 'consolidated' | 'waste' | 'downtime' | 'pareto' | 'efficiency' | 'gantt' | 'admin' | 'elaboracion' | 'elaboracion_history' | 'profile' | 'live' | 'management_summary' | 'management_comparison' | 'personnel' | 'scheduler' | 'syrup' | 'goal_fulfillment' | 'stock_control' | 'historical_report' | 'historical_importer' | 'historical_exporter' | 'historical_elab_importer' | 'historical_elab_exporter'>('dashboard');
   const [editingReport, setEditingReport] = useState<ProductionReport | undefined>(undefined);
   const [editingElabReport, setEditingElabReport] = useState<ElaboracionReport | undefined>(undefined);
   const [paretoLine, setParetoLine] = useState<string>('');
@@ -125,7 +124,6 @@ export default function App() {
         elaboracion_history: permissions.viewElaboracion || permissions.editElaboracion,
         personnel: permissions.viewPersonnel || permissions.editPersonnel,
         scheduler: permissions.viewScheduler || permissions.editScheduler,
-        scheduler_v2: permissions.viewScheduler || permissions.editScheduler,
         admin: permissions.viewAdmin,
         live: permissions.viewLiveMonitor,
         management_summary: permissions.viewManagementSummary,
@@ -438,7 +436,6 @@ export default function App() {
             {currentView === 'admin' && 'Administración'}
             {currentView === 'profile' && 'Mi Perfil'}
             {currentView === 'new' && (editingReport ? 'Editar Parte de Producción' : 'Nuevo Parte de Producción')}
-            {currentView === 'scheduler_v2' && 'Planificador de Packs Avanzado'}
           </h1>
           
           <div className="flex flex-wrap items-center gap-2 bg-white rounded-xl shadow-sm border border-gray-200 p-1.5 w-full lg:w-auto">
@@ -702,19 +699,6 @@ export default function App() {
               </button>
             )}
 
-            {(permissions.viewScheduler || permissions.editScheduler) && (
-              <button
-                onClick={() => { setCurrentView('scheduler_v2'); setActiveMenu(null); }}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
-                  currentView === 'scheduler_v2' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' : 'text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                <Sparkles className="w-4 h-4" />
-                <span className="hidden sm:inline">Planificación Packs (Nuevo)</span>
-                <span className="sm:hidden">Pack Plani.</span>
-              </button>
-            )}
-
             {permissions.viewLiveMonitor && (
               <button
                 onClick={() => { setCurrentView('live'); setActiveMenu(null); }}
@@ -842,9 +826,6 @@ export default function App() {
         )}
         {currentView === 'scheduler' && (
           <ProductionScheduler isAdmin={permissions.editScheduler} />
-        )}
-        {currentView === 'scheduler_v2' && (
-          <PackProductionScheduler isAdmin={permissions.editScheduler} />
         )}
         {currentView === 'admin' && (
           <AdminPanel userProfile={userProfile} />

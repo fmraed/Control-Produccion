@@ -331,6 +331,16 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /monthly_stock_init/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /daily_stocks/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
     match /production_reports/{reportId} {
       // Allow any authenticated user to read reports for now, as it's a company dashboard
       allow read: if isAuthenticated();
