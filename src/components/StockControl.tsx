@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, Fragment } from 'react';
+import { motion } from 'motion/react';
 import { collection, query, where, onSnapshot, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { ProductionReport, MonthlyGoal } from '../types';
@@ -24,6 +25,7 @@ const FLAVOR_PRIORITY: Record<string, number> = {
 
 export function StockControl() {
   const { config, availableBrands, availableSizes } = useAppConfig();
+  const [activeTab, setActiveTab] = useState<'grid' | 'evolution'>('grid');
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [goals, setGoals] = useState<MonthlyGoal[]>([]);
   const [sqlStock, setSqlStock] = useState<any[]>([]);
@@ -631,10 +633,46 @@ export function StockControl() {
         </div>
       )}
 
-      {/* Split side-by-side layout (un modulo a la par) */}
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 items-start">
-        {/* Main tables and cards: takes 3/4 widths */}
-        <div className="xl:col-span-3 space-y-6">
+      {/* Tabs Layout */}
+      <div className="flex border-b border-gray-200 gap-6 mt-4">
+        <button
+          onClick={() => setActiveTab('grid')}
+          className={`pb-4 text-sm font-bold transition-all relative ${
+            activeTab === 'grid' ? 'text-blue-600 font-extrabold' : 'text-gray-400 hover:text-gray-600 font-medium'
+          }`}
+        >
+          <div className="flex items-center gap-2 px-1">
+            <Database className="w-4 h-4" />
+            Planilla de Stock y Salidas
+          </div>
+          {activeTab === 'grid' && (
+            <motion.div 
+              layoutId="stock-tab-underline" 
+              className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" 
+            />
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab('evolution')}
+          className={`pb-4 text-sm font-bold transition-all relative ${
+            activeTab === 'evolution' ? 'text-blue-600 font-extrabold' : 'text-gray-400 hover:text-gray-600 font-medium'
+          }`}
+        >
+          <div className="flex items-center gap-2 px-1">
+            <TrendingUp className="w-4 h-4" />
+            Evolución de Stock
+          </div>
+          {activeTab === 'evolution' && (
+            <motion.div 
+              layoutId="stock-tab-underline" 
+              className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" 
+            />
+          )}
+        </button>
+      </div>
+
+      {activeTab === 'grid' ? (
+        <div className="space-y-6">
           {/* Summary stats */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
             <div className="sm:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
@@ -745,7 +783,10 @@ export function StockControl() {
                           return (
                             <tr 
                               key={p.key} 
-                              onClick={() => setSelectedChartProduct(p.key)}
+                              onClick={() => {
+                                setSelectedChartProduct(p.key);
+                                setActiveTab('evolution');
+                              }}
                               className={`hover:bg-gray-50 transition-all group cursor-pointer ${
                                 isSelectedChartProductNode ? 'bg-blue-50/80 border-l-4 border-l-blue-600 shadow-sm' : ''
                               }`}
@@ -920,7 +961,7 @@ export function StockControl() {
                     <td className="px-4 py-4 text-base border-r border-blue-900">
                       {groupValues.reduce((sum, g) => sum + g.avgExit, 0).toLocaleString('es-AR', { maximumFractionDigits: 0 })}
                     </td>
-                    <td className="px-6 py-4 bg-blue-800 border-r border-blue-900"></td>
+                    <td className="px-6 py-4 bg-blue-800 border-r border-blue-900 font-bold"></td>
                     <td className="px-4 py-4 text-base italic opacity-80 border-r border-blue-950">
                       {groupValues.reduce((sum, g) => sum + g.initialStock, 0).toLocaleString('es-AR')}
                     </td>
@@ -931,7 +972,7 @@ export function StockControl() {
                       {(() => {
                         const totalOrdered = groupValues.reduce((sum, g) => sum + g.ordered, 0);
                         const totalExit = groupValues.reduce((sum, g) => sum + g.accumulatedExit, 0);
-                        return totalOrdered > 0 ? ((totalExit / totalOrdered) * 100).toFixed(0) : '0';
+                        return totalOrdered > 0 ? ((totalExit / totalOrdered) * 105).toFixed(0) : '0';
                       })()}%
                     </td>
                   </tr>
@@ -940,58 +981,95 @@ export function StockControl() {
             </div>
           </div>
         </div>
+      ) : (
+        /* Wide majestic evolution tab */
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Product Information and Controls (1 column) */}
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-base font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5 text-blue-600 shrink-0" />
+                  Evolución de Stock
+                </h3>
+                <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mt-0.5">
+                  Historial de stock diario
+                </p>
+              </div>
 
-        {/* Sidebar module for line chart trend evolution (un modulo a la par) */}
-        <div className="xl:col-span-1 space-y-6 lg:sticky lg:top-4">
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 flex flex-col space-y-4">
-            <div>
-              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-blue-600 shrink-0" />
-                Evolución de Stock
-              </h3>
-              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-0.5">
-                Historial de stock diario
+              {/* Selected Product summary display */}
+              {selectedChartProduct && (() => {
+                const [brand, flavor, size] = selectedChartProduct.split('|');
+                const currentStockData = dataByProduct[selectedChartProduct]?.currentStock ?? 0;
+                const unitSize = size ? `${size}cc` : '';
+                return (
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex items-center justify-between">
+                    <div className="space-y-1">
+                      <span className="text-[10px] font-black uppercase text-blue-600 block tracking-wider">{brand}</span>
+                      <span className="text-base font-extrabold text-slate-800 block">{flavor}</span>
+                      <span className="text-xs text-slate-400 font-bold font-mono">{unitSize}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[9px] font-bold uppercase text-slate-400 block tracking-wider">STOCK SELECC.</span>
+                      <span className="text-2xl font-black text-slate-900 block font-mono">{currentStockData.toLocaleString('es-AR')}</span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Dropdown in case user wants to change manually */}
+              <div>
+                <span className="text-[10px] font-extrabold uppercase text-slate-400 block tracking-wider mb-1.5">Seleccionar Producto:</span>
+                <select
+                  value={selectedChartProduct}
+                  onChange={(e) => setSelectedChartProduct(e.target.value)}
+                  className="w-full rounded-xl border-gray-200 text-sm font-bold bg-slate-50 border p-3 text-slate-705 focus:ring-blue-500 focus:ring focus:border-blue-500 cursor-pointer focus:outline-none"
+                >
+                  {activeProducts.map(p => (
+                    <option key={p.key} value={p.key}>
+                      {p.marca} {p.sabor} {p.tamano}cc
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* stats summary of the trend */}
+              {(() => {
+                const chartData = dailyStocksList
+                  .filter(item => item.stocks[selectedChartProduct] !== undefined);
+                if (chartData.length === 0) return null;
+                const stocks = chartData.map(item => item.stocks[selectedChartProduct] || 0);
+                const maxStock = Math.max(...stocks);
+                const minStock = Math.min(...stocks);
+                const avgStock = stocks.reduce((sum, val) => sum + val, 0) / stocks.length;
+                return (
+                  <div className="space-y-3 pt-4 border-t border-slate-100">
+                    <span className="text-[10px] font-extrabold uppercase text-slate-400 block tracking-wider">Métricas del Período</span>
+                    <div className="grid grid-cols-3 gap-3 text-center uppercase tracking-widest text-[9px] font-bold">
+                      <div className="bg-slate-50 p-3 rounded-xl border border-slate-100/50">
+                        <span className="block mb-1 text-slate-400 font-bold">MÍNIMO</span>
+                        <span className="text-sm font-black text-slate-800 font-mono leading-none">{minStock.toLocaleString('es-AR', { maximumFractionDigits: 0 })}</span>
+                      </div>
+                      <div className="bg-slate-50 p-3 rounded-xl border border-slate-100/50">
+                        <span className="block mb-1 text-slate-400 font-bold">PROMEDIO</span>
+                        <span className="text-sm font-black text-slate-800 font-mono leading-none">{avgStock.toLocaleString('es-AR', { maximumFractionDigits: 0 })}</span>
+                      </div>
+                      <div className="bg-slate-50 p-3 rounded-xl border border-slate-100/50">
+                        <span className="block mb-1 text-slate-400 font-bold">MÁXIMO</span>
+                        <span className="text-sm font-black text-slate-800 font-mono leading-none">{maxStock.toLocaleString('es-AR', { maximumFractionDigits: 0 })}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <p className="text-xs text-gray-500 font-medium leading-relaxed bg-blue-50/50 p-4 rounded-xl border border-blue-100/30">
+                💡 <span className="font-bold text-blue-800">Consejo:</span> Puedes volver a la pestaña de "Planilla de Stock" y hacer clic en cualquier fila para abrir automáticamente su gráfico aquí.
               </p>
             </div>
 
-            {/* Selected Product summary display */}
-            {selectedChartProduct && (() => {
-              const [brand, flavor, size] = selectedChartProduct.split('|');
-              const currentStockData = dataByProduct[selectedChartProduct]?.currentStock ?? 0;
-              const unitSize = size ? `${size}cc` : '';
-              return (
-                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <span className="text-[10px] font-black uppercase text-blue-600 block tracking-tight">{brand}</span>
-                    <span className="text-sm font-extrabold text-slate-800 block">{flavor}</span>
-                    <span className="text-xs text-slate-400 font-bold font-mono">{unitSize}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-[9px] font-bold uppercase text-slate-400 block tracking-wider">STOCK SELECC.</span>
-                    <span className="text-lg font-black text-slate-900 block font-mono">{currentStockData.toLocaleString('es-AR')}</span>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Dropdown in case user wants to change manually */}
-            <div>
-              <span className="text-[9px] font-extrabold uppercase text-slate-400 block tracking-wider mb-1">Cambiar Producto:</span>
-              <select
-                value={selectedChartProduct}
-                onChange={(e) => setSelectedChartProduct(e.target.value)}
-                className="w-full rounded-xl border-gray-200 text-xs font-bold bg-slate-50 border p-2 text-slate-700 focus:ring-blue-500 focus:ring"
-              >
-                {activeProducts.map(p => (
-                  <option key={p.key} value={p.key}>
-                    {p.marca} {p.sabor} {p.tamano}cc
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Recharts chart render area */}
-            <div className="pt-2 border-t border-slate-100">
+            {/* Chart container (2 columns) */}
+            <div className="lg:col-span-2 flex flex-col justify-center min-h-[400px]">
               {(() => {
                 const chartData = dailyStocksList
                   .filter(item => item.stocks[selectedChartProduct] !== undefined)
@@ -1011,31 +1089,26 @@ export function StockControl() {
 
                 if (chartData.length === 0) {
                   return (
-                    <div className="bg-slate-50 border border-dashed border-slate-200 p-6 rounded-xl text-center flex flex-col items-center justify-center space-y-2 py-10">
-                      <Clock className="w-8 h-8 text-slate-300" />
-                      <p className="text-xs font-bold text-slate-500 leading-snug">
-                        Faltan Datos Registrados
+                    <div className="bg-slate-50 border border-dashed border-slate-200 p-8 rounded-2xl text-center flex flex-col items-center justify-center space-y-3 py-16">
+                      <Clock className="w-12 h-12 text-slate-300" />
+                      <p className="text-sm font-black text-slate-500 leading-snug">
+                        Faltan Datos Registrados en el Historial
                       </p>
-                      <p className="text-[10px] text-slate-400 font-medium max-w-[200px]">
-                        Congela el stock de hoy para iniciar tu historial de evolución temporal.
+                      <p className="text-xs text-slate-400 font-medium max-w-sm">
+                        Haz clic en el botón "Congelar Stock en Historial" de la pestaña anterior para empezar a guardar registros diarios y visualizar tu gráfico aquí.
                       </p>
                     </div>
                   );
                 }
 
-                // Compute mini metrics
-                const stocks = chartData.map(d => d.stock);
-                const maxStock = Math.max(...stocks);
-                const minStock = Math.min(...stocks);
-                const avgStock = stocks.reduce((a, b) => a + b, 0) / stocks.length;
-
-                // Tooltip definition
                 const CustomTooltip = ({ active, payload }: any) => {
                   if (active && payload && payload.length) {
                     return (
-                      <div className="bg-slate-900 border border-slate-800 text-white p-2 px-3 rounded-lg shadow-xl text-[11px] font-sans">
-                        <p className="font-bold text-slate-400 mb-0.5">{payload[0].payload.rawDate}</p>
-                        <p className="font-extrabold">Stock: <span className="text-cyan-400">{payload[0].value.toLocaleString('es-AR')} un.</span></p>
+                      <div className="bg-slate-900 border border-slate-800 text-white p-3 px-4 rounded-xl shadow-2xl text-xs font-sans">
+                        <p className="font-bold text-slate-400 mb-1">{payload[0].payload.rawDate}</p>
+                        <p className="font-extrabold text-base">
+                          Stock: <span className="text-cyan-400">{payload[0].value.toLocaleString('es-AR')} un.</span>
+                        </p>
                       </div>
                     );
                   }
@@ -1043,62 +1116,42 @@ export function StockControl() {
                 };
 
                 return (
-                  <div className="space-y-4">
-                    <div className="h-60 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={chartData} margin={{ top: 10, right: 10, left: -22, bottom: 0 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                          <XAxis 
-                            dataKey="date" 
-                            tick={{ fontSize: 9, fontWeight: 'bold', fill: '#94a3b8' }}
-                            axisLine={false}
-                            tickLine={false}
-                          />
-                          <YAxis 
-                            tick={{ fontSize: 9, fontWeight: 'bold', fill: '#94a3b8' }}
-                            axisLine={false}
-                            tickLine={false}
-                            tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}
-                          />
-                          <Tooltip content={<CustomTooltip />} />
-                          <Line 
-                            type="monotone" 
-                            dataKey="stock" 
-                            stroke="#2563eb" 
-                            strokeWidth={3}
-                            dot={{ r: 4, stroke: '#2563eb', strokeWidth: 1.5, fill: '#fff' }}
-                            activeDot={{ r: 6, fill: '#2563eb' }}
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
-
-                    {/* Mini metrics bar */}
-                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100 text-center uppercase tracking-widest text-[9px] font-bold text-slate-400">
-                      <div className="bg-slate-50 p-2 rounded-lg">
-                        <span className="block mb-0.5 text-slate-400 font-bold">MÍNIMO</span>
-                        <span className="text-xs font-black text-slate-800 font-mono leading-none">{minStock.toLocaleString('es-AR', { maximumFractionDigits: 0 })}</span>
-                      </div>
-                      <div className="bg-slate-50 p-2 rounded-lg">
-                        <span className="block mb-0.5 text-slate-400 font-bold">PROMEDIO</span>
-                        <span className="text-xs font-black text-slate-800 font-mono leading-none">{avgStock.toLocaleString('es-AR', { maximumFractionDigits: 0 })}</span>
-                      </div>
-                      <div className="bg-slate-50 p-2 rounded-lg">
-                        <span className="block mb-0.5 text-slate-400 font-bold">MÁXIMO</span>
-                        <span className="text-xs font-black text-slate-800 font-mono leading-none">{maxStock.toLocaleString('es-AR', { maximumFractionDigits: 0 })}</span>
-                      </div>
-                    </div>
+                  <div className="h-96 w-full pr-4">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={chartData} margin={{ top: 20, right: 10, left: -22, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                        <XAxis 
+                          dataKey="date" 
+                          tick={{ fontSize: 10, fontWeight: 'bold', fill: '#64748b' }}
+                          axisLine={false}
+                          tickLine={false}
+                          dy={10}
+                        />
+                        <YAxis 
+                          tick={{ fontSize: 10, fontWeight: 'bold', fill: '#64748b' }}
+                          axisLine={false}
+                          tickLine={false}
+                          tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}
+                          dx={-10}
+                        />
+                        <Tooltip content={<CustomTooltip />} />
+                        <Line 
+                          type="monotone" 
+                          dataKey="stock" 
+                          stroke="#2563eb" 
+                          strokeWidth={4}
+                          dot={{ r: 5, stroke: '#2563eb', strokeWidth: 2, fill: '#fff' }}
+                          activeDot={{ r: 7, stroke: '#2563eb', strokeWidth: 3, fill: '#fff' }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
                   </div>
                 );
               })()}
             </div>
-            
-            <div className="text-[10px] text-gray-400 font-medium text-center leading-normal pt-2 border-t border-slate-100/50">
-              💡 <span className="font-bold">TIP:</span> Selecciona cualquier fila de la tabla de la izquierda para desplegar al instante su tendencia de stock.
-            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

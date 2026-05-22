@@ -29,6 +29,36 @@ import { SchedulerStockProjection } from './SchedulerStockProjection';
 
 const SHIFTS = ['Mañana', 'Tarde', 'Noche'] as const;
 
+const isShiftShaded = (day: Date, shift: typeof SHIFTS[number], holidays?: string[]) => {
+  const dateStr = format(day, 'yyyy-MM-dd');
+  const dayOfWeek = day.getDay(); // 0 is Sunday, 6 is Saturday
+  
+  // Saturday afternoon & night
+  if (dayOfWeek === 6 && (shift === 'Tarde' || shift === 'Noche')) {
+    return true;
+  }
+  // Sunday morning & afternoon
+  if (dayOfWeek === 0 && (shift === 'Mañana' || shift === 'Tarde')) {
+    return true;
+  }
+  
+  // Holiday rules:
+  if (holidays && holidays.length > 0) {
+    // Shaded on holiday itself: "Mañana" and "Tarde"
+    if (holidays.includes(dateStr) && (shift === 'Mañana' || shift === 'Tarde')) {
+      return true;
+    }
+    // Shaded on the night of the day BEFORE the holiday
+    const nextDay = addDays(day, 1);
+    const nextDayStr = format(nextDay, 'yyyy-MM-dd');
+    if (holidays.includes(nextDayStr) && shift === 'Noche') {
+      return true;
+    }
+  }
+  
+  return false;
+};
+
 export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) {
   const { config, availableBrands, availableLines, availableFlavors, availableSizes, getFilteredFlavors, getFilteredSizes } = useAppConfig();
   const [activeTab, setActiveTab] = useState<'scheduler' | 'projection' | 'config'>('scheduler');
@@ -512,31 +542,44 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
                 <th rowSpan={2} className="sticky left-0 bg-gray-50 z-20 w-32 px-4 py-2 text-center border-r border-gray-200 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
                   <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Línea / Día</span>
                 </th>
-                {weekDays.map((day, i) => (
-                  <th key={i} colSpan={3} className={`px-2 py-2 border-r border-gray-200 min-w-[720px] ${isToday(day) ? 'bg-indigo-50/50' : ''}`}>
-                    <div className="flex flex-col items-center">
-                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-tighter truncate w-full text-center">
-                        {format(day, 'EEEE', { locale: es })}
-                      </span>
-                      <span className={`text-sm font-black ${isToday(day) ? 'text-indigo-600' : 'text-gray-900'}`}>
-                        {format(day, 'dd/MM')}
-                      </span>
-                    </div>
-                  </th>
-                ))}
+                {weekDays.map((day, i) => {
+                  const dateStr = format(day, 'yyyy-MM-dd');
+                  const isDayHoliday = config?.shiftConfig?.holidays?.includes(dateStr);
+                  return (
+                    <th key={i} colSpan={3} className={`px-2 py-2 border-r border-gray-200 min-w-[720px] ${isToday(day) ? 'bg-indigo-50/50' : ''} ${isDayHoliday ? 'bg-rose-50/50' : ''}`}>
+                      <div className="flex flex-col items-center">
+                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-tighter truncate w-full text-center flex items-center justify-center gap-1">
+                          {format(day, 'EEEE', { locale: es })}
+                          {isDayHoliday && <span className="bg-rose-100 text-rose-700 text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest border border-rose-200">Feriado</span>}
+                        </span>
+                        <span className={`text-sm font-black ${isToday(day) ? 'text-indigo-600' : (isDayHoliday ? 'text-rose-600' : 'text-gray-900')}`}>
+                          {format(day, 'dd/MM')}
+                        </span>
+                      </div>
+                    </th>
+                  );
+                })}
               </tr>
               <tr className="bg-gray-50/50 border-b border-gray-200">
-                {weekDays.map((_, dayIdx) => (
+                {weekDays.map((day, dayIdx) => (
                   <Fragment key={dayIdx}>
-                    {SHIFTS.map((shift, shiftIdx) => (
-                      <th key={shiftIdx} className={`px-1 py-2 text-center border-r border-gray-100 text-[10px] font-black uppercase tracking-tighter min-w-[240px] ${
-                        shift === 'Mañana' ? 'text-orange-600 bg-orange-50/30' : 
-                        shift === 'Tarde' ? 'text-blue-600 bg-blue-50/30' : 
-                        'text-indigo-900 bg-indigo-50/30'
-                      }`}>
-                        {shift}
-                      </th>
-                    ))}
+                    {SHIFTS.map((shift, shiftIdx) => {
+                      const shaded = isShiftShaded(day, shift, config?.shiftConfig?.holidays);
+                      return (
+                        <th key={shiftIdx} className={`px-1 py-1.5 text-center border-r border-gray-100 text-[10px] font-black uppercase tracking-tighter min-w-[240px] transition-colors duration-200 ${
+                          shaded 
+                            ? 'bg-slate-200/80 text-slate-500 border-slate-300 shadow-inner' 
+                            : (shift === 'Mañana' ? 'text-orange-600 bg-orange-50/30' : 
+                               shift === 'Tarde' ? 'text-blue-600 bg-blue-50/30' : 
+                               'text-indigo-900 bg-indigo-50/30')
+                        }`}>
+                          <div className="flex items-center justify-center gap-1">
+                            <span>{shift}</span>
+                            {shaded && <span className="text-[8px] opacity-75 font-normal lowercase italic">(sombreado)</span>}
+                          </div>
+                        </th>
+                      );
+                    })}
                   </Fragment>
                 ))}
               </tr>
@@ -551,11 +594,16 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
                     const dateStr = format(day, 'yyyy-MM-dd');
                     return SHIFTS.map(shift => {
                       const slotPlans = displayPlans.filter(p => p.date === dateStr && p.shift === shift && p.linea === linea);
+                      const shaded = isShiftShaded(day, shift, config?.shiftConfig?.holidays);
                       
                       return (
                         <td 
                           key={`${dateStr}-${shift}`} 
-                          className={`p-0.5 border-r border-gray-100 align-top min-h-[40px] relative hover:bg-gray-50/30 transition-colors ${isToday(day) ? 'bg-indigo-50/10' : ''}`}
+                          className={`p-0.5 border-r border-gray-100 align-top min-h-[40px] relative transition-colors duration-200 ${
+                            shaded 
+                              ? 'bg-slate-100/60 border-dashed border-slate-300 shadow-inner' 
+                              : (isToday(day) ? 'bg-indigo-50/10 hover:bg-gray-50/30' : 'hover:bg-gray-50/30')
+                          }`}
                         >
                           <div className="space-y-1">
                             {isAdmin && (
@@ -754,8 +802,14 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
                               {SHIFTS.map(shift => {
                                 const dateStr = format(day, 'yyyy-MM-dd');
                                 const slotPlans = displayPlans.filter(p => p.date === dateStr && p.shift === shift && p.linea === linea);
+                                const shaded = isShiftShaded(day, shift, config?.shiftConfig?.holidays);
                                 return (
-                                  <div key={shift} className="w-[240px] relative rounded h-full overflow-hidden bg-gray-50/50 border border-gray-100 transition-all shadow-inner flex">
+                                  <div 
+                                    key={shift} 
+                                    className={`w-[240px] relative rounded h-full overflow-hidden border transition-all shadow-inner flex ${
+                                      shaded ? 'bg-slate-200 border-slate-300' : 'bg-gray-50/50 border-gray-100'
+                                    }`}
+                                  >
                                     {slotPlans.length > 0 ? (
                                       slotPlans.map(plan => {
                                         const widthPercent = (plan.duration || 1) * 100;
@@ -793,9 +847,15 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
                               {SHIFTS.map(shift => {
                                 const dateStr = format(day, 'yyyy-MM-dd');
                                 const realBlocks = getSlotActuals(dateStr, shift, linea);
+                                const shaded = isShiftShaded(day, shift, config?.shiftConfig?.holidays);
                                 
                                 return (
-                                  <div key={shift} className="w-[240px] relative rounded-lg h-full overflow-hidden bg-white border border-gray-200 shadow-sm transition-all group/real ring-1 ring-gray-100">
+                                  <div 
+                                    key={shift} 
+                                    className={`w-[240px] relative rounded-lg h-full overflow-hidden shadow-sm transition-all group/real ring-1 ${
+                                      shaded ? 'bg-slate-100 border-slate-300 ring-slate-200' : 'bg-white border-gray-200 ring-gray-100'
+                                    }`}
+                                  >
                                     {realBlocks.length > 0 ? (
                                       realBlocks.map((data, idx) => (
                                         <div 

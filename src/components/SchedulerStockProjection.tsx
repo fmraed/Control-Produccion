@@ -193,10 +193,11 @@ export function SchedulerStockProjection({
         iterations++;
         const dateStr = format(currentSimDate, 'yyyy-MM-dd');
         const dayOfWeek = currentSimDate.getDay();
+        const isHoliday = config?.shiftConfig?.holidays?.includes(dateStr);
         
         let exitFactor = 1.0;
         if (dayOfWeek === 6) exitFactor = 0.5; // Saturday
-        if (dayOfWeek === 0) exitFactor = 0.0; // Sunday
+        if (dayOfWeek === 0 || isHoliday) exitFactor = 0.0; // Sunday or Holiday (no exit)
 
         // Only subtract exit and add plans from today onwards
         const dateStrIsTodayOrFuture = dateStr >= todayStr;
@@ -278,7 +279,7 @@ export function SchedulerStockProjection({
     });
 
     return { groups: Object.values(groups), grandOrdered: gOrdered, grandInitialStock: gInitialStock };
-  }, [activeProducts, goals, sqlStock, sqlPending, plans, weekDays, todayStr]);
+  }, [activeProducts, goals, sqlStock, sqlPending, plans, weekDays, todayStr, config]);
 
   if (loading) {
      return <div className="p-8 text-center text-slate-500">Cargando datos...</div>;
@@ -324,18 +325,29 @@ export function SchedulerStockProjection({
               <th className="px-3 py-3 font-black text-slate-600 uppercase text-xs border border-slate-300 bg-slate-200/50">Stock Actual</th>
               <th className="px-3 py-3 font-black text-slate-600 uppercase text-xs border border-slate-300 bg-slate-200/50">Salida Diaria</th>
               {weekDays.map((day) => {
+                const dateStr = format(day, 'yyyy-MM-dd');
+                const isHoliday = config?.shiftConfig?.holidays?.includes(dateStr);
                 const isWeekend = day.getDay() === 0 || day.getDay() === 6;
-                const isDayToday = format(day, 'yyyy-MM-dd') === todayStr;
+                const isDayToday = dateStr === todayStr;
                 return (
                   <th 
                     key={day.toISOString()} 
                     className={`px-2 py-2 text-xs font-black uppercase text-center border border-slate-300 min-w-[100px] ${
-                      isDayToday ? 'bg-indigo-500 text-white' : (isWeekend ? 'bg-yellow-50 text-yellow-800' : 'text-slate-700 bg-slate-200')
+                      isDayToday 
+                        ? 'bg-indigo-500 text-white' 
+                        : (isHoliday 
+                            ? 'bg-rose-100 text-rose-800 border-rose-300' 
+                            : (isWeekend ? 'bg-yellow-50 text-yellow-800' : 'text-slate-700 bg-slate-200'))
                     }`}
                   >
-                    <div className="flex flex-col">
+                    <div className="flex flex-col items-center">
                       <span>{format(day, "eeee", { locale: es }).substring(0, 3)}</span>
                       <span>{format(day, "dd/MM")}</span>
+                      {isHoliday && (
+                        <span className="text-[7.5px] font-black tracking-widest text-rose-700 bg-rose-200/60 px-1 py-0.5 rounded uppercase mt-0.5 border border-rose-300">
+                          Feriado
+                        </span>
+                      )}
                     </div>
                   </th>
                 );
