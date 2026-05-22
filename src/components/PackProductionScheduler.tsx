@@ -296,9 +296,10 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
       const startHourStr = lineStartHours[line] || '06:00';
 
       const windowBaseDateStr = format(subDays(focusedDate, 1), 'yyyy-MM-dd');
-      const windowStart = parseISO(`${windowBaseDateStr}T${startHourStr.padStart(5, '0')}`);
+      // Fix visual scale to midnight so all lines share the exact same grid
+      const windowStart = parseISO(`${windowBaseDateStr}T00:00`);
 
-      let currentStartTime = windowStart;
+      let currentStartTime = parseISO(`${windowBaseDateStr}T${startHourStr.padStart(5, '0')}`);
       if (linePlans.length > 0) {
         const firstPlanDate = linePlans[0].date || windowBaseDateStr;
         currentStartTime = parseISO(`${firstPlanDate}T${startHourStr.padStart(5, '0')}`);
@@ -336,10 +337,9 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
     // 2. Map Actual Production Reports (real)
     // Extended boundary for visual tracking
     availableLines.forEach(line => {
-      const startHourStr = lineStartHours[line] || '06:00';
       const windowBaseDateStr = format(subDays(focusedDate, 1), 'yyyy-MM-dd');
       
-      const windowStart = parseISO(`${windowBaseDateStr}T${startHourStr.padStart(5, '0')}`);
+      const windowStart = parseISO(`${windowBaseDateStr}T00:00`);
       const windowEnd = addDays(windowStart, 4); // 96 hours later
 
       const lineReports = actualReports.filter(rep => rep.linea === line && rep.entraTurno && rep.saleTurno);
@@ -978,7 +978,8 @@ export function PackProductionScheduler({ isAdmin = false }: { isAdmin?: boolean
                           {/* GRID TIME LABELS BACKGROUND MARKERS */}
                           <div className="absolute inset-x-0 top-0 bottom-0 pointer-events-none flex justify-between px-4">
                             {Array.from({ length: 33 }).map((_, i) => {
-                              const [sh, sm] = lineStart.split(':').map(Number);
+                              // We modified the Gantt scale to strictly start at midnight (00:00) so all lines align horizontally in a global timeframe
+                              const sh = 0, sm = 0;
                               const totalMins = sh * 60 + sm + (i * 180); // every 3 hours
                               const hrNum = Math.floor((totalMins / 60) % 24);
                               const minNum = Math.floor(totalMins % 60);
