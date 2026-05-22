@@ -302,8 +302,11 @@ export function SchedulerStockProjection() {
                 const dayStr = format(day, "eeee dd/MM", { locale: es });
                 const isWeekend = day.getDay() === 0 || day.getDay() === 6;
                 return (
-                  <th key={day.toISOString()} className={`px-2 py-2 text-[10px] font-black uppercase text-center border-r border-slate-200 ${isWeekend ? 'bg-yellow-100/50 text-yellow-800' : 'text-slate-600'}`}>
-                    {dayStr}
+                  <th key={day.toISOString()} className={`px-2 py-2 text-xs font-black uppercase text-center border border-slate-300 ${isWeekend ? 'bg-yellow-100/80 text-yellow-800' : 'text-slate-700 bg-slate-200'}`}>
+                    <div className="flex flex-col">
+                      <span>{format(day, "eeee", { locale: es }).substring(0, 3)}</span>
+                      <span>{format(day, "dd/MM")}</span>
+                    </div>
                   </th>
                 );
               })}
@@ -330,15 +333,15 @@ export function SchedulerStockProjection() {
                         const cov = p.daysCoverage[dateStr];
                         
                         let bgColor = 'bg-white';
-                        let textColor = 'text-slate-700';
-                        if (cov < 1) { bgColor = 'bg-rose-100'; textColor = 'text-rose-700'; }
-                        else if (cov < 3) { bgColor = 'bg-orange-100'; textColor = 'text-orange-700'; }
-                        else if (cov < 5) { bgColor = 'bg-yellow-100'; textColor = 'text-yellow-800'; }
-                        else { bgColor = 'bg-white'; }
+                        let textColor = 'text-slate-800';
+                        if (cov < 1) { bgColor = 'bg-rose-200'; textColor = 'text-rose-900'; }
+                        else if (cov < 3) { bgColor = 'bg-orange-200'; textColor = 'text-orange-900'; }
+                        else if (cov < 5) { bgColor = 'bg-yellow-200'; textColor = 'text-yellow-900'; }
+                        else { bgColor = 'bg-slate-50'; }
 
                         return (
-                          <td key={dateStr} className={`px-2 py-2 font-mono text-[10px] font-bold text-center border-r border-slate-100 ${bgColor} ${textColor}`}>
-                            {cov.toFixed(2)}
+                          <td key={dateStr} className={`px-2 py-2 font-sans text-xs font-black text-center border border-slate-300 ${bgColor} ${textColor}`}>
+                            {cov.toFixed(1)}
                           </td>
                         );
                       })}
