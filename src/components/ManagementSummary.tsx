@@ -3,7 +3,7 @@ import { collection, query, orderBy, onSnapshot, doc, setDoc, getDoc, addDoc, wh
 import { db, auth } from '../firebase';
 import { ProductionReport, MonthlySnapshot, AttendanceRecord, ScheduleAuditLog, ProductionPlan } from '../types';
 import { BarChart3, Calendar, Users, Package, Droplets, Info, Edit2, Save, X, UserCircle2, Milk as BottleIcon, Clock, Lock, Unlock, RefreshCw, AlertTriangle, ListChecks, History as HistoryIcon, Trash2 } from 'lucide-react';
-import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addDays, subDays, differenceInHours } from 'date-fns';
+import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addDays, subDays, differenceInHours, differenceInMinutes } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { getLogicalDate } from '../utils';
 import { useAppConfig } from '../hooks/useAppConfig';
@@ -183,6 +183,12 @@ export function ManagementSummary() {
         avgPacksPerShift: 0,
         projectedPendingPacks: 0,
         projectedTotalPacks: 0,
+        transformations: snapshot.stats?.transformations || {
+          consecutive: 0,
+          nonConsecutive: 0,
+          total: 0,
+          flavorChanges: 0
+        },
         ...snapshot.stats,
         breakdown: {
           daysInMonth: 0,
@@ -813,6 +819,115 @@ export function ManagementSummary() {
       });
     }
 
+    // ---- NUEVAS MÉTRICAS: TRANSFORMACIONES DE LÍNEA Y CAMBIO DE SABOR ----
+    const lineReports: Record<string, ProductionReport[]> = {};
+    
+    // Normalize line identifier helpers
+    const getNormalizedLine = (line: any): string => {
+      if (!line) return '';
+      const s = String(line).trim().toLowerCase();
+      const numMatch = s.match(/\d+/);
+      if (numMatch) {
+        return numMatch[0]; // e.g. "1" from "Línea 1"
+      }
+      return s;
+    };
+
+    const getReportStartAndEnd = (r: ProductionReport) => {
+      const entraStr = r.entraTurno || '00:00';
+      const saleStr = r.saleTurno || '00:00';
+      
+      let start = parseISO(`${r.fecha}T${entraStr}`);
+      let end = parseISO(`${r.fecha}T${saleStr}`);
+
+      if (entraStr >= '22:00') {
+        start = subDays(start, 1);
+        if (saleStr >= '22:00') {
+          end = subDays(end, 1);
+        }
+      } else if (saleStr < entraStr) {
+        end = addDays(end, 1);
+      }
+      return { start, end };
+    };
+
+    const normalizedAvailableLines = new Set(
+      availableLines.map(l => getNormalizedLine(l)).filter(Boolean)
+    );
+
+    // Group reports by robustly normalized line
+    filteredReports.forEach(r => {
+      const normLine = getNormalizedLine(r.linea);
+      if (!normLine) return; // Ignore reports without a line
+      if (!normalizedAvailableLines.has(normLine)) return; // Ignore if line is not enabled/available
+
+      if (!lineReports[normLine]) lineReports[normLine] = [];
+      lineReports[normLine].push(r);
+    });
+
+    let transformacionesConsecutivas = 0;
+    let transformacionesNoConsecutivas = 0;
+    let cambiosSabor = 0;
+
+    Object.keys(lineReports).forEach(lKey => {
+      // Keep only valid production reports with positive sizes and populated brands/flavors
+      const validLineSorted = lineReports[lKey].filter(r => {
+        const size = r.tamano || 0;
+        const sabor = (r.sabor || '').trim();
+        const marca = (r.marca || '').trim();
+        return size > 0 && sabor.length > 0 && marca.length > 0;
+      });
+
+      // Map each report to its absolute start and end times
+      const withTimes = validLineSorted.map(r => ({
+        report: r,
+        times: getReportStartAndEnd(r)
+      }));
+
+      // Sort reports for this line chronologically using their physical start time
+      withTimes.sort((a, b) => {
+        const timeDiff = a.times.start.getTime() - b.times.start.getTime();
+        if (timeDiff !== 0) return timeDiff;
+        const crA = a.report.createdAt || '';
+        const crB = b.report.createdAt || '';
+        if (crA !== crB) return crA.localeCompare(crB);
+        return (a.report.id || '').localeCompare(b.report.id || '');
+      });
+
+      for (let i = 1; i < withTimes.length; i++) {
+        const prev = withTimes[i - 1];
+        const curr = withTimes[i];
+
+        const prevSize = prev.report.tamano!;
+        const currSize = curr.report.tamano!;
+        const prevSabor = prev.report.sabor!.trim().toLowerCase();
+        const currSabor = curr.report.sabor!.trim().toLowerCase();
+
+        // Gap in minutes from end of prev to start of curr
+        const gap = differenceInMinutes(curr.times.start, prev.times.end);
+
+        // Even with small differences back-to-back, allow up to 60 minutes for handovers/overlapping
+        const isConsecutive = gap >= -60 && gap <= 60;
+
+        const hasSizeChange = prevSize !== currSize;
+
+        if (hasSizeChange) {
+          if (isConsecutive) {
+            transformacionesConsecutivas++;
+          } else {
+            transformacionesNoConsecutivas++;
+          }
+        } else {
+          const hasFlavorChange = prevSabor !== currSabor;
+          if (hasFlavorChange && isConsecutive) {
+            cambiosSabor++;
+          }
+        }
+      }
+    });
+
+    const totalTransformaciones = transformacionesConsecutivas + transformacionesNoConsecutivas;
+
     return {
       turnosTotales,
       turnosOperativosPlanificados,
@@ -832,6 +947,12 @@ export function ManagementSummary() {
       projectedTotalPacks,
       cajasUnitarias,
       relacionLitrosBotellas,
+      transformations: {
+        consecutive: transformacionesConsecutivas,
+        nonConsecutive: transformacionesNoConsecutivas,
+        total: totalTransformaciones,
+        flavorChanges: cambiosSabor
+      },
       waste: {
         totalScrapSoplado,
         totalScrapEtiquetado,
@@ -1413,6 +1534,56 @@ export function ManagementSummary() {
             </div>
             <div className="hidden sm:flex items-end pb-6">
               <BottleIcon className="w-20 h-20 text-gray-200" />
+            </div>
+          </div>
+
+          {/* Card: Transformaciones y Cambios de Sabor */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50/50 p-4 border-b border-gray-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="w-5 h-5 text-blue-600" />
+                <h3 className="font-bold text-gray-700 uppercase text-xs tracking-wider">Cambios y Transformaciones</h3>
+              </div>
+              <span className="text-[10px] font-black bg-blue-100 text-blue-700 px-2 py-0.5 rounded tracking-widest uppercase">KPIs de Setups</span>
+            </div>
+            
+            <div className="p-4 space-y-4">
+              {/* Transformaciones de Línea */}
+              <div className="pb-4 border-b border-gray-100">
+                <div className="flex justify-between items-baseline mb-1">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Transformaciones de Línea</span>
+                    <span className="text-xs text-gray-400 font-medium">Cambios de calibre (tamaño) en la línea</span>
+                  </div>
+                  <span className="text-3xl font-black text-slate-800">
+                    {stats.transformations?.total ?? 0}
+                  </span>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                  <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                    <span className="block text-[8px] font-bold text-gray-400 uppercase tracking-tighter">Con Personal (Consecutivas)</span>
+                    <span className="text-base font-black text-slate-700 mt-1 block">{stats.transformations?.consecutive ?? 0}</span>
+                  </div>
+                  <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                    <span className="block text-[8px] font-bold text-gray-400 uppercase tracking-tighter">Sin Personal (Faltantes)</span>
+                    <span className="text-base font-black text-slate-700 mt-1 block">{stats.transformations?.nonConsecutive ?? 0}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Cambios de Sabor */}
+              <div>
+                <div className="flex justify-between items-baseline">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Cambios de Sabor</span>
+                    <span className="text-xs text-gray-400 font-medium">Misma línea y calibre, consecutivas</span>
+                  </div>
+                  <span className="text-3xl font-black text-blue-600">
+                    {stats.transformations?.flavorChanges ?? 0}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
