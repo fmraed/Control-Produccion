@@ -21,7 +21,8 @@ import {
   History,
   Upload,
   Download,
-  Sparkles
+  Sparkles,
+  FlaskConical
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Dashboard } from './components/Dashboard';
@@ -43,6 +44,7 @@ import { ProductionScheduler } from './components/ProductionScheduler';
 import { SyrupReport } from './components/SyrupReport';
 import { GoalFulfillment } from './components/GoalFulfillment';
 import { StockControl } from './components/StockControl';
+import { InsumosControlReport } from './components/InsumosControlReport';
 import { HistoricalReport } from './components/HistoricalReport';
 import { HistoricalImporter } from './components/HistoricalImporter';
 import { HistoricalExporter } from './components/HistoricalExporter';
@@ -128,6 +130,7 @@ export default function App() {
         live: permissions.viewLiveMonitor,
         management_summary: permissions.viewManagementSummary,
         management_comparison: permissions.viewManagementSummary,
+        insumos_control: permissions.viewManagementSummary,
         consolidated: permissions.viewConsolidated,
         waste: permissions.viewWaste,
         syrup: permissions.viewSyrup,
@@ -474,7 +477,7 @@ export default function App() {
                     setActiveMenu(activeMenu === 'reports' ? null : 'reports');
                   }}
                   className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
-                    ['consolidated', 'waste', 'downtime', 'pareto', 'efficiency', 'gantt', 'syrup', 'goal_fulfillment', 'management_summary', 'stock_control', 'historical_report'].includes(currentView)
+                    ['consolidated', 'waste', 'downtime', 'pareto', 'efficiency', 'gantt', 'syrup', 'goal_fulfillment', 'management_summary', 'stock_control', 'historical_report', 'insumos_control'].includes(currentView)
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200'
                       : 'text-gray-600 hover:bg-gray-100'
                   }`}
@@ -502,6 +505,18 @@ export default function App() {
                         >
                           <Activity className="w-4 h-4" />
                           Resumen Gerencial
+                        </button>
+                      )}
+
+                      {permissions.viewManagementSummary !== false && (
+                        <button
+                          onClick={() => { setCurrentView('insumos_control'); setActiveMenu(null); }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                            currentView === 'insumos_control' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          <FlaskConical className="w-4 h-4" />
+                          Control de Insumos
                         </button>
                       )}
 
@@ -793,6 +808,9 @@ export default function App() {
         )}
         {currentView === 'stock_control' && (
           <StockControl />
+        )}
+        {currentView === 'insumos_control' && (
+          <InsumosControlReport />
         )}
         {currentView === 'historical_report' && (
           <HistoricalReport />

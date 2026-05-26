@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, Fragment } from 'react';
+import { useState, useEffect, useMemo, Fragment, useRef } from 'react';
 import { motion } from 'motion/react';
 import { collection, query, where, onSnapshot, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
@@ -39,6 +39,9 @@ export function StockControl() {
   const [editingStockKey, setEditingStockKey] = useState<string | null>(null);
   const [editingStockValue, setEditingStockValue] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+
+  // Auto-save ref
+  const hasAttemptedAutoSave = useRef(false);
 
   // Daily stock states
   const [selectedDate, setSelectedDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
@@ -167,6 +170,7 @@ export function StockControl() {
 
   // Synchronize selectedMonth when selectedDate changes
   useEffect(() => {
+    hasAttemptedAutoSave.current = false;
     const computedMonth = selectedDate.substring(0, 7);
     if (computedMonth !== selectedMonth) {
       setSelectedMonth(computedMonth);
@@ -416,6 +420,34 @@ export function StockControl() {
 
     return productsMap;
   }, [activeProducts, reports, goals, sqlStock, sqlPending, sqlMappings, selectedMonth, savedDailyStocks, initialStockOverrides, config]);
+
+  // Auto-save the daily snapshot if it is today, has not been saved yet, SQL data is populated, and we haven't already attempted to save it
+  useEffect(() => {
+    const isToday = selectedDate === format(new Date(), 'yyyy-MM-dd');
+    const hasData = activeProducts.length > 0 && Object.keys(dataByProduct).length > 0 && sqlStock.length > 0;
+    const isNotSavedYet = Object.keys(savedDailyStocks).length === 0;
+
+    if (
+      isToday &&
+      dailyStocksLoaded &&
+      hasData &&
+      isNotSavedYet &&
+      !savingDailySnapshot &&
+      !hasAttemptedAutoSave.current
+    ) {
+      hasAttemptedAutoSave.current = true;
+      console.log('Automated saving of daily stock snapshot...');
+      handleSaveDailySnapshot();
+    }
+  }, [
+    selectedDate,
+    dailyStocksLoaded,
+    activeProducts.length,
+    dataByProduct,
+    sqlStock.length,
+    savedDailyStocks,
+    savingDailySnapshot
+  ]);
 
   const groupTotals = useMemo(() => {
     interface GroupData {

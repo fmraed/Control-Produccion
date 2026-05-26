@@ -42,6 +42,44 @@ export const LINEAS = ['1', '2', '3'];
 export const MARCAS = ['Torasso'];
 export const SABORES = ['Manzana', 'Naranja', 'Cola', 'Lima Limon', 'Pomelo', 'Agua Tónica', 'Pomelo Blanco', 'Citrus', 'Granadina', 'Limonada', 'Soda', 'Soda Sifon', 'Agua'];
 export const SABORES_SIN_JARABE = ['Soda', 'Soda Sifon', 'Agua'];
+export const DEFAULT_INSUMOS = [
+  'Azucar',
+  'Jugo de limon conc. 400 GPL',
+  'Benzoato de Sodio',
+  'Acido Citrico anidro',
+  'Acido Ascórbico',
+  'Sacarina sodica',
+  'Acido Fosfórico',
+  'EDTA',
+  'Ciclamato de Sodio',
+  'Colorante Caramelo 90F',
+  'Sorbato de potasio',
+  'Colorante Rojo Allura',
+  'Citrato de sodio',
+  'Lactato de calcio',
+  'Cloruro de calcio',
+  'Sulfato de magnesio',
+  'Emulsion Cola 8373-78 Harmony',
+  'Esencia manzana Novarom 7946 H',
+  'NARANJA LK 642-78/0 SAPORITI',
+  'ESENCIA LIMON SW 05/36',
+  'EMULSION COLA FER 11924 E-SAPORITI',
+  'EMULSION POMELO LK 615-78/2',
+  'Emul. Citrus Novarom 8804Z',
+  'TONICA LK 11824 SAPORITI',
+  'Esencia granadina 10 veces concentrada Saporiti',
+  'Colorante granadina 1004 Saporiti',
+  'Aspartamo',
+  'Acesulfame K',
+  'ES. LIMON SW 1516 SAPORITI',
+  'Enturbiante 1516 IFF 1516',
+  'Cafeina',
+  'Emul. Cola Novarom 8250',
+  'Esencia Menta',
+  'Extracto Fernet - MPA',
+  'Cuasia',
+  'Alcohol'
+];
 export const TAMANOS = [500, 1000, 1500, 2000, 2250, 3000];
 
 export const FLAVOR_COLORS: Record<string, string> = {

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
-import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, SABORES_SIN_JARABE, CO2_VOLUMES, WASTE_WEIGHTS } from '../constants';
+import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, SABORES_SIN_JARABE, CO2_VOLUMES, WASTE_WEIGHTS, DEFAULT_INSUMOS } from '../constants';
 
 interface AppConfig {
   flavors: string[];
@@ -54,6 +54,9 @@ interface AppConfig {
   stackableFlavors?: string[];
   externalProducts?: Record<string, Record<string, string[]>>;
   wasteWeights?: Record<string, { etiq: number; tapa: number; termo: number }>;
+  syrupFormulas?: Record<string, Record<string, { liters: number; emulsion: number }>>;
+  insumos?: string[];
+  insumosMatrix?: Record<string, Record<string, Record<string, number>>>;
 }
 
 export function useAppConfig() {
@@ -100,6 +103,9 @@ export function useAppConfig() {
           stackableFlavors: Array.isArray(data.stackableFlavors) ? data.stackableFlavors : (data.flavors || SABORES).filter((s: string) => s !== 'Soda Sifon' && s !== 'Soda'),
           externalProducts: data.externalProducts || {},
           wasteWeights: data.wasteWeights || WASTE_WEIGHTS,
+          syrupFormulas: data.syrupFormulas || {},
+          insumos: data.insumos || DEFAULT_INSUMOS,
+          insumosMatrix: data.insumosMatrix || {},
           co2Volumes: (() => {
             const defaultVols = { ...CO2_VOLUMES };
             if (data.co2Volumes) {
@@ -167,7 +173,10 @@ export function useAppConfig() {
           warehousePositions: 2300,
           stackableFlavors: SABORES.filter(s => s !== 'Soda Sifon' && s !== 'Soda'),
           externalProducts: {},
-          wasteWeights: WASTE_WEIGHTS
+          wasteWeights: WASTE_WEIGHTS,
+          syrupFormulas: {},
+          insumos: DEFAULT_INSUMOS,
+          insumosMatrix: {}
         });
       }
       setLoading(false);

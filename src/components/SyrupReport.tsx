@@ -15,7 +15,10 @@ export function SyrupReport() {
   const [productionReports, setProductionReports] = useState<ProductionReport[]>([]);
   const [elaboracionReports, setElaboracionReports] = useState<ElaboracionReport[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'balance' | 'jarabes'>('balance');
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
+  const [jarabesStartDate, setJarabesStartDate] = useState<string>(format(parseISO(format(new Date(), 'yyyy-MM-01')), 'yyyy-MM-dd'));
+  const [jarabesEndDate, setJarabesEndDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
   const [initialStocks, setInitialStocks] = useState<Record<string, number>>({});
   const [savingInitial, setSavingInitial] = useState<string | null>(null);
 
@@ -165,6 +168,35 @@ export function SyrupReport() {
     }
   };
 
+  const jarabesData = useMemo(() => {
+    const data: Record<string, { marca: string, sabor: string, consumidoL: number, unidades: number, emulsionKg: number }> = {};
+    const saboresSinJarabeCfg = config?.saboresSinJarabe || SABORES_SIN_JARABE;
+
+    elaboracionReports.forEach(r => {
+      const date = getLogicalDate(r);
+      if (!date || date < jarabesStartDate || date > jarabesEndDate) return;
+      if (!r.marca || !r.sabor) return;
+      if (saboresSinJarabeCfg.includes(r.sabor)) return;
+
+      const key = `${r.marca}-${r.sabor}`;
+      if (!data[key]) {
+        data[key] = { marca: r.marca, sabor: r.sabor, consumidoL: 0, unidades: 0, emulsionKg: 0 };
+      }
+      data[key].consumidoL += (r.jarabeConsumido || 0);
+    });
+
+    Object.keys(data).forEach(key => {
+      const d = data[key];
+      const formula = config?.syrupFormulas?.[d.marca]?.[d.sabor];
+      if (formula && formula.liters > 0) {
+        d.unidades = d.consumidoL / formula.liters;
+        d.emulsionKg = d.unidades * (formula.emulsion || 0);
+      }
+    });
+
+    return Object.values(data).sort((a, b) => b.consumidoL - a.consumidoL);
+  }, [elaboracionReports, jarabesStartDate, jarabesEndDate, config?.syrupFormulas, config?.saboresSinJarabe]);
+
   if (loading) {
     return (
       <div className="flex justify-center py-12">
@@ -175,12 +207,37 @@ export function SyrupReport() {
 
   return (
     <div className="space-y-6">
-      {/* Header & Filter */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 flex flex-col sm:flex-row justify-between items-center gap-4">
-        <div className="flex items-center gap-2 text-gray-700 font-medium">
-          <Beaker className="w-5 h-5 text-indigo-600" />
-          <h2 className="text-lg">Balance de Jarabes por Sabor</h2>
-        </div>
+      <div className="flex border-b border-gray-200 gap-4">
+        <button
+          onClick={() => setActiveTab('balance')}
+          className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
+            activeTab === 'balance'
+              ? 'border-indigo-600 text-indigo-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          }`}
+        >
+          Balance General
+        </button>
+        <button
+          onClick={() => setActiveTab('jarabes')}
+          className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
+            activeTab === 'jarabes'
+              ? 'border-indigo-600 text-indigo-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          }`}
+        >
+          Jarabes
+        </button>
+      </div>
+
+      {activeTab === 'balance' && (
+      <div className="space-y-6">
+        {/* Header & Filter */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-2 text-gray-700 font-medium">
+            <Beaker className="w-5 h-5 text-indigo-600" />
+            <h2 className="text-lg">Balance de Jarabes por Sabor</h2>
+          </div>
         <div className="flex items-center gap-2">
           <Calendar className="w-4 h-4 text-gray-400" />
           <select
@@ -405,6 +462,75 @@ export function SyrupReport() {
           </table>
         </div>
       </div>
+      </div>
+      )}
+
+      {activeTab === 'jarabes' && (
+      <div className="space-y-6">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-2 text-gray-700 font-medium">
+            <Beaker className="w-5 h-5 text-blue-600" />
+            <h2 className="text-lg">Consumo de Jarabes</h2>
+          </div>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex flex-col">
+              <label className="text-[10px] uppercase text-gray-500 font-bold">Desde</label>
+              <input
+                type="date"
+                value={jarabesStartDate}
+                onChange={(e) => setJarabesStartDate(e.target.value)}
+                className="border border-gray-300 rounded px-2 py-1 text-sm focus:border-blue-500 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex flex-col">
+              <label className="text-[10px] uppercase text-gray-500 font-bold">Hasta</label>
+              <input
+                type="date"
+                value={jarabesEndDate}
+                onChange={(e) => setJarabesEndDate(e.target.value)}
+                className="border border-gray-300 rounded px-2 py-1 text-sm focus:border-blue-500 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-900 border-r border-gray-200">Marca / Sabor</th>
+                  <th className="px-4 py-3 text-center font-semibold text-gray-900 border-r border-gray-200">Jarabe Consumido (L)</th>
+                  <th className="px-4 py-3 text-center font-semibold text-gray-900 border-r border-gray-200">Unidades Elaboradas</th>
+                  <th className="px-4 py-3 text-center font-semibold text-gray-900">Emulsión Usada (Kg)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 bg-white">
+                {jarabesData.length === 0 ? (
+                  <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-500 italic">No hay datos en este período</td></tr>
+                ) : jarabesData.map(d => (
+                  <tr key={`${d.marca}-${d.sabor}`} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 font-medium text-gray-900 border-r border-gray-200 flex items-center gap-2">
+                       <div className="w-2 h-2 rounded-full" style={{ backgroundColor: FLAVOR_COLORS[d.sabor] || '#CBD5E1' }} />
+                       {d.marca} {d.sabor}
+                    </td>
+                    <td className="px-4 py-3 text-center border-r border-gray-200 font-medium text-blue-700">
+                      {d.consumidoL.toLocaleString('es-AR', { maximumFractionDigits: 1 })}
+                    </td>
+                    <td className="px-4 py-3 text-center border-r border-gray-200 font-medium">
+                       {d.unidades.toLocaleString('es-AR', { maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-4 py-3 text-center font-medium text-gray-700">
+                       {d.emulsionKg.toLocaleString('es-AR', { maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment, useMemo } from 'react';
 import { collection, query, orderBy, onSnapshot, doc, getDoc, setDoc, addDoc, deleteDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
-import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, CO2_VOLUMES, SABORES_SIN_JARABE, RANGOS_MIXTO, WASTE_WEIGHTS } from '../constants';
+import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, CO2_VOLUMES, SABORES_SIN_JARABE, RANGOS_MIXTO, WASTE_WEIGHTS, DEFAULT_INSUMOS } from '../constants';
 import { Settings, Save, CheckCircle2, XCircle, AlertCircle, Plus, Trash2, Users, Database, FlaskConical, Link2, Clock, Calendar, ShieldCheck, UserCog, Briefcase, AlertTriangle, Hash, Package, TrendingUp, Scale } from 'lucide-react';
 import { UserProfile, UserRole, RolePermissions } from '../types';
 import { SQLIntegration } from './SQLIntegration';
@@ -54,6 +54,9 @@ interface AppConfig {
   stackableFlavors?: string[];
   externalProducts?: Record<string, Record<string, string[]>>;
   wasteWeights?: Record<string, { etiq: number; tapa: number; termo: number }>;
+  syrupFormulas?: Record<string, Record<string, { liters: number; emulsion: number }>>;
+  insumos?: string[];
+  insumosMatrix?: Record<string, Record<string, Record<string, number>>>;
 }
 
 export function AdminPanel() {
@@ -62,6 +65,21 @@ export function AdminPanel() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [activeTab, setActiveTab] = useState<'config' | 'sql' | 'mappings' | 'shifts' | 'users' | 'permissions' | 'formulas' | 'danger' | 'salaries' | 'counters' | 'waste'>('config');
+
+  const getFlavorsForBrand = (brand: string) => {
+    if (!config) return [];
+    const brandActive = config.activeProducts?.[brand];
+    if (brandActive && Object.keys(brandActive).length > 0) {
+      const allActiveFlavors = new Set<string>();
+      Object.values(brandActive as Record<string, string[]>).forEach(flavors => {
+        if (Array.isArray(flavors)) {
+          flavors.forEach(f => allActiveFlavors.add(f));
+        }
+      });
+      return config.flavors.filter(f => allActiveFlavors.has(f));
+    }
+    return (config.brandFlavorCombinations?.[brand] || []).filter(f => config.flavors.includes(f));
+  };
   const [isPurging, setIsPurging] = useState(false);
   const [confirmPurge, setConfirmPurge] = useState(false);
 
@@ -117,9 +135,10 @@ export function AdminPanel() {
   const [newLine, setNewLine] = useState('');
   const [newSupervisor, setNewSupervisor] = useState('');
   const [newChemist, setNewChemist] = useState('');
+  const [newInsumo, setNewInsumo] = useState('');
   
   // Deletion confirmation state
-  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'brand' | 'line' | 'flavor' | 'size' | 'supervisor' | 'chemist', id: string | number, step: number } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'brand' | 'line' | 'flavor' | 'size' | 'supervisor' | 'chemist' | 'insumo', id: string | number, step: number } | null>(null);
 
   const [userSearch, setUserSearch] = useState('');
   
@@ -233,7 +252,10 @@ export function AdminPanel() {
           warehousePositions: data.warehousePositions || 2300,
           stackableFlavors: Array.isArray(data.stackableFlavors) ? data.stackableFlavors : (data.flavors || SABORES).filter((s: string) => s !== 'Soda Sifon' && s !== 'Soda'),
           externalProducts: data.externalProducts || {},
-          wasteWeights: data.wasteWeights || WASTE_WEIGHTS
+          wasteWeights: data.wasteWeights || WASTE_WEIGHTS,
+          syrupFormulas: data.syrupFormulas || {},
+          insumos: data.insumos || DEFAULT_INSUMOS,
+          insumosMatrix: data.insumosMatrix || {}
         };
         setConfig(mergedConfig);
       } else {
@@ -333,7 +355,10 @@ export function AdminPanel() {
             holidays: []
           },
           saboresSinJarabe: SABORES_SIN_JARABE,
-          co2Volumes: CO2_VOLUMES
+          co2Volumes: CO2_VOLUMES,
+          syrupFormulas: {},
+          insumos: DEFAULT_INSUMOS,
+          insumosMatrix: {}
         };
         setConfig(defaultConfig);
       }
@@ -539,6 +564,18 @@ export function AdminPanel() {
     setNewFlavor('');
   };
 
+  const handleAddInsumo = () => {
+    if (!config || !newInsumo.trim()) return;
+    const currentInsumos = config.insumos || [];
+    if (currentInsumos.includes(newInsumo.trim())) return;
+    
+    setConfig({
+      ...config,
+      insumos: [...currentInsumos, newInsumo.trim()]
+    });
+    setNewInsumo('');
+  };
+
   const handleAddSize = () => {
     if (!config || !newSize.trim()) return;
     const sizeNum = Number(newSize.trim());
@@ -653,6 +690,16 @@ export function AdminPanel() {
       flavors: newFlavors,
       enabledFlavors: newEnabledFlavors,
       brandFlavorCombinations: newBrandCombinations
+    });
+    setDeleteConfirm(null);
+  };
+
+  const handleDeleteInsumo = (insumo: string) => {
+    if (!config) return;
+    const currentInsumos = config.insumos || [];
+    setConfig({
+      ...config,
+      insumos: currentInsumos.filter(i => i !== insumo)
     });
     setDeleteConfirm(null);
   };
@@ -2653,7 +2700,7 @@ export function AdminPanel() {
                       <div key={brand} className="space-y-3">
                          <h4 className="font-bold text-gray-700 flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500 shadow-sm ring-2 ring-blue-100"></div> {brand}</h4>
                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                           {config.flavors.map(sabor => {
+                           {getFlavorsForBrand(brand).map(sabor => {
                               const val = config.co2Volumes?.[brand]?.[sabor] !== undefined ? config.co2Volumes[brand][sabor] : 0;
                               return (
                                  <div key={sabor} className="flex justify-between items-center bg-white p-2 rounded border border-gray-200 text-sm">
@@ -2687,6 +2734,216 @@ export function AdminPanel() {
                          </div>
                       </div>
                    ))}
+                 </div>
+              </section>
+
+              <section className="bg-gray-50 p-4 rounded-xl border border-gray-200 lg:col-span-2">
+                 <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Fórmulas de Jarabe (Por Unidad)</h3>
+                 <p className="text-xs text-gray-500 mb-4">Defina los litros de jarabe y los kg de emulsión que conforman una "unidad" de jarabe, por Marca y Sabor.</p>
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                   {config.brands.map(brand => (
+                      <div key={brand} className="space-y-3">
+                         <h4 className="font-bold text-gray-700 flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-blue-500 shadow-sm ring-2 ring-blue-100"></div> 
+                            {brand}
+                         </h4>
+                         <div className="flex flex-col gap-2">
+                           {getFlavorsForBrand(brand).filter(sabor => !(config.saboresSinJarabe || SABORES_SIN_JARABE).includes(sabor)).map(sabor => {
+                              const formula = config.syrupFormulas?.[brand]?.[sabor] || { liters: 0, emulsion: 0 };
+                              return (
+                                 <div key={sabor} className="flex justify-between items-center bg-white p-2 rounded border border-gray-200 text-sm">
+                                    <span className="truncate w-1/3">{sabor}</span>
+                                    <div className="flex items-center gap-2 w-2/3 justify-end">
+                                        <div className="flex flex-col">
+                                            <span className="text-[10px] text-gray-500 mb-1">Litros Jarabe</span>
+                                            <input 
+                                                type="number"
+                                                step="0.01"
+                                                min="0"
+                                                value={formula.liters === 0 ? '' : formula.liters}
+                                                placeholder="L"
+                                                onChange={(e) => {
+                                                    const val = Number(e.target.value);
+                                                    const current = config.syrupFormulas || {};
+                                                    const brandObj = current[brand] || {};
+                                                    setConfig({
+                                                        ...config,
+                                                        syrupFormulas: {
+                                                            ...current,
+                                                            [brand]: {
+                                                                ...brandObj,
+                                                                [sabor]: { ...(brandObj[sabor] || { emulsion: 0 }), liters: val }
+                                                            }
+                                                        }
+                                                    });
+                                                }}
+                                                className="w-24 text-right rounded border-gray-300 bg-gray-50 hover:bg-white transition-colors shadow-sm p-1 px-2 border focus:border-blue-500 focus:ring-blue-500"
+                                            />
+                                        </div>
+                                        <div className="flex flex-col">
+                                            <span className="text-[10px] text-gray-500 mb-1">Kg Emulsión</span>
+                                            <input 
+                                                type="number"
+                                                step="0.01"
+                                                min="0"
+                                                value={formula.emulsion === 0 ? '' : formula.emulsion}
+                                                placeholder="Kg"
+                                                onChange={(e) => {
+                                                    const val = Number(e.target.value);
+                                                    const current = config.syrupFormulas || {};
+                                                    const brandObj = current[brand] || {};
+                                                    setConfig({
+                                                        ...config,
+                                                        syrupFormulas: {
+                                                            ...current,
+                                                            [brand]: {
+                                                                ...brandObj,
+                                                                [sabor]: { ...(brandObj[sabor] || { liters: 0 }), emulsion: val }
+                                                            }
+                                                        }
+                                                    });
+                                                }}
+                                                className="w-24 text-right rounded border-gray-300 bg-gray-50 hover:bg-white transition-colors shadow-sm p-1 px-2 border focus:border-blue-500 focus:ring-blue-500"
+                                            />
+                                        </div>
+                                    </div>
+                                 </div>
+                              )
+                           })}
+                         </div>
+                      </div>
+                   ))}
+                 </div>
+              </section>
+
+              <section className="bg-gray-50 p-4 rounded-xl border border-gray-200 lg:col-span-2 overflow-x-auto">
+                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 border-b pb-2">
+                   <div>
+                     <h3 className="text-lg font-semibold text-gray-800">Matriz General de Insumos (Kg por Unidad)</h3>
+                     <p className="text-xs text-gray-500 mt-1">Ajuste los kilogramos de cada insumo requeridos para una "unidad" de jarabe, por Marca y Sabor.</p>
+                   </div>
+                   <div className="flex gap-2">
+                     <input 
+                       type="text" 
+                       value={newInsumo} 
+                       onChange={e => setNewInsumo(e.target.value)}
+                       placeholder="Nuevo insumo..."
+                       className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2 w-48"
+                     />
+                     <button 
+                       onClick={handleAddInsumo}
+                       className="bg-indigo-600 text-white px-3 py-2 rounded-md hover:bg-indigo-700 font-medium text-sm flex items-center gap-2 transition-colors"
+                     >
+                       <Plus className="w-4 h-4" />
+                       Agregar Insumo
+                     </button>
+                   </div>
+                 </div>
+                 
+                 {/* List of currently managed insumos so they can be deleted */}
+                 <div className="mb-6">
+                   <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-3">Gestión de Insumos</h4>
+                   <div className="flex flex-wrap gap-2">
+                     {config.insumos?.map(insumo => (
+                       <div key={insumo} className="flex items-center gap-1 bg-white border border-gray-200 rounded-md px-2 py-1 shadow-sm transition-all hover:border-gray-300">
+                         <span className="text-xs font-medium text-gray-700">{insumo}</span>
+                         {deleteConfirm?.type === 'insumo' && deleteConfirm.id === insumo ? (
+                           <button
+                             onClick={() => {
+                               if (deleteConfirm.step === 1) setDeleteConfirm({ ...deleteConfirm, step: 2 });
+                               else handleDeleteInsumo(insumo);
+                             }}
+                             onMouseLeave={() => setDeleteConfirm(null)}
+                             className={`ml-1 px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
+                               deleteConfirm.step === 1 ? 'bg-orange-100 text-orange-600 border border-orange-200' : 'bg-red-600 text-white'
+                             }`}
+                           >
+                             {deleteConfirm.step === 1 ? '¿Borrar?' : '¡CONFIRMAR!'}
+                           </button>
+                         ) : (
+                           <button
+                             onClick={() => setDeleteConfirm({ type: 'insumo', id: insumo, step: 1 })}
+                             className="text-gray-400 hover:text-red-500 p-0.5 rounded transition-colors ml-1 hover:bg-gray-100"
+                             title="Eliminar insumo"
+                           >
+                             <Trash2 className="w-3.5 h-3.5" />
+                           </button>
+                         )}
+                       </div>
+                     ))}
+                   </div>
+                 </div>
+
+                 <div className="space-y-8">
+                   {config.brands.map(brand => {
+                     const brandFlavors = getFlavorsForBrand(brand).filter(sabor => !(config.saboresSinJarabe || SABORES_SIN_JARABE).includes(sabor));
+                     if (brandFlavors.length === 0) return null;
+                     return (
+                       <div key={brand} className="space-y-3">
+                          <h4 className="font-bold text-gray-700 flex items-center gap-2">
+                             <div className="w-2 h-2 rounded-full bg-indigo-500 shadow-sm ring-2 ring-indigo-100"></div> 
+                             {brand}
+                          </h4>
+                          <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                            <table className="min-w-full divide-y divide-gray-200 text-xs">
+                              <thead className="bg-gray-100">
+                                <tr>
+                                  <th className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-gray-200 sticky left-0 bg-gray-100 z-10 w-64 min-w-[16rem]">Kg por Unidad<br/><span className="font-normal text-[10px]">GPL/Sabor</span></th>
+                                  {brandFlavors.map(sabor => (
+                                    <th key={sabor} className="px-3 py-2 text-center font-semibold text-gray-700 border-r border-gray-200 min-w-[80px]">
+                                      {sabor}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-200 bg-white">
+                                {config.insumos?.map(insumo => (
+                                  <tr key={insumo} className="hover:bg-gray-50">
+                                    <td className="px-3 py-1.5 font-medium text-gray-800 border-r border-gray-200 sticky left-0 bg-white z-10 truncate shadow-[1px_0_0_0_#e5e7eb]">
+                                      {insumo}
+                                    </td>
+                                    {brandFlavors.map(sabor => {
+                                      const val = config.insumosMatrix?.[brand]?.[sabor]?.[insumo] || 0;
+                                      return (
+                                        <td key={sabor} className="p-0 border-r border-gray-200">
+                                          <input
+                                            type="number"
+                                            step="0.001"
+                                            min="0"
+                                            value={val === 0 ? '' : val}
+                                            placeholder="0"
+                                            onChange={(e) => {
+                                              const newVal = Number(e.target.value);
+                                              const currentMatrix = config.insumosMatrix || {};
+                                              const brandData = currentMatrix[brand] || {};
+                                              const saborData = brandData[sabor] || {};
+                                              setConfig({
+                                                ...config,
+                                                insumosMatrix: {
+                                                  ...currentMatrix,
+                                                  [brand]: {
+                                                    ...brandData,
+                                                    [sabor]: {
+                                                      ...saborData,
+                                                      [insumo]: newVal
+                                                    }
+                                                  }
+                                                }
+                                              });
+                                            }}
+                                            className="w-full h-full min-h-[32px] text-center border-none bg-transparent hover:bg-gray-50 focus:ring-1 focus:ring-inset focus:ring-indigo-500 focus:bg-white transition-colors"
+                                          />
+                                        </td>
+                                      )
+                                    })}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                       </div>
+                     )
+                   })}
                  </div>
               </section>
           </div>

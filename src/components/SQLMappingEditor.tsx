@@ -2,14 +2,15 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SQL_PRODUCT_MAPPING, SABORES, SABORES_SIN_JARABE, MARCAS } from '../constants';
-import { Save, RefreshCw, CheckCircle2, AlertCircle, Search, Package, Droplet } from 'lucide-react';
+import { Save, RefreshCw, CheckCircle2, AlertCircle, Search, Package, Droplet, FlaskConical } from 'lucide-react';
 import { useAppConfig } from '../hooks/useAppConfig';
 
 export function SQLMappingEditor() {
   const { availableBrands, availableFlavors, availableSizes, getFilteredFlavors, config } = useAppConfig();
   const [productMappings, setProductMappings] = useState<Record<string, string>>({});
   const [syrupMappings, setSyrupMappings] = useState<Record<string, string>>({});
-  const [activeTab, setActiveTab] = useState<'products' | 'syrups'>('products');
+  const [insumoMappings, setInsumoMappings] = useState<Record<string, string>>({});
+  const [activeTab, setActiveTab] = useState<'products' | 'syrups' | 'insumos'>('products');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
@@ -18,12 +19,14 @@ export function SQLMappingEditor() {
   useEffect(() => {
     const productMappingRef = doc(db, 'config', 'sql_mappings');
     const syrupMappingRef = doc(db, 'config', 'sql_syrup_mappings');
+    const insumoMappingRef = doc(db, 'config', 'sql_insumo_mappings');
     
     let isProductReady = false;
     let isSyrupReady = false;
+    let isInsumoReady = false;
 
     const checkReady = () => {
-      if (isProductReady && isSyrupReady) setLoading(false);
+      if (isProductReady && isSyrupReady && isInsumoReady) setLoading(false);
     };
 
     const unsubscribeProducts = onSnapshot(productMappingRef, (docSnap) => {
@@ -46,9 +49,20 @@ export function SQLMappingEditor() {
       checkReady();
     });
 
+    const unsubscribeInsumos = onSnapshot(insumoMappingRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setInsumoMappings(docSnap.data() as Record<string, string>);
+      } else {
+        setInsumoMappings({});
+      }
+      isInsumoReady = true;
+      checkReady();
+    });
+
     return () => {
       unsubscribeProducts();
       unsubscribeSyrups();
+      unsubscribeInsumos();
     }
   }, []);
 
@@ -66,16 +80,25 @@ export function SQLMappingEditor() {
     }));
   };
 
+  const handleUpdateInsumoMapping = (key: string, value: string) => {
+    setInsumoMappings(prev => ({
+      ...prev,
+      [key]: value
+    }));
+  };
+
   const saveMappings = async () => {
     setSaving(true);
     setMessage(null);
     try {
       if (activeTab === 'products') {
         await setDoc(doc(db, 'config', 'sql_mappings'), productMappings);
-      } else {
+      } else if (activeTab === 'syrups') {
         await setDoc(doc(db, 'config', 'sql_syrup_mappings'), syrupMappings);
+      } else {
+        await setDoc(doc(db, 'config', 'sql_insumo_mappings'), insumoMappings);
       }
-      setMessage({ type: 'success', text: `Mapeos de ${activeTab === 'products' ? 'productos' : 'jarabes'} guardados.` });
+      setMessage({ type: 'success', text: `Mapeos de ${activeTab === 'products' ? 'productos' : activeTab === 'syrups' ? 'jarabes' : 'insumos'} guardados.` });
       setTimeout(() => setMessage(null), 3000);
     } catch (error) {
       console.error("Error saving mappings:", error);
@@ -121,6 +144,10 @@ export function SQLMappingEditor() {
     return keys;
   }, [availableBrands, getFilteredFlavors]);
 
+  const generatedInsumoKeys = useMemo(() => {
+    return config?.insumos || [];
+  }, [config?.insumos]);
+
   if (loading) {
     return (
       <div className="flex justify-center py-8">
@@ -129,10 +156,10 @@ export function SQLMappingEditor() {
     );
   }
 
-  const activeMappings = activeTab === 'products' ? productMappings : syrupMappings;
+  const activeMappings = activeTab === 'products' ? productMappings : activeTab === 'syrups' ? syrupMappings : insumoMappings;
   
   // Only show keys that are currently active in the configuration
-  const sourceKeysSet = new Set<string>(activeTab === 'products' ? generatedProductKeys : generatedSyrupKeys);
+  const sourceKeysSet = new Set<string>(activeTab === 'products' ? generatedProductKeys : activeTab === 'syrups' ? generatedSyrupKeys : generatedInsumoKeys);
   const sourceKeys = Array.from(sourceKeysSet);
 
   const filteredKeys = sourceKeys.filter(key => 
@@ -180,6 +207,17 @@ export function SQLMappingEditor() {
           <Droplet className="w-4 h-4" />
           Jarabes
         </button>
+        <button
+          onClick={() => { setActiveTab('insumos'); setSearchTerm(''); }}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors border-b-2 ${
+            activeTab === 'insumos' 
+              ? 'border-blue-600 text-blue-600 bg-blue-50/50' 
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+          }`}
+        >
+          <FlaskConical className="w-4 h-4" />
+          Insumos
+        </button>
       </div>
 
       {message && (
@@ -207,7 +245,7 @@ export function SQLMappingEditor() {
             <input
               type="text"
               value={activeMappings[key] || ''}
-              onChange={(e) => activeTab === 'products' ? handleUpdateProductMapping(key, e.target.value) : handleUpdateSyrupMapping(key, e.target.value)}
+              onChange={(e) => activeTab === 'products' ? handleUpdateProductMapping(key, e.target.value) : activeTab === 'syrups' ? handleUpdateSyrupMapping(key, e.target.value) : handleUpdateInsumoMapping(key, e.target.value)}
               className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono"
               placeholder="Código SQL..."
             />

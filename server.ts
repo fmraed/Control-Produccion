@@ -220,6 +220,59 @@ async function startServer() {
     }
   });
 
+  // API Route for Insumos Stock Control
+  app.get("/api/sql/insumosStock", async (req, res) => {
+    if (!process.env.SQL_SERVER_SERVER || !process.env.SQL_SERVER_USER || !process.env.SQL_SERVER_PASSWORD) {
+      return res.status(400).json({ error: "Configuración SQL incompleta" });
+    }
+
+    try {
+      let pool = await sql.connect(sqlConfig);
+      
+      const query = `
+        SELECT 
+            a.co_codAbre AS codigo_articulo,
+            a.no_descripcion AS nombre_articulo,
+            ISNULL(s1.nu_actual,0) AS stock_almacen,
+            ISNULL(s2.nu_actual,0) AS stock_piso,
+            CASE 
+                WHEN ISNULL(s1.nu_actual,0) > 0 
+                    THEN ISNULL(s1.nu_actual,0)
+                WHEN ISNULL(s1.nu_actual,0) = 0 AND ISNULL(s2.nu_actual,0) >= 0
+                    THEN ISNULL(s2.nu_actual,0)
+                WHEN ISNULL(s1.nu_actual,0) = 0 AND ISNULL(s2.nu_actual,0) < 0
+                    THEN 0
+            END AS stock_final
+        FROM forDrink.dbo.fc_articulos a
+        LEFT JOIN forDrink.dbo.vw_articulos_stock_fason s1
+            ON a.id_articulo = s1.id_articulo 
+           AND s1.id_deposito = 19
+           AND s1.id_grupo = 1
+        LEFT JOIN forDrink.dbo.vw_articulos_stock_fason s2
+            ON a.id_articulo = s2.id_articulo 
+           AND s2.id_deposito = 35
+             AND s2.id_grupo = 1
+        WHERE (a.id_familia = 17 
+               OR (a.id_familia = 155 AND a.id_articulo IN (10994, 10988)))
+           OR (a.id_calificacion = 1 OR a.id_familia = 135)
+      `;
+
+      const result = await pool.request().query(query);
+
+      res.json({
+        success: true,
+        data: result.recordset,
+        message: "Datos de insumos obtenidos correctamente."
+      });
+    } catch (err) {
+      console.error("SQL Insumos Stock Error:", err);
+      res.status(500).json({ 
+        error: "Error al consultar stock de insumos en SQL",
+        details: err instanceof Error ? err.message : String(err)
+      });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

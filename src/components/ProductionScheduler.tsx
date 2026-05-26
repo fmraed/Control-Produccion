@@ -575,7 +575,7 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
                         }`}>
                           <div className="flex items-center justify-center gap-1">
                             <span>{shift}</span>
-                            {shaded && <span className="text-[8px] opacity-75 font-normal lowercase italic">(sombreado)</span>}
+                            {shaded && <span className="text-[8px] opacity-75 font-normal lowercase italic">(fin de semana)</span>}
                           </div>
                         </th>
                       );
