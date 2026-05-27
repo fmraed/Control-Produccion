@@ -17,7 +17,10 @@ import {
   FileCheck,
   TrendingUp,
   Sliders,
-  Database
+  Database,
+  Layers,
+  Scale,
+  ShoppingBag
 } from 'lucide-react';
 import { startOfWeek, addDays, format, subDays, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -34,7 +37,7 @@ interface InsumoStock {
 
 export function InsumosControlReport() {
   const { config } = useAppConfig();
-  const [activeTab, setActiveTab] = useState<'capacity' | 'program'>('capacity');
+  const [activeTab, setActiveTab] = useState<'capacity' | 'insumos' | 'azucar' | 'program'>('capacity');
   
   // SQL and Firebase data state
   const [stockData, setStockData] = useState<InsumoStock[]>([]);
@@ -49,6 +52,10 @@ export function InsumosControlReport() {
   const [plans, setPlans] = useState<ProductionPlan[]>([]);
   const [goals, setGoals] = useState<MonthlyGoal[]>([]);
   const [plansLoading, setPlansLoading] = useState(true);
+
+  // Sugar Tab States
+  const [sugarManualUnitsByDay, setSugarManualUnitsByDay] = useState<Record<string, number>>({});
+  const [sugarBagsPerUnit, setSugarBagsPerUnit] = useState<number>(12);
 
   // Filter
   const [selectedBrand, setSelectedBrand] = useState<string>('all');
@@ -230,6 +237,9 @@ export function InsumosControlReport() {
       unsubscribeGoals();
     };
   }, [startDateStr, endDateStr]);
+
+  // Load today's production plans
+  const todayStr = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
 
   useEffect(() => {
     fetchMappings()
@@ -528,6 +538,80 @@ export function InsumosControlReport() {
     };
   }, [config, plans, goals, insumoMappings, stockData, simulatedStocks, simulationMode, getEffectiveInsumoStock]);
 
+  // Sugar Calculation Hooks
+  const sugarInsumoName = useMemo(() => {
+    if (!config?.insumos) return 'Azúcar';
+    return config.insumos.find(i => i.toLowerCase().includes('azúcar') || i.toLowerCase().includes('azucar')) || 'Azúcar';
+  }, [config?.insumos]);
+
+  const sugarStockKg = useMemo(() => {
+    return getEffectiveInsumoStock(sugarInsumoName);
+  }, [sugarInsumoName, getEffectiveInsumoStock]);
+
+  const sugarStockBags = useMemo(() => {
+    return sugarStockKg / 50;
+  }, [sugarStockKg]);
+
+  const sugarDailyProjectionState = useMemo(() => {
+    let currentStock = sugarStockKg;
+    
+    return weekDays.map((d) => {
+      const dateStr = format(d, 'yyyy-MM-dd');
+      const manualValue = sugarManualUnitsByDay[dateStr];
+      const hasManualOverride = manualValue !== undefined && manualValue > 0;
+      
+      let consumptionKg = 0;
+      let usedUnits = 0;
+      let source: 'manual' | 'plan' = 'plan';
+      let dayPlans = plans.filter(p => p.date === dateStr);
+      
+      if (hasManualOverride) {
+        source = 'manual';
+        usedUnits = manualValue;
+        consumptionKg = manualValue * sugarBagsPerUnit * 50;
+      } else {
+        source = 'plan';
+        dayPlans.forEach(p => {
+          const botellasPorPack = config?.botellasPorPack?.[p.tamano] || BOTELLAS_POR_PACK[p.tamano] || 6;
+          const bottlesTotal = p.plannedPacks * botellasPorPack;
+          const beverageLiters = bottlesTotal * (p.tamano / 1000); 
+
+          const syrupLitersNeeded = beverageLiters / 6;
+          const syrupLitersPerUnit = config?.syrupFormulas?.[p.marca]?.[p.sabor]?.liters || 0;
+          const unitsRequired = syrupLitersPerUnit > 0 ? (syrupLitersNeeded / syrupLitersPerUnit) : 0;
+          usedUnits += unitsRequired;
+
+          const matrixObj = config?.insumosMatrix?.[p.marca]?.[p.sabor] || {};
+          let sugarKey = Object.keys(matrixObj).find(k => k.toLowerCase().includes('azúcar') || k.toLowerCase().includes('azucar'));
+          const sugarKgPerUnit = sugarKey ? (matrixObj[sugarKey] || 0) : 0;
+          const sugarNeededKg = unitsRequired * sugarKgPerUnit;
+          consumptionKg += sugarNeededKg;
+        });
+      }
+      
+      const stockBeforeKg = currentStock;
+      const stockAfterKg = currentStock - consumptionKg;
+      
+      // update currentStock for cumulative calculation
+      currentStock = stockAfterKg;
+      
+      return {
+        date: d,
+        dateStr,
+        source,
+        usedUnits,
+        consumptionKg,
+        consumptionBags: consumptionKg / 50,
+        stockBeforeKg,
+        stockAfterKg,
+        stockAfterBags: stockAfterKg / 50,
+        hasPlans: dayPlans.length > 0,
+        plansCount: dayPlans.length,
+        dayPlans
+      };
+    });
+  }, [weekDays, plans, config, sugarStockKg, sugarManualUnitsByDay, sugarBagsPerUnit, BOTELLAS_POR_PACK]);
+
 
   if (loading && Object.keys(simulatedStocks).length === 0) {
     return (
@@ -609,21 +693,43 @@ export function InsumosControlReport() {
       </div>
 
       {/* Tab Navigators */}
-      <div className="flex bg-gray-100 p-1.5 rounded-xl gap-2 max-w-md">
+      <div className="flex bg-gray-100 p-1.5 rounded-xl gap-2 w-full md:w-auto">
         <button
           onClick={() => setActiveTab('capacity')}
-          className={`flex-1 py-3 text-xs font-black uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 ${
+          className={`flex-1 py-3 px-4 text-xs font-black uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 ${
             activeTab === 'capacity' 
               ? 'bg-white text-indigo-700 shadow-sm' 
               : 'text-gray-500 hover:text-gray-900'
           }`}
         >
           <TrendingUp className="w-4 h-4" />
-          Proyección de Capacidad
+          Control por Sabor
+        </button>
+        <button
+          onClick={() => setActiveTab('insumos')}
+          className={`flex-1 py-3 px-4 text-xs font-black uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 ${
+            activeTab === 'insumos' 
+              ? 'bg-white text-indigo-700 shadow-sm' 
+              : 'text-gray-500 hover:text-gray-900'
+          }`}
+        >
+          <Layers className="w-4 h-4" />
+          Control por Insumo
+        </button>
+        <button
+          onClick={() => setActiveTab('azucar')}
+          className={`flex-1 py-3 px-4 text-xs font-black uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 ${
+            activeTab === 'azucar' 
+              ? 'bg-white text-indigo-700 shadow-sm' 
+              : 'text-gray-500 hover:text-gray-900'
+          }`}
+        >
+          <Scale className="w-4 h-4" />
+          Azúcar
         </button>
         <button
           onClick={() => setActiveTab('program')}
-          className={`flex-1 py-3 text-xs font-black uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 ${
+          className={`flex-1 py-3 px-4 text-xs font-black uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 ${
             activeTab === 'program' 
               ? 'bg-white text-indigo-700 shadow-sm' 
               : 'text-gray-500 hover:text-gray-900'
@@ -759,8 +865,8 @@ export function InsumosControlReport() {
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
                   <div>
-                    <h3 className="text-lg font-bold text-gray-800">Proyección de Capacidad por Sabor</h3>
-                    <p className="text-xs text-gray-500">Volumen máximo teorico de elaboración a parter de existencias e insumo limitante</p>
+                    <h3 className="text-lg font-bold text-gray-800">Control por Sabor</h3>
+                    <p className="text-xs text-gray-500">Volumen máximo teórico de elaboración a partir de existencias e insumo limitante</p>
                   </div>
                   <div className="flex flex-col sm:flex-row gap-3">
                     <label className="flex items-center gap-2 px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors shadow-sm">
@@ -856,7 +962,7 @@ export function InsumosControlReport() {
                             </td>
                             <td className="px-4 py-4 text-right">
                               {r.limitingInsumo && r.monthsOfStock !== Infinity ? (
-                                <span className={`font-sans font-bold px-2.5 py-1.5 rounded text-[13px] tracking-wide ${r.monthsOfStock < 1 ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
+                                <span className={`font-sans font-bold px-2.5 py-1.5 rounded text-[13px] tracking-wide ${r.monthsOfStock < 0.5 ? 'bg-red-100 text-red-800' : r.monthsOfStock < 1 ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800'}`}>
                                   {Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(r.monthsOfStock)} m
                                 </span>
                               ) : (
@@ -866,6 +972,358 @@ export function InsumosControlReport() {
                           </tr>
                         ))
                       )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAPA DE AZUCAR */}
+          {activeTab === 'azucar' && (
+            <div className="space-y-6">
+              
+              {/* Resumen De Stock Cabecera */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                
+                {/* Caja 1: Stock Actual */}
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex items-center justify-between">
+                  <div className="flex items-center gap-3 w-full">
+                    <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+                      <Scale className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1">
+                      <span className="text-[11px] font-black text-gray-400 uppercase tracking-wider block">Existencias de Azúcar</span>
+                      <div className="flex items-baseline gap-1.5 mt-1">
+                        <span className="text-2xl font-black text-gray-900">
+                          {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(sugarStockKg)}
+                        </span>
+                        <span className="text-xs font-bold text-gray-500">kg</span>
+                      </div>
+                      <span className="text-[11px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-full mt-1 inline-block">
+                        {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(sugarStockBags)} bolsas
+                      </span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded bg-indigo-100 text-indigo-800">
+                       {simulationMode ? 'Simulado' : 'SQL Real'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Caja 2: Total Planificado en la Semana */}
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl">
+                      <ShoppingBag className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <span className="text-[11px] font-black text-gray-400 uppercase tracking-wider block">Demanda Planificada</span>
+                      {(() => {
+                        const totalPlKg = sugarDailyProjectionState.reduce((acc, current) => acc + (current.source === 'plan' ? current.consumptionKg : 0), 0);
+                        return (
+                          <>
+                            <div className="flex items-baseline gap-1.5 mt-1">
+                              <span className="text-2xl font-black text-gray-900">
+                                {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(totalPlKg)}
+                              </span>
+                              <span className="text-xs font-bold text-gray-500">kg</span>
+                            </div>
+                            <span className="text-[11px] text-indigo-600 font-bold bg-indigo-50 px-2 py-0.5 rounded-full mt-1 inline-block">
+                              {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(totalPlKg / 50)} bolsas
+                            </span>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Caja 3: Configuración de Dosificaciones */}
+                <div className="bg-white rounded-2xl shadow-sm border border-orange-100 p-5 space-y-2">
+                  <div className="flex items-center justify-between border-b border-gray-50 pb-1.5">
+                    <span className="text-xs font-black uppercase tracking-wider text-gray-700 block">Dosificación Manual</span>
+                    <span className="text-[9px] font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded">Config</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={sugarBagsPerUnit}
+                      onChange={(e) => setSugarBagsPerUnit(Math.max(1, parseInt(e.target.value) || 12))}
+                      className="w-16 px-2 py-1.5 border border-gray-300 rounded-lg text-sm font-black text-center text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <div className="text-[11px] text-gray-500 leading-tight">
+                      <strong className="text-gray-900 block font-bold">Bolsas / Unidad</strong>
+                      equivale a {sugarBagsPerUnit * 50} kg por item.
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Contenedor Principal de la Proyección Diaria */}
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4 mb-6">
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-800">Proyección de Stock y Consumo de Azúcar</h3>
+                    <p className="text-xs text-gray-500">
+                      Monitoree de forma acumulativa y día por día las necesidades de azúcar en base al programa semanal o simulaciones manuales directas
+                    </p>
+                  </div>
+                  
+                  {/* Calendar controller replica to allow changing week inside the Sugar Tab */}
+                  <div className="flex items-center gap-2 bg-gray-50 p-1.5 rounded-xl border border-gray-200 shadow-sm self-start">
+                    <button
+                      title="Semana anterior"
+                      onClick={() => setSelectedWeek(prev => subDays(prev, 7))}
+                      className="p-1.5 hover:bg-white text-gray-600 rounded-lg transition-all"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <div className="px-2 text-center min-w-[170px]">
+                      <span className="text-[11px] font-black block text-gray-800 uppercase tracking-tight">
+                        {format(selectedWeek, "dd 'de' MMMM", { locale: es })}
+                      </span>
+                      <span className="text-[9px] font-bold text-gray-400">
+                        al {format(addDays(selectedWeek, 6), "dd 'de' MMMM, yyyy", { locale: es })}
+                      </span>
+                    </div>
+                    <button
+                      title="Siguiente semana"
+                      onClick={() => setSelectedWeek(prev => addDays(prev, 7))}
+                      className="p-1.5 hover:bg-white text-gray-600 rounded-lg transition-all"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 text-gray-600 text-[11px] font-black uppercase tracking-wider">
+                        <th className="px-4 py-4 text-left font-sans w-1/5">Día / Fecha</th>
+                        <th className="px-4 py-4 text-center font-sans w-1/4">Unidades a Producir</th>
+                        <th className="px-4 py-4 text-center font-sans w-1/6">Origen</th>
+                        <th className="px-4 py-4 text-right font-sans w-1/5">Consumo Previsto</th>
+                        <th className="px-4 py-4 text-right font-sans rounded-tr-lg w-1/4">Stock que Quedaría</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 bg-white text-sm">
+                      {sugarDailyProjectionState.map((row) => {
+                        const isToday = row.dateStr === todayStr;
+                        const isOverridden = row.source === 'manual';
+                        const isDeficient = row.stockAfterKg < 0;
+
+                        return (
+                          <tr 
+                            key={row.dateStr} 
+                            className={`transition-colors hover:bg-gray-50/50 relative ${
+                              isToday ? 'bg-indigo-50/10 font-medium' : ''
+                            }`}
+                          >
+                            {/* Día y Fecha */}
+                            <td className="px-4 py-4 whitespace-nowrap">
+                              <div className="flex items-center gap-2">
+                                {isToday && (
+                                  <span className="w-1 h-10 bg-indigo-600 rounded-r absolute left-0" />
+                                )}
+                                <div>
+                                  <span className="text-gray-900 font-bold block capitalize text-sm">
+                                    {format(row.date, "EEEE", { locale: es })}
+                                  </span>
+                                  <span className="text-xs font-semibold text-gray-400 block tracking-tight">
+                                    {format(row.date, "dd 'de' MMM", { locale: es })}
+                                  </span>
+                                  {isToday && (
+                                    <span className="inline-block mt-1 bg-indigo-100 text-indigo-800 text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full">
+                                      Hoy
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Unidades a producir */}
+                            <td className="px-4 py-4 text-center">
+                              <div className="flex flex-col items-center justify-center max-w-[170px] mx-auto space-y-1">
+                                <div className="relative w-full">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    placeholder={
+                                      row.hasPlans 
+                                        ? `Plan: ${row.usedUnits.toFixed(1)} u`
+                                        : "0"
+                                    }
+                                    value={sugarManualUnitsByDay[row.dateStr] || ''}
+                                    onChange={(e) => {
+                                      const val = e.target.value === '' ? 0 : Math.max(0, parseFloat(e.target.value) || 0);
+                                      setSugarManualUnitsByDay(prev => ({
+                                        ...prev,
+                                        [row.dateStr]: val
+                                      }));
+                                    }}
+                                    className={`w-full text-center px-3 py-1.5 text-xs font-bold rounded-xl border focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all ${
+                                      isOverridden 
+                                        ? 'bg-amber-50 border-amber-300 text-amber-900 focus:ring-amber-500' 
+                                        : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300 placeholder-gray-400'
+                                    }`}
+                                  />
+                                  {isOverridden && (
+                                    <button
+                                      title="Borrar simulación manual"
+                                      onClick={() => {
+                                        setSugarManualUnitsByDay(prev => {
+                                          const copy = { ...prev };
+                                          delete copy[row.dateStr];
+                                          return copy;
+                                        });
+                                      }}
+                                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-amber-500 hover:text-amber-700 text-lg font-black p-0.5 rounded leading-none"
+                                    >
+                                      ×
+                                    </button>
+                                  )}
+                                </div>
+                                <span className="text-[10px] font-semibold text-gray-400">
+                                  {isOverridden ? 'Editado manualmente' : 'Equivalente tanques'}
+                                </span>
+                              </div>
+                            </td>
+
+                            {/* Origen */}
+                            <td className="px-4 py-4 whitespace-nowrap text-center">
+                              {isOverridden ? (
+                                <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 text-[10px] uppercase font-black px-2.5 py-1 rounded-lg">
+                                  Manual
+                                </span>
+                              ) : row.hasPlans ? (
+                                <span 
+                                  title={row.dayPlans.map(p => `${p.marca} ${p.sabor} (${p.plannedPacks} packs)`).join('\n')}
+                                  className="inline-flex items-center gap-1 bg-blue-50 text-blue-800 text-[10px] uppercase font-black px-2.5 py-1 rounded-lg cursor-help hover:bg-blue-100 transition-colors"
+                                >
+                                  Programa ({row.plansCount})
+                                </span>
+                              ) : (
+                                <span className="inline-flex bg-gray-100 text-gray-400 text-[10px] uppercase font-black px-2.5 py-1 rounded-lg">
+                                  Sin Plan
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Consumo Previsto */}
+                            <td className="px-4 py-4 text-right whitespace-nowrap">
+                              <div className="font-mono">
+                                <span className="text-gray-900 font-extrabold text-sm block">
+                                  {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(row.consumptionKg)} kg
+                                </span>
+                                <span className="text-gray-400 font-bold text-xs block">
+                                  ({Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(row.consumptionBags)} bols)
+                                </span>
+                              </div>
+                            </td>
+
+                            {/* Stock que quedará */}
+                            <td className="px-4 py-4 text-right whitespace-nowrap">
+                              <div className="flex flex-col items-end">
+                                <div className={`inline-flex flex-col items-end px-3 py-1.5 rounded-xl border ${
+                                  isDeficient 
+                                    ? 'bg-red-50 border-red-200 text-red-800' 
+                                    : row.stockAfterBags < 10 
+                                      ? 'bg-amber-50 border-amber-200 text-amber-800'
+                                      : 'bg-emerald-50 border-emerald-100 text-emerald-800'
+                                }`}>
+                                  <span className="font-mono font-black text-sm block">
+                                    {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(row.stockAfterKg)} kg
+                                  </span>
+                                  <span className="font-sans font-bold text-[10px] block opacity-80">
+                                    {isDeficient ? 'Déficit:' : 'Equiv:'} {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(row.stockAfterBags)} bols
+                                  </span>
+                                </div>
+                                {isDeficient && (
+                                  <span className="text-[10px] font-black text-red-600 mt-1 flex items-center gap-1 animate-pulse">
+                                    <AlertTriangle className="w-3" /> Quiebre de stock
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Info footer */}
+                <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 mt-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                  <div className="text-xs text-gray-500 max-w-2xl">
+                    <p className="font-bold text-gray-700">💡 Instrucciones de simulación:</p>
+                    <p className="mt-1 leading-relaxed">
+                      El sistema calcula automáticamente el consumo de azúcar previsto en base a las fórmulas de jarabe de los productos planificados. Si desea simular o registrar un plan distinto para un día en particular, simplemente ingrese el número estimado de "Unidades a Producir" en la columna correspondiente; el sistema dejará de usar el programa para ese día y computará la dosificación configurada (<span className="font-extrabold">{sugarBagsPerUnit}</span> bolsas por lote). Para revertir, borre el valor ingresado.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setSugarManualUnitsByDay({})}
+                    disabled={Object.keys(sugarManualUnitsByDay).length === 0}
+                    className="px-4 py-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-700 font-bold text-xs uppercase tracking-wide rounded-xl shadow-sm transition-all flex-shrink-0"
+                  >
+                    Restablecer Todo
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          )}
+
+          {/* CONTROL POR INSUMO TAB */}
+          {activeTab === 'insumos' && (
+            <div className="space-y-6">
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 relative">
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-800">Control por Insumo</h3>
+                    <p className="text-xs text-gray-500">Analice sus existencias agrupadas calculando su duración según ritmo mensual</p>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 text-gray-600 text-xs font-black uppercase tracking-wider">
+                        <th className="px-5 py-4 text-left font-sans">Insumo / Grupo</th>
+                        <th className="px-4 py-4 text-right font-sans">Stock (Kg)</th>
+                        <th className="px-4 py-4 text-right text-indigo-700 font-sans">Consumo Mensual (Kg)</th>
+                        <th className="px-4 py-4 text-right text-blue-700 rounded-tr-lg font-sans">Meses Disp.</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 bg-white text-sm">
+                      {[...programCrossover.requiredInsumosAgg].sort((a, b) => a.monthsOfStock - b.monthsOfStock).map(item => (
+                        <tr key={item.insumoName} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-5 py-4 font-bold text-gray-900 border-l-[3px] border-l-transparent hover:border-l-indigo-600">
+                            {item.insumoName}
+                          </td>
+                          <td className="px-4 py-4 text-right font-medium text-gray-800">
+                            {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}
+                          </td>
+                          <td className="px-4 py-4 text-right font-bold text-indigo-700 bg-indigo-50/30">
+                            {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.monthlyRequiredKg)}
+                          </td>
+                          <td className="px-4 py-4 text-right">
+                            {item.monthsOfStock === Infinity ? (
+                              <span className="text-xs font-bold text-gray-400">0 Consumo</span>
+                            ) : (
+                              <span className={`font-sans font-bold px-2.5 py-1.5 rounded text-[13px] tracking-wide ${item.monthsOfStock < 0.5 ? 'bg-red-100 text-red-800' : item.monthsOfStock < 1 ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800'}`}>
+                                {Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(item.monthsOfStock)} m
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
