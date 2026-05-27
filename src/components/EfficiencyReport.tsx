@@ -18,6 +18,7 @@ export function EfficiencyReport() {
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
   const [selectedDate, setSelectedDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
   const [frequency, setFrequency] = useState<Frequency>('monthly');
+  const [hasInitializedDaily, setHasInitializedDaily] = useState(false);
 
   const filteredLines = availableLines;
 
@@ -68,14 +69,24 @@ export function EfficiencyReport() {
     return Array.from(uniqueDates).sort().reverse();
   }, [reports, shouldShowReport]);
 
-  // Set initial selectedDate to the most recent logical date with data
+  // Reset hasInitializedDaily when not in daily frequency
   useEffect(() => {
-    if (availableDates.length > 0 && frequency === 'daily') {
+    if (frequency !== 'daily') {
+      setHasInitializedDaily(false);
+    }
+  }, [frequency]);
+
+  // Set initial selectedDate to the most recent logical date with data when daily mode is active
+  useEffect(() => {
+    if (availableDates.length > 0 && frequency === 'daily' && !hasInitializedDaily) {
       // Find the latest date that actually has reports
       const latestWithData = reports.length > 0 ? getLogicalDate(reports.find(r => shouldShowReport(r)) || reports[0]) : format(new Date(), 'yyyy-MM-dd');
-      setSelectedDate(latestWithData);
+      if (latestWithData) {
+        setSelectedDate(latestWithData);
+        setHasInitializedDaily(true);
+      }
     }
-  }, [availableDates.length, frequency, reports, shouldShowReport]);
+  }, [availableDates, frequency, reports, shouldShowReport, hasInitializedDaily]);
 
   const filteredReports = useMemo(() => {
     const now = new Date();

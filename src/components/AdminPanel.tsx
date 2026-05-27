@@ -136,6 +136,7 @@ export function AdminPanel() {
   const [newSupervisor, setNewSupervisor] = useState('');
   const [newChemist, setNewChemist] = useState('');
   const [newInsumo, setNewInsumo] = useState('');
+  const [newCompatibleGroup, setNewCompatibleGroup] = useState<string[]>([]);
   
   // Deletion confirmation state
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'brand' | 'line' | 'flavor' | 'size' | 'supervisor' | 'chemist' | 'insumo', id: string | number, step: number } | null>(null);
@@ -2841,7 +2842,7 @@ export function AdminPanel() {
                  </div>
                  
                  {/* List of currently managed insumos so they can be deleted */}
-                 <div className="mb-6">
+                 <div className="mb-6 mb-8">
                    <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-3">Gestión de Insumos</h4>
                    <div className="flex flex-wrap gap-2">
                      {config.insumos?.map(insumo => (
@@ -2874,10 +2875,115 @@ export function AdminPanel() {
                    </div>
                  </div>
 
+                 {/* Insumos Compatibles / Equivalentes */}
+                 <div className="mb-8 p-4 bg-blue-50 border border-blue-100 rounded-xl">
+                   <div className="flex flex-col md:flex-row gap-6">
+                     <div className="flex-1">
+                       <h4 className="text-sm font-bold text-blue-900 mb-2 flex items-center gap-2">
+                         <Link2 className="w-4 h-4" /> 
+                         Grupos de Insumos Equivalentes
+                       </h4>
+                       <p className="text-xs text-blue-700 mb-4 max-w-lg">
+                         Cree grupos de insumos que se pueden usar de forma intercambiable en las fórmulas (ej. Azúcar y Azúcar Refinada). El sistema sumará su stock cuando calcule requerimientos y disponibilidad.
+                       </p>
+                       
+                       <div className="space-y-2 mb-4">
+                         {Object.entries(config.compatibleInsumoGroups || {}).map(([groupId, group]) => {
+                           const groupArray = group as string[];
+                           return (
+                           <div key={groupId} className="flex items-center justify-between bg-white px-3 py-2 border border-blue-200 rounded-lg shadow-sm">
+                             <div className="flex flex-wrap gap-1.5 items-center">
+                               {groupArray.map((item, i) => (
+                                 <span key={item} className="flex items-center text-xs font-semibold text-blue-800 bg-blue-100 px-2 py-0.5 rounded">
+                                   {item}
+                                   {i < groupArray.length - 1 && <span className="mx-1 text-blue-400">/</span>}
+                                 </span>
+                               ))}
+                             </div>
+                             <button
+                               onClick={() => {
+                                 const updatedGroups = { ...(config.compatibleInsumoGroups || {}) };
+                                 delete updatedGroups[groupId];
+                                 setConfig({
+                                   ...config,
+                                   compatibleInsumoGroups: updatedGroups
+                                 });
+                               }}
+                               className="text-blue-400 hover:text-red-500 p-1 rounded transition-colors ml-2"
+                               title="Eliminar grupo"
+                             >
+                               <Trash2 className="w-4 h-4" />
+                             </button>
+                           </div>
+                         )})}
+                         {(!config.compatibleInsumoGroups || Object.keys(config.compatibleInsumoGroups).length === 0) && (
+                           <div className="text-xs text-blue-600/70 italic bg-white/50 px-3 py-2 rounded border border-blue-200/50">
+                             No hay grupos de insumos equivalentes creados.
+                           </div>
+                         )}
+                       </div>
+                     </div>
+                     <div className="flex-1 md:max-w-sm bg-white p-4 rounded-lg border border-blue-100 shadow-sm">
+                       <h5 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-3">Nuevo Grupo de Equivalencia</h5>
+                       <div className="space-y-3">
+                         <div className="max-h-[160px] overflow-y-auto border border-gray-200 rounded p-2 bg-gray-50 space-y-1">
+                           {config.insumos?.map(insumo => {
+                             const isChecked = newCompatibleGroup.includes(insumo);
+                             return (
+                               <label key={insumo} className={`flex items-center gap-2 p-1.5 rounded cursor-pointer transition-colors ${isChecked ? 'bg-blue-50 text-blue-800 font-medium' : 'hover:bg-gray-100 text-gray-600'}`}>
+                                 <input
+                                   type="checkbox"
+                                   className="rounded text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                                   checked={isChecked}
+                                   onChange={(e) => {
+                                     if (e.target.checked) {
+                                       setNewCompatibleGroup([...newCompatibleGroup, insumo]);
+                                     } else {
+                                       setNewCompatibleGroup(newCompatibleGroup.filter(i => i !== insumo));
+                                     }
+                                   }}
+                                 />
+                                 <span className="text-xs">{insumo}</span>
+                               </label>
+                             );
+                           })}
+                         </div>
+                         <button
+                           onClick={() => {
+                             if (newCompatibleGroup.length >= 2) {
+                               const groupId = newCompatibleGroup.join('-');
+                               const updatedGroups = { ...(config.compatibleInsumoGroups || {}) };
+                               updatedGroups[groupId] = [...newCompatibleGroup];
+                               setConfig({
+                                 ...config,
+                                 compatibleInsumoGroups: updatedGroups
+                               });
+                               setNewCompatibleGroup([]);
+                             }
+                           }}
+                           disabled={newCompatibleGroup.length < 2}
+                           className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded shadow-sm transition-colors uppercase tracking-wide"
+                         >
+                           <Plus className="w-3.5 h-3.5" /> Guardar Grupo ({newCompatibleGroup.length})
+                         </button>
+                       </div>
+                     </div>
+                   </div>
+                 </div>
+
                  <div className="space-y-8">
                    {config.brands.map(brand => {
                      const brandFlavors = getFlavorsForBrand(brand).filter(sabor => !(config.saboresSinJarabe || SABORES_SIN_JARABE).includes(sabor));
                      if (brandFlavors.length === 0) return null;
+
+                     const visibleInsumos = config.insumos?.filter(insumo => {
+                       if (!config.compatibleInsumoGroups) return true;
+                       for (const group of (Object.values(config.compatibleInsumoGroups) as string[][])) {
+                         if (group.indexOf(insumo) > 0) return false;
+                       }
+                       return true;
+                     }) || [];
+
                      return (
                        <div key={brand} className="space-y-3">
                           <h4 className="font-bold text-gray-700 flex items-center gap-2">
@@ -2897,10 +3003,18 @@ export function AdminPanel() {
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-200 bg-white">
-                                {config.insumos?.map(insumo => (
+                                {visibleInsumos.map(insumo => {
+                                  // Determine display name
+                                  let displayName = insumo;
+                                  if (config.compatibleInsumoGroups) {
+                                    const group = (Object.values(config.compatibleInsumoGroups) as string[][]).find(g => g[0] === insumo);
+                                    if (group) displayName = group.join(' / ');
+                                  }
+
+                                  return (
                                   <tr key={insumo} className="hover:bg-gray-50">
                                     <td className="px-3 py-1.5 font-medium text-gray-800 border-r border-gray-200 sticky left-0 bg-white z-10 truncate shadow-[1px_0_0_0_#e5e7eb]">
-                                      {insumo}
+                                      {displayName}
                                     </td>
                                     {brandFlavors.map(sabor => {
                                       const val = config.insumosMatrix?.[brand]?.[sabor]?.[insumo] || 0;
@@ -2917,18 +3031,34 @@ export function AdminPanel() {
                                               const currentMatrix = config.insumosMatrix || {};
                                               const brandData = currentMatrix[brand] || {};
                                               const saborData = brandData[sabor] || {};
-                                              setConfig({
-                                                ...config,
-                                                insumosMatrix: {
-                                                  ...currentMatrix,
-                                                  [brand]: {
-                                                    ...brandData,
-                                                    [sabor]: {
-                                                      ...saborData,
-                                                      [insumo]: newVal
-                                                    }
+                                              
+                                              // Set the new value for this insumo
+                                              let updatedMatrix = {
+                                                ...currentMatrix,
+                                                [brand]: {
+                                                  ...brandData,
+                                                  [sabor]: {
+                                                    ...saborData,
+                                                    [insumo]: newVal
                                                   }
                                                 }
+                                              };
+
+                                              // If this is part of a compatible group, also mirror the value to other members for data consistency
+                                              if (config.compatibleInsumoGroups) {
+                                                const group = (Object.values(config.compatibleInsumoGroups) as string[][]).find(g => g.includes(insumo));
+                                                if (group) {
+                                                  group.forEach(member => {
+                                                    if (member !== insumo) {
+                                                      updatedMatrix[brand][sabor][member] = newVal;
+                                                    }
+                                                  });
+                                                }
+                                              }
+
+                                              setConfig({
+                                                ...config,
+                                                insumosMatrix: updatedMatrix
                                               });
                                             }}
                                             className="w-full h-full min-h-[32px] text-center border-none bg-transparent hover:bg-gray-50 focus:ring-1 focus:ring-inset focus:ring-indigo-500 focus:bg-white transition-colors"
@@ -2937,7 +3067,7 @@ export function AdminPanel() {
                                       )
                                     })}
                                   </tr>
-                                ))}
+                                )})}
                               </tbody>
                             </table>
                           </div>

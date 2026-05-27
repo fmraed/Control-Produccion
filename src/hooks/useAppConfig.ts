@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, SABORES_SIN_JARABE, CO2_VOLUMES, WASTE_WEIGHTS, DEFAULT_INSUMOS } from '../constants';
@@ -57,6 +57,7 @@ interface AppConfig {
   syrupFormulas?: Record<string, Record<string, { liters: number; emulsion: number }>>;
   insumos?: string[];
   insumosMatrix?: Record<string, Record<string, Record<string, number>>>;
+  compatibleInsumoGroups?: Record<string, string[]>;
 }
 
 export function useAppConfig() {
@@ -106,6 +107,7 @@ export function useAppConfig() {
           syrupFormulas: data.syrupFormulas || {},
           insumos: data.insumos || DEFAULT_INSUMOS,
           insumosMatrix: data.insumosMatrix || {},
+          compatibleInsumoGroups: data.compatibleInsumoGroups || {},
           co2Volumes: (() => {
             const defaultVols = { ...CO2_VOLUMES };
             if (data.co2Volumes) {
@@ -238,7 +240,7 @@ export function useAppConfig() {
     });
   }, [config, availableBrands, availableSizes]);
 
-  const getFilteredFlavors = (brand?: string, size?: number, includeExternal: boolean = true) => {
+  const getFilteredFlavors = useCallback((brand?: string, size?: number, includeExternal: boolean = true) => {
     let filtered = availableFlavors;
     
     // Triple filter (Brand + Size -> Flavors)
@@ -281,9 +283,9 @@ export function useAppConfig() {
     }
     
     return filtered;
-  };
+  }, [availableFlavors, config?.activeProducts, config?.brandFlavorCombinations, config?.externalProducts, config?.enabledFlavors]);
 
-  const getFilteredSizes = (linea?: string) => {
+  const getFilteredSizes = useCallback((linea?: string) => {
     let filtered = availableSizes;
     
     if (linea && config?.lineSizeCombinations?.[linea]) {
@@ -294,9 +296,9 @@ export function useAppConfig() {
     }
     
     return filtered;
-  };
+  }, [availableSizes, config?.lineSizeCombinations]);
 
-  const shouldShowReport = (report: any, forceShow?: boolean) => {
+  const shouldShowReport = useCallback((report: any, forceShow?: boolean) => {
     if (forceShow) return true;
     
     if (!config?.historicalSettings) return true;
@@ -318,7 +320,7 @@ export function useAppConfig() {
     }
     
     return false;
-  };
+  }, [config?.historicalSettings]);
 
   return { 
     config, 

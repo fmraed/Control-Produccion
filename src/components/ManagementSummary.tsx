@@ -869,6 +869,10 @@ export function ManagementSummary() {
     let transformacionesNoConsecutivas = 0;
     let cambiosSabor = 0;
 
+    const arranquesPorLinea: Record<string, number> = {};
+    let totalArranquesLinea = 0;
+    const allReportsWithTimes: Array<{ report: ProductionReport; times: { start: Date; end: Date }; line: string }> = [];
+
     Object.keys(lineReports).forEach(lKey => {
       // Keep only valid production reports with positive sizes and populated brands/flavors
       const validLineSorted = lineReports[lKey].filter(r => {
@@ -893,6 +897,31 @@ export function ManagementSummary() {
         if (crA !== crB) return crA.localeCompare(crB);
         return (a.report.id || '').localeCompare(b.report.id || '');
       });
+
+      // Add to merged list for factory calculations
+      withTimes.forEach(item => {
+        allReportsWithTimes.push({
+          report: item.report,
+          times: item.times,
+          line: lKey
+        });
+      });
+
+      // Calculate line startups
+      let lineStartups = 0;
+      if (withTimes.length > 0) {
+        lineStartups = 1; // El primer reporte del período cuenta como arranque de la línea
+        for (let j = 1; j < withTimes.length; j++) {
+          const prev = withTimes[j - 1];
+          const curr = withTimes[j];
+          const gap = differenceInMinutes(curr.times.start, prev.times.end);
+          if (gap > 60) { // Parado por más de 1 hora
+            lineStartups++;
+          }
+        }
+      }
+      arranquesPorLinea[lKey] = lineStartups;
+      totalArranquesLinea += lineStartups;
 
       for (let i = 1; i < withTimes.length; i++) {
         const prev = withTimes[i - 1];
@@ -926,6 +955,33 @@ export function ManagementSummary() {
       }
     });
 
+    // Calculate overall factory startups
+    allReportsWithTimes.sort((a, b) => {
+      const timeDiff = a.times.start.getTime() - b.times.start.getTime();
+      if (timeDiff !== 0) return timeDiff;
+      const crA = a.report.createdAt || '';
+      const crB = b.report.createdAt || '';
+      if (crA !== crB) return crA.localeCompare(crB);
+      return (a.report.id || '').localeCompare(b.report.id || '');
+    });
+
+    let arranquesFabrica = 0;
+    if (allReportsWithTimes.length > 0) {
+      arranquesFabrica = 1; // Empezar el lote inicial de reportes cuenta como arranque de fábrica
+      let maxEndTime = allReportsWithTimes[0].times.end;
+
+      for (let i = 1; i < allReportsWithTimes.length; i++) {
+        const curr = allReportsWithTimes[i];
+        const gap = differenceInMinutes(curr.times.start, maxEndTime);
+        if (gap > 720) { // Más de 12 horas de inactividad de toda la fábrica (ej. fin de semana)
+          arranquesFabrica++;
+        }
+        if (curr.times.end.getTime() > maxEndTime.getTime()) {
+          maxEndTime = curr.times.end;
+        }
+      }
+    }
+
     const totalTransformaciones = transformacionesConsecutivas + transformacionesNoConsecutivas;
 
     return {
@@ -951,7 +1007,10 @@ export function ManagementSummary() {
         consecutive: transformacionesConsecutivas,
         nonConsecutive: transformacionesNoConsecutivas,
         total: totalTransformaciones,
-        flavorChanges: cambiosSabor
+        flavorChanges: cambiosSabor,
+        factoryStartups: arranquesFabrica,
+        lineStartupsTotal: totalArranquesLinea,
+        lineStartupsBreakdown: arranquesPorLinea
       },
       waste: {
         totalScrapSoplado,
@@ -1573,7 +1632,7 @@ export function ManagementSummary() {
               </div>
 
               {/* Cambios de Sabor */}
-              <div>
+              <div className="pb-4 border-b border-gray-100">
                 <div className="flex justify-between items-baseline">
                   <div className="flex flex-col">
                     <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Cambios de Sabor</span>
@@ -1582,6 +1641,50 @@ export function ManagementSummary() {
                   <span className="text-3xl font-black text-blue-600">
                     {stats.transformations?.flavorChanges ?? 0}
                   </span>
+                </div>
+              </div>
+
+              {/* Arranques de Línea */}
+              <div>
+                <div className="flex justify-between items-baseline mb-3">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Arranques de línea y planta</span>
+                    <span className="text-xs text-gray-400 font-medium">Puestas en marcha de líneas de producción</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div className="bg-amber-50/50 p-2.5 rounded-xl border border-amber-100/70 shadow-sm">
+                    <span className="block text-[8px] font-black text-amber-700 uppercase tracking-tight">Arranque de Fábrica</span>
+                    <div className="flex items-baseline gap-1 mt-1">
+                      <span className="text-xl font-black text-amber-800">{stats.transformations?.factoryStartups ?? 0}</span>
+                      <span className="text-[8px] text-amber-600 font-bold uppercase tracking-widest">Planta</span>
+                    </div>
+                  </div>
+                  <div className="bg-indigo-50/50 p-2.5 rounded-xl border border-indigo-100/70 shadow-sm">
+                    <span className="block text-[8px] font-black text-indigo-700 uppercase tracking-tight">Arranques de Línea</span>
+                    <div className="flex items-baseline gap-1 mt-1">
+                      <span className="text-xl font-black text-indigo-800">{stats.transformations?.lineStartupsTotal ?? 0}</span>
+                      <span className="text-[8px] text-indigo-600 font-bold uppercase tracking-widest">Totales</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Desglose de Arranques por Línea */}
+                <div className="bg-gray-50 rounded-xl p-3 border border-gray-100 space-y-2">
+                  <span className="block text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Desglose de Arranques</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    {availableLines.map(line => {
+                      const normLine = line.replace(/\D/g, '') || line.toLowerCase().trim();
+                      const count = stats.transformations?.lineStartupsBreakdown?.[normLine] ?? 0;
+                      return (
+                        <div key={line} className="bg-white p-2 rounded-lg border border-gray-100 flex flex-col items-center justify-center shadow-sm">
+                          <span className="text-[9px] font-bold text-gray-500">{line}</span>
+                          <span className="text-sm font-black text-gray-800 mt-1">{count}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>

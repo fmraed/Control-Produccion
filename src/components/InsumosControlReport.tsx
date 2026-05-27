@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAppConfig } from '../hooks/useAppConfig';
 import { collection, query, where, onSnapshot, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -207,8 +207,8 @@ export function InsumosControlReport() {
     }));
   };
 
-  // Helper to read stock of an insumo
-  const getInsumoStock = (insumoName: string): number => {
+  // Helper to read raw stock of an insumo (without equivalence)
+  const getRawInsumoStock = useCallback((insumoName: string): number => {
     if (simulationMode) {
       return simulatedStocks[insumoName] || 0;
     }
@@ -222,7 +222,27 @@ export function InsumosControlReport() {
       if (match) return match.stock_almacen;
     }
     return 0; // fallback if no code / no match
-  };
+  }, [simulationMode, simulatedStocks, insumoMappings, stockData]);
+
+  // Helper to read effective stock considering equivalent groups
+  const getEffectiveInsumoStock = useCallback((insumoName: string): number => {
+    const rawStock = getRawInsumoStock(insumoName);
+    
+    // Check if it belongs to a compatible group
+    if (config?.compatibleInsumoGroups) {
+      const groups = Object.values(config.compatibleInsumoGroups) as string[][];
+      const group = groups.find(g => g.includes(insumoName));
+      if (group) {
+        // Sum stock for all members in the group
+        let total = 0;
+        group.forEach((member: string) => {
+          total += getRawInsumoStock(member);
+        });
+        return total;
+      }
+    }
+    return rawStock;
+  }, [config?.compatibleInsumoGroups, getRawInsumoStock]);
 
   // 1. Calculations for Tab 1: Capacity estimation
   const capacityResults = useMemo(() => {
@@ -248,7 +268,7 @@ export function InsumosControlReport() {
 
         requiredInsumos.forEach(insumoName => {
           const kgPerUnit = matrixObj[insumoName];
-          const availableStock = getInsumoStock(insumoName);
+          const availableStock = getEffectiveInsumoStock(insumoName);
 
           const possibleUnits = Math.floor(availableStock / kgPerUnit);
           if (possibleUnits < maxUnits) {
@@ -279,7 +299,7 @@ export function InsumosControlReport() {
     });
 
     return finalResults.sort((a, b) => b.totalLitersBeverage - a.totalLitersBeverage);
-  }, [config, insumoMappings, stockData, selectedBrand, simulatedStocks, simulationMode]);
+  }, [config, insumoMappings, stockData, selectedBrand, simulatedStocks, simulationMode, getEffectiveInsumoStock]);
 
   // 2. Calculations for Tab 2: Program Crossover Check
   const programCrossover = useMemo(() => {
@@ -337,16 +357,39 @@ export function InsumosControlReport() {
       });
     });
 
-    // Cross-check requirements with stocks
-    let statusOk = true;
-    const itemsList = Object.keys(insumosRequiredSum).map(insumo => {
+    // Aggregate requirements by compatible groups to avoid double counting stock
+    const groupedRequirements: Record<string, number> = {};
+    const groupNameMap: Record<string, string> = {}; // Map original insumo -> Group Display Name
+
+    Object.keys(insumosRequiredSum).forEach(insumo => {
       const required = insumosRequiredSum[insumo];
-      const stock = getInsumoStock(insumo);
+      
+      let groupKey = insumo;
+      if (config?.compatibleInsumoGroups) {
+        const groups = Object.values(config.compatibleInsumoGroups) as string[][];
+        const group = groups.find(g => g.includes(insumo));
+        if (group) {
+          groupKey = group.join(' / ');
+        }
+      }
+      groupNameMap[insumo] = groupKey;
+      groupedRequirements[groupKey] = (groupedRequirements[groupKey] || 0) + required;
+    });
+
+    // Cross-check requirements with stocks at the group level
+    let statusOk = true;
+    const itemsList = Object.keys(groupedRequirements).map(groupKey => {
+      const required = groupedRequirements[groupKey];
+      
+      // We can just query effective stock using the first member of the group (or the insumo itself if no group)
+      const representativeInsumo = groupKey.split(' / ')[0];
+      const stock = getEffectiveInsumoStock(representativeInsumo);
+      
       const isMet = stock >= required;
       if (!isMet && required > 0) statusOk = false;
 
       return {
-        insumoName: insumo,
+        insumoName: groupKey, // Show the group label
         requiredKg: required,
         stockKg: stock,
         isMet,
@@ -359,7 +402,7 @@ export function InsumosControlReport() {
       programSummary: listProductsAnalyzed,
       statusOk
     };
-  }, [config, plans, insumoMappings, stockData, simulatedStocks, simulationMode]);
+  }, [config, plans, insumoMappings, stockData, simulatedStocks, simulationMode, getEffectiveInsumoStock]);
 
 
   if (loading && Object.keys(simulatedStocks).length === 0) {
@@ -527,7 +570,7 @@ export function InsumosControlReport() {
 
             <div className="space-y-4 max-h-[480px] overflow-y-auto pr-1">
               {config?.insumos?.map((insumo: string) => {
-                const stockVal = getInsumoStock(insumo);
+                const stockVal = getRawInsumoStock(insumo);
                 const sqlCode = insumoMappings[insumo] || 'S/M';
                 
                 return (
