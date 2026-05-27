@@ -51,6 +51,7 @@ export function InsumosControlReport() {
 
   // Filter
   const [selectedBrand, setSelectedBrand] = useState<string>('all');
+  const [excludeAzucar, setExcludeAzucar] = useState<boolean>(false);
 
   // Simulation / Local Stock overrides State
   const [simulationMode, setSimulationMode] = useState(false);
@@ -257,8 +258,12 @@ export function InsumosControlReport() {
       
       brandFlavors.forEach(sabor => {
         const matrixObj = config.insumosMatrix?.[brand]?.[sabor] || {};
-        const requiredInsumos = Object.keys(matrixObj).filter(i => matrixObj[i] > 0);
+        let requiredInsumos = Object.keys(matrixObj).filter(i => matrixObj[i] > 0);
         
+        if (excludeAzucar) {
+           requiredInsumos = requiredInsumos.filter(i => !i.toLowerCase().includes('azúcar') && !i.toLowerCase().includes('azucar'));
+        }
+
         if (requiredInsumos.length === 0) return; // Parameters not set up for this brand flavor
 
         let maxUnits = Infinity;
@@ -276,6 +281,8 @@ export function InsumosControlReport() {
             limitingInsumo = insumoName;
             stockOfLimiting = availableStock;
             reqOfLimiting = kgPerUnit;
+          } else if (possibleUnits === maxUnits && maxUnits < Infinity) {
+            limitingInsumo += ` / ${insumoName}`;
           }
         });
 
@@ -299,7 +306,7 @@ export function InsumosControlReport() {
     });
 
     return finalResults.sort((a, b) => b.totalLitersBeverage - a.totalLitersBeverage);
-  }, [config, insumoMappings, stockData, selectedBrand, simulatedStocks, simulationMode, getEffectiveInsumoStock]);
+  }, [config, insumoMappings, stockData, selectedBrand, simulatedStocks, simulationMode, getEffectiveInsumoStock, excludeAzucar]);
 
   // 2. Calculations for Tab 2: Program Crossover Check
   const programCrossover = useMemo(() => {
@@ -633,7 +640,16 @@ export function InsumosControlReport() {
                     <h3 className="text-lg font-bold text-gray-800">Proyección de Capacidad por Sabor</h3>
                     <p className="text-xs text-gray-500">Volumen máximo teorico de elaboración a parter de existencias e insumo limitante</p>
                   </div>
-                  <div>
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <label className="flex items-center gap-2 px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors shadow-sm">
+                      <input 
+                        type="checkbox" 
+                        checked={excludeAzucar}
+                        onChange={(e) => setExcludeAzucar(e.target.checked)}
+                        className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                      />
+                      <span className="text-xs font-bold text-gray-700">Excluir Azúcar</span>
+                    </label>
                     <select
                       title="Filtrar sabores por marca"
                       value={selectedBrand}
@@ -651,19 +667,19 @@ export function InsumosControlReport() {
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200 text-sm">
                     <thead>
-                      <tr className="bg-gray-50 text-gray-500 text-[11px] font-black uppercase tracking-wider">
-                        <th className="px-5 py-3 text-left">Marca / Sabor</th>
-                        <th className="px-4 py-3 text-right">Fórmula</th>
-                        <th className="px-4 py-3 text-right">Unes. Máximas</th>
-                        <th className="px-4 py-3 text-right text-indigo-700">Litros Jarabe</th>
-                        <th className="px-4 py-3 text-right text-emerald-700 bg-emerald-50/30">Litros Bebida</th>
-                        <th className="px-5 py-3 text-left text-orange-700 rounded-tr-lg">Insumo Limitante</th>
+                      <tr className="bg-gray-50 text-gray-600 text-xs font-black uppercase tracking-wider">
+                        <th className="px-5 py-4 text-left font-sans">Marca / Sabor</th>
+                        <th className="px-4 py-4 text-right font-sans">Fórmula</th>
+                        <th className="px-4 py-4 text-right font-sans">Unes. Máximas</th>
+                        <th className="px-4 py-4 text-right text-indigo-700 font-sans">Litros Jarabe</th>
+                        <th className="px-4 py-4 text-right text-emerald-700 bg-emerald-50/30 font-sans">Litros Bebida</th>
+                        <th className="px-5 py-4 text-left text-orange-700 rounded-tr-lg font-sans">Insumo Limitante</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100 bg-white">
+                    <tbody className="divide-y divide-gray-100 bg-white text-sm">
                       {capacityResults.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="px-5 py-12 text-center text-gray-500">
+                          <td colSpan={6} className="px-5 py-12 text-center text-gray-500 font-medium">
                             No hay suficientes datos. Defina su matriz general de insumos y los litros de jarabe por unidad en el Admin Panel.
                           </td>
                         </tr>
@@ -671,39 +687,39 @@ export function InsumosControlReport() {
                         capacityResults.map((r, idx) => (
                           <tr key={`${r.brand}-${r.flavor}`} className="hover:bg-gray-50 transition-colors">
                             <td className="px-5 py-4 border-l-[3px] border-l-transparent hover:border-l-indigo-600">
-                              <span className="text-[10px] font-black text-indigo-600 uppercase block tracking-wider leading-none mb-1">
+                              <span className="text-xs font-black text-indigo-600 uppercase block tracking-wider leading-none mb-1">
                                 {r.brand}
                               </span>
-                              <span className="text-xs font-bold text-gray-900">{r.flavor}</span>
+                              <span className="text-sm font-bold text-gray-900">{r.flavor}</span>
                             </td>
                             <td className="px-4 py-4 text-right">
-                              <span className="text-[11px] text-gray-500 bg-gray-100 font-bold font-mono px-2 py-1 rounded">
+                              <span className="text-xs text-gray-600 bg-gray-100 font-bold px-2.5 py-1.5 rounded">
                                 {config.syrupFormulas?.[r.brand]?.[r.flavor]?.liters || 0} L/Un
                               </span>
                             </td>
-                            <td className="px-4 py-4 text-right font-black text-gray-800">
+                            <td className="px-4 py-4 text-right font-black text-gray-800 text-base">
                               {Intl.NumberFormat('es-AR').format(r.maxUnits)}
                             </td>
-                            <td className="px-4 py-4 text-right font-bold text-indigo-600 font-mono">
+                            <td className="px-4 py-4 text-right font-bold text-indigo-700">
                               {Intl.NumberFormat('es-AR').format(Math.round(r.totalLitersSyrup))} L
                             </td>
-                            <td className="px-4 py-4 text-right font-black text-emerald-600 font-mono bg-emerald-50/10">
+                            <td className="px-4 py-4 text-right font-black text-emerald-700 bg-emerald-50/10">
                               {Intl.NumberFormat('es-AR').format(Math.round(r.totalLitersBeverage))} L
                             </td>
                             <td className="px-5 py-4">
                               {r.limitingInsumo ? (
                                 <div className="space-y-1">
-                                  <div className="font-semibold text-xs text-orange-700 flex items-center gap-1">
-                                    <TrendingDown className="w-3.5 h-3.5" />
+                                  <div className="font-semibold text-sm text-orange-700 flex items-center gap-1.5">
+                                    <TrendingDown className="w-4 h-4" />
                                     <span>{r.limitingInsumo}</span>
                                   </div>
-                                  <div className="text-[10px] text-gray-400 font-medium">
-                                    Stock: <strong>{Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(r.stockOfLimiting)} kg</strong> | 
-                                    Consumo: <strong>{r.reqOfLimiting} kg/Un</strong>
+                                  <div className="text-xs text-gray-500 font-medium tracking-wide">
+                                    Stock: <strong className="text-gray-700">{Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(r.stockOfLimiting)} kg</strong> | 
+                                    Consumo: <strong className="text-gray-700">{r.reqOfLimiting} kg/Un</strong>
                                   </div>
                                 </div>
                               ) : (
-                                <span className="text-emerald-600 italic text-xs font-bold">Sin restricciones (no requiere jarabe)</span>
+                                <span className="text-emerald-600 italic text-sm font-medium">Sin restricciones</span>
                               )}
                             </td>
                           </tr>
@@ -864,7 +880,7 @@ export function InsumosControlReport() {
                       <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-gray-200 text-xs">
                           <thead>
-                            <tr className="bg-gray-50 text-gray-500 font-bold uppercase text-[10px] tracking-wider">
+                            <tr className="bg-gray-50 text-gray-500 font-bold uppercase text-xs tracking-wider">
                               <th className="px-3 py-2 text-left">Día / Turno</th>
                               <th className="px-3 py-2 text-left">Marca &amp; Sabor</th>
                               <th className="px-3 py-2 text-right">Tamaño</th>
@@ -879,10 +895,10 @@ export function InsumosControlReport() {
                                 <tr key={planSummary.id || `${planSummary.date}-${planSummary.linea}-${planSummary.shift}`} className="hover:bg-gray-50/55">
                                   <td className="px-3 py-3 font-medium text-gray-900">
                                     <div className="font-bold capitalize">{format(parseISO(planSummary.date), "dd/MM - EE", { locale: es })}</div>
-                                    <div className="text-[10px] text-gray-500">{planSummary.shift} (L{planSummary.linea})</div>
+                                    <div className="text-xs text-gray-500">{planSummary.shift} (L{planSummary.linea})</div>
                                   </td>
                                   <td className="px-3 py-3">
-                                    <span className="text-[10px] font-bold text-indigo-600 uppercase block tracking-wide">{planSummary.brand}</span>
+                                    <span className="text-xs font-bold text-indigo-600 uppercase block tracking-wide">{planSummary.brand}</span>
                                     <span className="font-semibold text-gray-800">{planSummary.flavor}</span>
                                   </td>
                                   <td className="px-3 py-3 text-right text-gray-600">
