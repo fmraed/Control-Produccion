@@ -57,7 +57,17 @@ export function InsumosControlReport() {
 
   // Simulation / Local Stock overrides State
   const [simulationMode, setSimulationMode] = useState(false);
-  const [simulatedStocks, setSimulatedStocks] = useState<Record<string, number>>({});
+  const [simulatedStocks, setSimulatedStocks] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem('simulated_stocks_cache');
+      if (saved) return JSON.parse(saved);
+    } catch(e) {}
+    return {};
+  });
+
+  useEffect(() => {
+    localStorage.setItem('simulated_stocks_cache', JSON.stringify(simulatedStocks));
+  }, [simulatedStocks]);
 
   const getFlavorsForBrand = (brand: string) => {
     if (!config) return [];
@@ -145,31 +155,42 @@ export function InsumosControlReport() {
   // Prepopulate simulated stock values with realistic defaults if they are empty
   useEffect(() => {
     if (config?.insumos) {
-      const initialSims: Record<string, number> = {};
-      config.insumos.forEach((insumo: string) => {
-        // Find existing simulated or pre-calculated SQL stock if present
-        const mappedCode = insumoMappings[insumo];
-        const sqlMatch = stockData.find(s => {
-          const dbCode = (s.codigo_articulo || '').toString().trim().toLowerCase();
-          const mapCode = (mappedCode || '').toString().trim().toLowerCase();
-          return dbCode === mapCode && mapCode !== '';
-        });
-        
-        if (sqlMatch) {
-          initialSims[insumo] = sqlMatch.stock_almacen;
-        } else {
-          // Defaults:
-          if (insumo.toLowerCase().includes('azúcar')) initialSims[insumo] = 6500;
-          else if (insumo.toLowerCase().includes('benzoato')) initialSims[insumo] = 250;
-          else if (insumo.toLowerCase().includes('sorbato')) initialSims[insumo] = 180;
-          else if (insumo.toLowerCase().includes('citrico') || insumo.toLowerCase().includes('cítrico')) initialSims[insumo] = 400;
-          else if (insumo.toLowerCase().includes('esencia') || insumo.toLowerCase().includes('emulsión')) initialSims[insumo] = 150;
-          else initialSims[insumo] = 800; // General fallbacks
-        }
-      });
       setSimulatedStocks(prev => {
-        const merged = { ...initialSims, ...prev };
-        return merged;
+        const nextState = { ...prev };
+        let stateChanged = false;
+
+        config.insumos.forEach((insumo: string) => {
+          const mappedCode = insumoMappings[insumo];
+          let foundSql = false;
+
+          if (mappedCode) {
+            const sqlMatch = stockData.find(s => {
+              const dbCode = (s.codigo_articulo || '').toString().trim().toLowerCase();
+              const mapCode = (mappedCode || '').toString().trim().toLowerCase();
+              return dbCode === mapCode && mapCode !== '';
+            });
+
+            if (sqlMatch) {
+              if (nextState[insumo] !== sqlMatch.stock_almacen) {
+                nextState[insumo] = sqlMatch.stock_almacen;
+                stateChanged = true;
+              }
+              foundSql = true;
+            }
+          }
+
+          if (!foundSql && nextState[insumo] === undefined) {
+            stateChanged = true;
+            if (insumo.toLowerCase().includes('azúcar')) nextState[insumo] = 6500;
+            else if (insumo.toLowerCase().includes('benzoato')) nextState[insumo] = 250;
+            else if (insumo.toLowerCase().includes('sorbato')) nextState[insumo] = 180;
+            else if (insumo.toLowerCase().includes('citrico') || insumo.toLowerCase().includes('cítrico')) nextState[insumo] = 400;
+            else if (insumo.toLowerCase().includes('esencia') || insumo.toLowerCase().includes('emulsión')) nextState[insumo] = 150;
+            else nextState[insumo] = 800; // General fallbacks
+          }
+        });
+
+        return stateChanged ? nextState : prev;
       });
     }
   }, [config?.insumos, stockData, insumoMappings]);
@@ -359,8 +380,19 @@ export function InsumosControlReport() {
         const totalLitersSyrup = maxUnits * litersPerUnit;
         const totalLitersBeverage = totalLitersSyrup * 6; // Formula given: liters syrup * 6
 
-        const monthlyRequiredForLimiting = monthlyGroupedRequirements[limitingInsumo] || 0;
-        const monthsOfStock = monthlyRequiredForLimiting > 0 ? stockOfLimiting / monthlyRequiredForLimiting : Infinity;
+        // Resolve months of stock. If multiple limiters, take the minimum month.
+        let monthsOfStock = Infinity;
+        if (limitingInsumo) {
+          const limitantes = limitingInsumo.split(' / ');
+          limitantes.forEach(lim => {
+            const req = monthlyGroupedRequirements[lim] || 0;
+            const stock = getEffectiveInsumoStock(lim);
+            if (req > 0) {
+              const months = stock / req;
+              if (months < monthsOfStock) monthsOfStock = months;
+            }
+          });
+        }
 
         finalResults.push({
           brand,
@@ -635,14 +667,19 @@ export function InsumosControlReport() {
                     const reseted: Record<string, number> = {};
                     config?.insumos?.forEach((insumo: string) => {
                       const mappedCode = insumoMappings[insumo];
-                      const sqlMatch = stockData.find(s => {
-                        const dbCode = (s.codigo_articulo || '').toString().trim().toLowerCase();
-                        const mapCode = (mappedCode || '').toString().trim().toLowerCase();
-                        return dbCode === mapCode && mapCode !== '';
-                      });
-                      if (sqlMatch) {
-                        reseted[insumo] = sqlMatch.stock_almacen;
-                      } else {
+                      let foundSql = false;
+                      if (mappedCode) {
+                        const sqlMatch = stockData.find(s => {
+                          const dbCode = (s.codigo_articulo || '').toString().trim().toLowerCase();
+                          const mapCode = (mappedCode || '').toString().trim().toLowerCase();
+                          return dbCode === mapCode && mapCode !== '';
+                        });
+                        if (sqlMatch) {
+                          reseted[insumo] = sqlMatch.stock_almacen;
+                          foundSql = true;
+                        }
+                      }
+                      if (!foundSql) {
                         if (insumo.toLowerCase().includes('azúcar')) reseted[insumo] = 6500;
                         else if (insumo.toLowerCase().includes('benzoato')) reseted[insumo] = 250;
                         else if (insumo.toLowerCase().includes('sorbato')) reseted[insumo] = 180;
@@ -819,8 +856,8 @@ export function InsumosControlReport() {
                             </td>
                             <td className="px-4 py-4 text-right">
                               {r.limitingInsumo && r.monthsOfStock !== Infinity ? (
-                                <span className={`font-mono font-bold px-2 py-1 rounded text-xs ${r.monthsOfStock < 1 ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
-                                  {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(r.monthsOfStock)} m
+                                <span className={`font-sans font-bold px-2.5 py-1.5 rounded text-[13px] tracking-wide ${r.monthsOfStock < 1 ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
+                                  {Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(r.monthsOfStock)} m
                                 </span>
                               ) : (
                                 <span className="text-xs font-bold text-gray-400">Sin req.</span>
