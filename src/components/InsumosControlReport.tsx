@@ -54,8 +54,41 @@ export function InsumosControlReport() {
   const [plansLoading, setPlansLoading] = useState(true);
 
   // Sugar Tab States
-  const [sugarManualUnitsByDay, setSugarManualUnitsByDay] = useState<Record<string, number>>({});
-  const [sugarBagsPerUnit, setSugarBagsPerUnit] = useState<number>(12);
+  const [sugarManualUnitsByDay, setSugarManualUnitsByDay] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem('sugar_manual_units_by_day');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return {};
+  });
+
+  const [sugarIncomingBagsByDay, setSugarIncomingBagsByDay] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem('sugar_incoming_bags_by_day');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return {};
+  });
+
+  const [sugarBagsPerUnit, setSugarBagsPerUnit] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('sugar_bags_per_unit');
+      if (saved) return parseInt(saved) || 12;
+    } catch (e) {}
+    return 12;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('sugar_manual_units_by_day', JSON.stringify(sugarManualUnitsByDay));
+  }, [sugarManualUnitsByDay]);
+
+  useEffect(() => {
+    localStorage.setItem('sugar_incoming_bags_by_day', JSON.stringify(sugarIncomingBagsByDay));
+  }, [sugarIncomingBagsByDay]);
+
+  useEffect(() => {
+    localStorage.setItem('sugar_bags_per_unit', sugarBagsPerUnit.toString());
+  }, [sugarBagsPerUnit]);
 
   // Filter
   const [selectedBrand, setSelectedBrand] = useState<string>('all');
@@ -85,8 +118,18 @@ export function InsumosControlReport() {
     return Array.from({ length: 7 }, (_, i) => addDays(selectedWeek, i));
   }, [selectedWeek]);
 
+  const sugarDays = useMemo(() => {
+    const today = new Date();
+    return Array.from({ length: 14 }, (_, i) => addDays(today, i));
+  }, []);
+
   const startDateStr = format(weekDays[0], 'yyyy-MM-dd');
   const endDateStr = format(weekDays[6], 'yyyy-MM-dd');
+
+  // Filter plans to only those whose scheduled date falls in the selected week range
+  const weeklyPlansOnly = useMemo(() => {
+    return plans.filter(p => p.date >= startDateStr && p.date <= endDateStr);
+  }, [plans, startDateStr, endDateStr]);
 
   const fetchMappings = async () => {
     try {
@@ -202,13 +245,21 @@ export function InsumosControlReport() {
     }
   }, [config?.insumos, stockData, insumoMappings]);
 
-  // Load Firestore production plans for the selected week
+  // Load Firestore production plans for the selected week and 14-day sugar projection (including preparation-shift margins)
   useEffect(() => {
     setPlansLoading(true);
+    const today = new Date();
+    const todayMinusOneStr = format(subDays(today, 1), 'yyyy-MM-dd');
+    const todayPlusSixteenStr = format(addDays(today, 16), 'yyyy-MM-dd');
+    const endPlusTwoStr = format(addDays(parseISO(endDateStr), 2), 'yyyy-MM-dd');
+
+    const calcMinDate = startDateStr < todayMinusOneStr ? startDateStr : todayMinusOneStr;
+    const calcMaxDate = endPlusTwoStr > todayPlusSixteenStr ? endPlusTwoStr : todayPlusSixteenStr;
+
     const qPlans = query(
       collection(db, 'production_plans'),
-      where('date', '>=', startDateStr),
-      where('date', '<=', endDateStr)
+      where('date', '>=', calcMinDate),
+      where('date', '<=', calcMaxDate)
     );
 
     const unsubscribePlans = onSnapshot(qPlans, (snap) => {
@@ -458,7 +509,7 @@ export function InsumosControlReport() {
       return { beverageLiters, syrupLitersNeeded };
     };
 
-    plans.forEach(plan => {
+    weeklyPlansOnly.forEach(plan => {
       const { marca, sabor, tamano, plannedPacks } = plan;
       const { beverageLiters, syrupLitersNeeded } = processCrossoverData(marca, sabor, tamano, plannedPacks, insumosRequiredSum);
       
@@ -536,7 +587,7 @@ export function InsumosControlReport() {
       programSummary: listProductsAnalyzed,
       statusOk
     };
-  }, [config, plans, goals, insumoMappings, stockData, simulatedStocks, simulationMode, getEffectiveInsumoStock]);
+  }, [config, weeklyPlansOnly, goals, insumoMappings, stockData, simulatedStocks, simulationMode, getEffectiveInsumoStock]);
 
   // Sugar Calculation Hooks
   const sugarInsumoName = useMemo(() => {
@@ -553,17 +604,48 @@ export function InsumosControlReport() {
   }, [sugarStockKg]);
 
   const sugarDailyProjectionState = useMemo(() => {
-    let currentStock = sugarStockKg;
-    
-    return weekDays.map((d) => {
+    const getSyrupPrepDateTime = (dateStr: string, shiftStr: string): { dateStr: string; shift: 'Mañana' | 'Tarde' | 'Noche' } => {
+      const date = parseISO(dateStr);
+      let shift: 'Mañana' | 'Tarde' | 'Noche' = 'Mañana';
+      if (shiftStr && (shiftStr.toLowerCase().includes('tarde') || shiftStr.toLowerCase().includes('afternoon'))) {
+        shift = 'Tarde';
+      } else if (shiftStr && (shiftStr.toLowerCase().includes('noche') || shiftStr.toLowerCase().includes('night'))) {
+        shift = 'Noche';
+      }
+      
+      const shiftOrder = ['Mañana', 'Tarde', 'Noche'] as const;
+      const currentIdx = shiftOrder.indexOf(shift);
+      
+      if (currentIdx === 2) {
+        // Noche on D is prepared 2 shifts before -> Mañana of same day D
+        return { dateStr, shift: 'Mañana' };
+      } else if (currentIdx === 1) {
+        // Tarde on D is prepared 2 shifts before -> Noche of previous day D-1
+        const prevDate = subDays(date, 1);
+        return { dateStr: format(prevDate, 'yyyy-MM-dd'), shift: 'Noche' };
+      } else {
+        // Mañana on D is prepared 2 shifts before -> Tarde of previous day D-1
+        const prevDate = subDays(date, 1);
+        return { dateStr: format(prevDate, 'yyyy-MM-dd'), shift: 'Tarde' };
+      }
+    };
+
+    const rawDays = sugarDays.map((d) => {
       const dateStr = format(d, 'yyyy-MM-dd');
       const manualValue = sugarManualUnitsByDay[dateStr];
       const hasManualOverride = manualValue !== undefined && manualValue > 0;
+      const incomingBags = sugarIncomingBagsByDay[dateStr] || 0;
+      const incomingKg = incomingBags * 50;
       
       let consumptionKg = 0;
       let usedUnits = 0;
       let source: 'manual' | 'plan' = 'plan';
-      let dayPlans = plans.filter(p => p.date === dateStr);
+      
+      // Select plans whose syrup preparation falls on this day
+      const dayPlans = plans.filter(p => {
+        const prep = getSyrupPrepDateTime(p.date, p.shift);
+        return prep.dateStr === dateStr;
+      });
       
       if (hasManualOverride) {
         source = 'manual';
@@ -589,12 +671,6 @@ export function InsumosControlReport() {
         });
       }
       
-      const stockBeforeKg = currentStock;
-      const stockAfterKg = currentStock - consumptionKg;
-      
-      // update currentStock for cumulative calculation
-      currentStock = stockAfterKg;
-      
       return {
         date: d,
         dateStr,
@@ -602,15 +678,34 @@ export function InsumosControlReport() {
         usedUnits,
         consumptionKg,
         consumptionBags: consumptionKg / 50,
-        stockBeforeKg,
-        stockAfterKg,
-        stockAfterBags: stockAfterKg / 50,
-        hasPlans: dayPlans.length > 0,
+        incomingBags,
+        incomingKg,
+        dayPlans,
         plansCount: dayPlans.length,
-        dayPlans
+        hasPlans: dayPlans.length > 0,
+        stockBeforeKg: 0,
+        stockAfterKg: 0,
+        stockAfterBags: 0
       };
     });
-  }, [weekDays, plans, config, sugarStockKg, sugarManualUnitsByDay, sugarBagsPerUnit, BOTELLAS_POR_PACK]);
+
+    // Compute cumulative stock dragging day-by-day starting from Day 0 (Today)
+    if (rawDays.length > 0) {
+      // Day 0: starting live stock is sugarStockKg, plus any incoming delivery for Today or manual entry
+      rawDays[0].stockBeforeKg = sugarStockKg + rawDays[0].incomingKg;
+      rawDays[0].stockAfterKg = rawDays[0].stockBeforeKg - rawDays[0].consumptionKg;
+      rawDays[0].stockAfterBags = rawDays[0].stockAfterKg / 50;
+
+      for (let i = 1; i < rawDays.length; i++) {
+        // Stock before is previous day's leftovers, plus any new incoming delivery on this day
+        rawDays[i].stockBeforeKg = rawDays[i - 1].stockAfterKg + rawDays[i].incomingKg;
+        rawDays[i].stockAfterKg = rawDays[i].stockBeforeKg - rawDays[i].consumptionKg;
+        rawDays[i].stockAfterBags = rawDays[i].stockAfterKg / 50;
+      }
+    }
+
+    return rawDays;
+  }, [sugarDays, plans, config, sugarStockKg, sugarManualUnitsByDay, sugarIncomingBagsByDay, sugarBagsPerUnit, BOTELLAS_POR_PACK]);
 
 
   if (loading && Object.keys(simulatedStocks).length === 0) {
@@ -1019,9 +1114,9 @@ export function InsumosControlReport() {
                       <ShoppingBag className="w-5 h-5" />
                     </div>
                     <div>
-                      <span className="text-[11px] font-black text-gray-400 uppercase tracking-wider block">Demanda Planificada</span>
+                      <span className="text-[11px] font-black text-gray-400 uppercase tracking-wider block">Consumo Total 14 Días</span>
                       {(() => {
-                        const totalPlKg = sugarDailyProjectionState.reduce((acc, current) => acc + (current.source === 'plan' ? current.consumptionKg : 0), 0);
+                        const totalPlKg = sugarDailyProjectionState.reduce((acc, current) => acc + current.consumptionKg, 0);
                         return (
                           <>
                             <div className="flex items-baseline gap-1.5 mt-1">
@@ -1074,30 +1169,10 @@ export function InsumosControlReport() {
                     </p>
                   </div>
                   
-                  {/* Calendar controller replica to allow changing week inside the Sugar Tab */}
-                  <div className="flex items-center gap-2 bg-gray-50 p-1.5 rounded-xl border border-gray-200 shadow-sm self-start">
-                    <button
-                      title="Semana anterior"
-                      onClick={() => setSelectedWeek(prev => subDays(prev, 7))}
-                      className="p-1.5 hover:bg-white text-gray-600 rounded-lg transition-all"
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                    </button>
-                    <div className="px-2 text-center min-w-[170px]">
-                      <span className="text-[11px] font-black block text-gray-800 uppercase tracking-tight">
-                        {format(selectedWeek, "dd 'de' MMMM", { locale: es })}
-                      </span>
-                      <span className="text-[9px] font-bold text-gray-400">
-                        al {format(addDays(selectedWeek, 6), "dd 'de' MMMM, yyyy", { locale: es })}
-                      </span>
-                    </div>
-                    <button
-                      title="Siguiente semana"
-                      onClick={() => setSelectedWeek(prev => addDays(prev, 7))}
-                      className="p-1.5 hover:bg-white text-gray-600 rounded-lg transition-all"
-                    >
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
+                  {/* Rolling 14-days indicator badge */}
+                  <div className="bg-indigo-50 border border-indigo-100 px-4 py-2 rounded-xl text-indigo-800 text-xs font-black uppercase flex items-center gap-2 shadow-sm self-start">
+                    <Calendar className="w-4 h-4 text-indigo-600" />
+                    <span>Desde {format(sugarDailyProjectionState[0].date, "dd/MM/yyyy")} al {format(sugarDailyProjectionState[sugarDailyProjectionState.length - 1].date, "dd/MM/yyyy")} ({sugarDailyProjectionState.length} Días)</span>
                   </div>
                 </div>
 
@@ -1105,11 +1180,12 @@ export function InsumosControlReport() {
                   <table className="min-w-full divide-y divide-gray-200 text-sm">
                     <thead>
                       <tr className="bg-gray-50 text-gray-600 text-[11px] font-black uppercase tracking-wider">
-                        <th className="px-4 py-4 text-left font-sans w-1/5">Día / Fecha</th>
-                        <th className="px-4 py-4 text-center font-sans w-1/4">Unidades a Producir</th>
-                        <th className="px-4 py-4 text-center font-sans w-1/6">Origen</th>
-                        <th className="px-4 py-4 text-right font-sans w-1/5">Consumo Previsto</th>
-                        <th className="px-4 py-4 text-right font-sans rounded-tr-lg w-1/4">Stock que Quedaría</th>
+                        <th className="px-4 py-4 text-left font-sans w-[15%]">Día / Fecha</th>
+                        <th className="px-4 py-4 text-center font-sans w-[22%]">Unidades a Producir</th>
+                        <th className="px-4 py-4 text-center font-sans w-[10%]">Origen</th>
+                        <th className="px-4 py-4 text-center font-sans w-[18%] text-emerald-800 font-extrabold bg-emerald-50/50">+ Cargar Ingreso (Bolsas)</th>
+                        <th className="px-4 py-4 text-right font-sans w-[15%]">Consumo Previsto</th>
+                        <th className="px-4 py-4 text-right font-sans rounded-tr-lg w-[20%]">Stock que Quedaría</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 bg-white text-sm">
@@ -1203,7 +1279,7 @@ export function InsumosControlReport() {
                                 </span>
                               ) : row.hasPlans ? (
                                 <span 
-                                  title={row.dayPlans.map(p => `${p.marca} ${p.sabor} (${p.plannedPacks} packs)`).join('\n')}
+                                  title={row.dayPlans.map(p => `Prep para: ${p.marca} ${p.sabor} (${p.plannedPacks} pack) - Producción: ${p.date} (${p.shift})`).join('\n')}
                                   className="inline-flex items-center gap-1 bg-blue-50 text-blue-800 text-[10px] uppercase font-black px-2.5 py-1 rounded-lg cursor-help hover:bg-blue-100 transition-colors"
                                 >
                                   Programa ({row.plansCount})
@@ -1213,6 +1289,52 @@ export function InsumosControlReport() {
                                   Sin Plan
                                 </span>
                               )}
+                            </td>
+
+                            {/* Cargar Ingreso (Bolsas) */}
+                            <td className="px-4 py-4 text-center">
+                              <div className="flex items-center justify-center max-w-[130px] mx-auto">
+                                <div className="relative w-full">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    placeholder="0"
+                                    value={sugarIncomingBagsByDay[row.dateStr] || ''}
+                                    onChange={(e) => {
+                                      const val = e.target.value === '' ? 0 : Math.max(0, parseInt(e.target.value) || 0);
+                                      setSugarIncomingBagsByDay(prev => {
+                                        const copy = { ...prev };
+                                        if (val === 0) {
+                                          delete copy[row.dateStr];
+                                        } else {
+                                          copy[row.dateStr] = val;
+                                        }
+                                        return copy;
+                                      });
+                                    }}
+                                    className={`w-full text-center px-3 py-1.5 text-xs font-black rounded-xl border focus:outline-none focus:ring-2 transition-all ${
+                                      row.incomingBags > 0
+                                        ? 'bg-emerald-50 border-emerald-300 text-emerald-950 focus:ring-emerald-500'
+                                        : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300 placeholder-gray-400 focus:ring-indigo-500'
+                                    }`}
+                                  />
+                                  {row.incomingBags > 0 && (
+                                    <button
+                                      title="Borrar ingreso manual"
+                                      onClick={() => {
+                                        setSugarIncomingBagsByDay(prev => {
+                                          const copy = { ...prev };
+                                          delete copy[row.dateStr];
+                                          return copy;
+                                        });
+                                      }}
+                                      className="absolute right-2 top-1/2 -translate-y-1/2 text-emerald-500 hover:text-emerald-700 text-lg font-black p-0.5 rounded leading-none"
+                                    >
+                                      ×
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
                             </td>
 
                             {/* Consumo Previsto */}
@@ -1264,12 +1386,15 @@ export function InsumosControlReport() {
                   <div className="text-xs text-gray-500 max-w-2xl">
                     <p className="font-bold text-gray-700">💡 Instrucciones de simulación:</p>
                     <p className="mt-1 leading-relaxed">
-                      El sistema calcula automáticamente el consumo de azúcar previsto en base a las fórmulas de jarabe de los productos planificados. Si desea simular o registrar un plan distinto para un día en particular, simplemente ingrese el número estimado de "Unidades a Producir" en la columna correspondiente; el sistema dejará de usar el programa para ese día y computará la dosificación configurada (<span className="font-extrabold">{sugarBagsPerUnit}</span> bolsas por lote). Para revertir, borre el valor ingresado.
+                      El sistema calcula automáticamente el consumo de azúcar previsto en base a las fórmulas de jarabe de los productos planificados. Si desea simular o registrar un plan distinto para un día en particular, simplemente ingrese el número estimado de "Unidades a Producir" en la columna correspondiente; el sistema dejará de usar el programa para ese día y computará la dosificación configurada (<span className="font-extrabold">{sugarBagsPerUnit}</span> bolsas por lote). Para revertir, borre el valor ingresado. También puede registrar ingresos de azúcar cargados en bolsas para prever aumentos del stock disponible.
                     </p>
                   </div>
                   <button
-                    onClick={() => setSugarManualUnitsByDay({})}
-                    disabled={Object.keys(sugarManualUnitsByDay).length === 0}
+                    onClick={() => {
+                      setSugarManualUnitsByDay({});
+                      setSugarIncomingBagsByDay({});
+                    }}
+                    disabled={Object.keys(sugarManualUnitsByDay).length === 0 && Object.keys(sugarIncomingBagsByDay).length === 0}
                     className="px-4 py-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-700 font-bold text-xs uppercase tracking-wide rounded-xl shadow-sm transition-all flex-shrink-0"
                   >
                     Restablecer Todo
