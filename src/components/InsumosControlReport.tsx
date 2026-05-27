@@ -22,7 +22,7 @@ import {
 import { startOfWeek, addDays, format, subDays, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { BOTELLAS_POR_PACK, SABORES_SIN_JARABE } from '../constants';
-import { ProductionPlan } from '../types';
+import { ProductionPlan, MonthlyGoal } from '../types';
 
 interface InsumoStock {
   codigo_articulo: string;
@@ -47,11 +47,13 @@ export function InsumosControlReport() {
   // Weekly selection for calculations
   const [selectedWeek, setSelectedWeek] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [plans, setPlans] = useState<ProductionPlan[]>([]);
+  const [goals, setGoals] = useState<MonthlyGoal[]>([]);
   const [plansLoading, setPlansLoading] = useState(true);
 
   // Filter
   const [selectedBrand, setSelectedBrand] = useState<string>('all');
   const [excludeAzucar, setExcludeAzucar] = useState<boolean>(false);
+  const [excludeJugoLimon, setExcludeJugoLimon] = useState<boolean>(false);
 
   // Simulation / Local Stock overrides State
   const [simulationMode, setSimulationMode] = useState(false);
@@ -181,7 +183,7 @@ export function InsumosControlReport() {
       where('date', '<=', endDateStr)
     );
 
-    const unsubscribe = onSnapshot(qPlans, (snap) => {
+    const unsubscribePlans = onSnapshot(qPlans, (snap) => {
       const dbPlans = snap.docs.map(d => ({ id: d.id, ...d.data() } as ProductionPlan));
       // Only use published plans unless user wants to cross Drafts also, let's include all to be secure, or just Published
       const publishedPlans = dbPlans.filter(p => p.status === 'Published');
@@ -192,7 +194,20 @@ export function InsumosControlReport() {
       setPlansLoading(false);
     });
 
-    return () => unsubscribe();
+    const currentMonth = format(new Date(), 'yyyy-MM');
+    const qGoals = query(
+      collection(db, 'monthly_goals'),
+      where('month', '==', currentMonth)
+    );
+    
+    const unsubscribeGoals = onSnapshot(qGoals, (snap) => {
+      setGoals(snap.docs.map(d => ({ id: d.id, ...d.data() } as MonthlyGoal)));
+    });
+
+    return () => {
+      unsubscribePlans();
+      unsubscribeGoals();
+    };
   }, [startDateStr, endDateStr]);
 
   useEffect(() => {
@@ -249,6 +264,41 @@ export function InsumosControlReport() {
   const capacityResults = useMemo(() => {
     if (!config) return [];
 
+    const monthlyInsumosRequiredSum: Record<string, number> = {};
+    const processMonthlyData = (marca: string, sabor: string, tamano: number, packs: number) => {
+      const botellasPorPack = config?.botellasPorPack?.[tamano] || BOTELLAS_POR_PACK[tamano] || 6;
+      const beverageLiters = packs * botellasPorPack * (tamano / 1000); 
+      const syrupLitersNeeded = beverageLiters / 6;
+      const syrupLitersPerUnit = config.syrupFormulas?.[marca]?.[sabor]?.liters || 0;
+      const unitsRequired = syrupLitersPerUnit > 0 ? (syrupLitersNeeded / syrupLitersPerUnit) : 0;
+      const matrixObj = config.insumosMatrix?.[marca]?.[sabor] || {};
+
+      Object.keys(matrixObj).forEach(insumoName => {
+        const kgPerUnit = matrixObj[insumoName] || 0;
+        if (kgPerUnit > 0) {
+          monthlyInsumosRequiredSum[insumoName] = (monthlyInsumosRequiredSum[insumoName] || 0) + (unitsRequired * kgPerUnit);
+        }
+      });
+    };
+
+    goals.forEach(goal => {
+      if (goal.quantity > 0) {
+        processMonthlyData(goal.marca, goal.sabor, goal.tamano, goal.quantity);
+      }
+    });
+
+    const monthlyGroupedRequirements: Record<string, number> = {};
+    Object.keys(monthlyInsumosRequiredSum).forEach(insumo => {
+      let groupKey = insumo;
+      if (config?.compatibleInsumoGroups) {
+        const groupMatch = (Object.values(config.compatibleInsumoGroups) as string[][]).find(g => g.includes(insumo));
+        if (groupMatch) {
+          groupKey = groupMatch.join(' / ');
+        }
+      }
+      monthlyGroupedRequirements[groupKey] = (monthlyGroupedRequirements[groupKey] || 0) + monthlyInsumosRequiredSum[insumo];
+    });
+
     const finalResults: any[] = [];
 
     config.brands.forEach(brand => {
@@ -263,6 +313,9 @@ export function InsumosControlReport() {
         if (excludeAzucar) {
            requiredInsumos = requiredInsumos.filter(i => !i.toLowerCase().includes('azúcar') && !i.toLowerCase().includes('azucar'));
         }
+        if (excludeJugoLimon) {
+           requiredInsumos = requiredInsumos.filter(i => !i.toLowerCase().includes('jugo de limón') && !i.toLowerCase().includes('jugo de limon'));
+        }
 
         if (requiredInsumos.length === 0) return; // Parameters not set up for this brand flavor
 
@@ -270,19 +323,33 @@ export function InsumosControlReport() {
         let limitingInsumo = '';
         let stockOfLimiting = 0;
         let reqOfLimiting = 0;
+        
+        let evaluatedGroups = new Set<string>();
 
         requiredInsumos.forEach(insumoName => {
+          let groupKey = insumoName;
+          if (config?.compatibleInsumoGroups) {
+             const groupMatch = (Object.values(config.compatibleInsumoGroups) as string[][]).find(g => g.includes(insumoName));
+             if (groupMatch) {
+               groupKey = groupMatch.join(' / ');
+             }
+          }
+          if (evaluatedGroups.has(groupKey)) return; // Skip if we already evaluated this group
+          evaluatedGroups.add(groupKey);
+
           const kgPerUnit = matrixObj[insumoName];
           const availableStock = getEffectiveInsumoStock(insumoName);
 
           const possibleUnits = Math.floor(availableStock / kgPerUnit);
           if (possibleUnits < maxUnits) {
             maxUnits = possibleUnits;
-            limitingInsumo = insumoName;
+            limitingInsumo = groupKey;
             stockOfLimiting = availableStock;
             reqOfLimiting = kgPerUnit;
           } else if (possibleUnits === maxUnits && maxUnits < Infinity) {
-            limitingInsumo += ` / ${insumoName}`;
+            if (!limitingInsumo.includes(groupKey)) {
+              limitingInsumo += ` / ${groupKey}`;
+            }
           }
         });
 
@@ -292,6 +359,9 @@ export function InsumosControlReport() {
         const totalLitersSyrup = maxUnits * litersPerUnit;
         const totalLitersBeverage = totalLitersSyrup * 6; // Formula given: liters syrup * 6
 
+        const monthlyRequiredForLimiting = monthlyGroupedRequirements[limitingInsumo] || 0;
+        const monthsOfStock = monthlyRequiredForLimiting > 0 ? stockOfLimiting / monthlyRequiredForLimiting : Infinity;
+
         finalResults.push({
           brand,
           flavor: sabor,
@@ -300,54 +370,56 @@ export function InsumosControlReport() {
           stockOfLimiting,
           reqOfLimiting,
           totalLitersSyrup,
-          totalLitersBeverage
+          totalLitersBeverage,
+          monthsOfStock
         });
       });
     });
 
     return finalResults.sort((a, b) => b.totalLitersBeverage - a.totalLitersBeverage);
-  }, [config, insumoMappings, stockData, selectedBrand, simulatedStocks, simulationMode, getEffectiveInsumoStock, excludeAzucar]);
+  }, [config, insumoMappings, stockData, selectedBrand, simulatedStocks, simulationMode, getEffectiveInsumoStock, excludeAzucar, excludeJugoLimon]);
 
   // 2. Calculations for Tab 2: Program Crossover Check
   const programCrossover = useMemo(() => {
-    if (!config) return { requiredInsumosAgg: {}, programSummary: [], statusOk: true };
+    if (!config) return { requiredInsumosAgg: {}, monthlyInsumosRequiredSum: {}, programSummary: [], statusOk: true };
 
     const insumosRequiredSum: Record<string, number> = {};
+    const monthlyInsumosRequiredSum: Record<string, number> = {};
     const listProductsAnalyzed: any[] = [];
 
     // Initialize required sums to 0 for all active config insumos so they appear in output
     config.insumos?.forEach((i: string) => {
       insumosRequiredSum[i] = 0;
+      monthlyInsumosRequiredSum[i] = 0;
     });
 
-    plans.forEach(plan => {
-      const { marca, sabor, tamano, plannedPacks } = plan;
-      
-      // Calculate beverage volume
+    // Helper function to extract requirements based on product details and required quantity(packs)
+    const processCrossoverData = (marca: string, sabor: string, tamano: number, packs: number, targetSum: Record<string, number>) => {
       const botellasPorPack = config?.botellasPorPack?.[tamano] || BOTELLAS_POR_PACK[tamano] || 6;
-      const bottlesTotal = plannedPacks * botellasPorPack;
-      const beverageLiters = bottlesTotal * (tamano / 1000); // tamano is in mL, so we divide by 1000
+      const bottlesTotal = packs * botellasPorPack;
+      const beverageLiters = bottlesTotal * (tamano / 1000); 
 
-      // Calculate required syrup liters (liters beverage = liters syrup * 6)
       const syrupLitersNeeded = beverageLiters / 6;
-
-      // Calculate required syrup units based on liters per unit formula
       const syrupLitersPerUnit = config.syrupFormulas?.[marca]?.[sabor]?.liters || 0;
       const unitsRequired = syrupLitersPerUnit > 0 ? (syrupLitersNeeded / syrupLitersPerUnit) : 0;
 
-      // Extract required ingredients for these units
       const matrixObj = config.insumosMatrix?.[marca]?.[sabor] || {};
-      const productInsumoList: { name: string; kg: number }[] = [];
 
       Object.keys(matrixObj).forEach(insumoName => {
         const kgPerUnit = matrixObj[insumoName] || 0;
         if (kgPerUnit > 0) {
           const neededKg = unitsRequired * kgPerUnit;
-          insumosRequiredSum[insumoName] = (insumosRequiredSum[insumoName] || 0) + neededKg;
-          productInsumoList.push({ name: insumoName, kg: neededKg });
+          targetSum[insumoName] = (targetSum[insumoName] || 0) + neededKg;
         }
       });
+      
+      return { beverageLiters, syrupLitersNeeded };
+    };
 
+    plans.forEach(plan => {
+      const { marca, sabor, tamano, plannedPacks } = plan;
+      const { beverageLiters, syrupLitersNeeded } = processCrossoverData(marca, sabor, tamano, plannedPacks, insumosRequiredSum);
+      
       listProductsAnalyzed.push({
         id: plan.id,
         date: plan.date,
@@ -358,18 +430,25 @@ export function InsumosControlReport() {
         size: tamano,
         packs: plannedPacks,
         beverageLiters,
-        syrupLitersNeeded,
-        unitsRequired,
-        productInsumoList
+        syrupLitersNeeded
       });
+    });
+
+    goals.forEach(goal => {
+      const { marca, sabor, tamano, quantity } = goal;
+      if (quantity > 0) {
+        processCrossoverData(marca, sabor, tamano, quantity, monthlyInsumosRequiredSum);
+      }
     });
 
     // Aggregate requirements by compatible groups to avoid double counting stock
     const groupedRequirements: Record<string, number> = {};
+    const monthlyGroupedRequirements: Record<string, number> = {};
     const groupNameMap: Record<string, string> = {}; // Map original insumo -> Group Display Name
 
     Object.keys(insumosRequiredSum).forEach(insumo => {
       const required = insumosRequiredSum[insumo];
+      const monthlyReq = monthlyInsumosRequiredSum[insumo] || 0;
       
       let groupKey = insumo;
       if (config?.compatibleInsumoGroups) {
@@ -381,12 +460,14 @@ export function InsumosControlReport() {
       }
       groupNameMap[insumo] = groupKey;
       groupedRequirements[groupKey] = (groupedRequirements[groupKey] || 0) + required;
+      monthlyGroupedRequirements[groupKey] = (monthlyGroupedRequirements[groupKey] || 0) + monthlyReq;
     });
 
     // Cross-check requirements with stocks at the group level
     let statusOk = true;
     const itemsList = Object.keys(groupedRequirements).map(groupKey => {
       const required = groupedRequirements[groupKey];
+      const monthlyRequired = monthlyGroupedRequirements[groupKey] || 0;
       
       // We can just query effective stock using the first member of the group (or the insumo itself if no group)
       const representativeInsumo = groupKey.split(' / ')[0];
@@ -395,10 +476,14 @@ export function InsumosControlReport() {
       const isMet = stock >= required;
       if (!isMet && required > 0) statusOk = false;
 
+      const monthsOfStock = monthlyRequired > 0 ? (stock / monthlyRequired) : Infinity;
+
       return {
         insumoName: groupKey, // Show the group label
         requiredKg: required,
+        monthlyRequiredKg: monthlyRequired,
         stockKg: stock,
+        monthsOfStock,
         isMet,
         deficit: isMet ? 0 : (required - stock)
       };
@@ -409,7 +494,7 @@ export function InsumosControlReport() {
       programSummary: listProductsAnalyzed,
       statusOk
     };
-  }, [config, plans, insumoMappings, stockData, simulatedStocks, simulationMode, getEffectiveInsumoStock]);
+  }, [config, plans, goals, insumoMappings, stockData, simulatedStocks, simulationMode, getEffectiveInsumoStock]);
 
 
   if (loading && Object.keys(simulatedStocks).length === 0) {
@@ -650,6 +735,15 @@ export function InsumosControlReport() {
                       />
                       <span className="text-xs font-bold text-gray-700">Excluir Azúcar</span>
                     </label>
+                    <label className="flex items-center gap-2 px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors shadow-sm">
+                      <input 
+                        type="checkbox" 
+                        checked={excludeJugoLimon}
+                        onChange={(e) => setExcludeJugoLimon(e.target.checked)}
+                        className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                      />
+                      <span className="text-xs font-bold text-gray-700">Excluir J. de Limón</span>
+                    </label>
                     <select
                       title="Filtrar sabores por marca"
                       value={selectedBrand}
@@ -673,13 +767,14 @@ export function InsumosControlReport() {
                         <th className="px-4 py-4 text-right font-sans">Unes. Máximas</th>
                         <th className="px-4 py-4 text-right text-indigo-700 font-sans">Litros Jarabe</th>
                         <th className="px-4 py-4 text-right text-emerald-700 bg-emerald-50/30 font-sans">Litros Bebida</th>
-                        <th className="px-5 py-4 text-left text-orange-700 rounded-tr-lg font-sans">Insumo Limitante</th>
+                        <th className="px-5 py-4 text-left text-orange-700 font-sans">Insumo Limitante</th>
+                        <th className="px-4 py-4 text-right text-blue-700 rounded-tr-lg font-sans">Meses Disp.</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 bg-white text-sm">
                       {capacityResults.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="px-5 py-12 text-center text-gray-500 font-medium">
+                          <td colSpan={7} className="px-5 py-12 text-center text-gray-500 font-medium">
                             No hay suficientes datos. Defina su matriz general de insumos y los litros de jarabe por unidad en el Admin Panel.
                           </td>
                         </tr>
@@ -720,6 +815,15 @@ export function InsumosControlReport() {
                                 </div>
                               ) : (
                                 <span className="text-emerald-600 italic text-sm font-medium">Sin restricciones</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-4 text-right">
+                              {r.limitingInsumo && r.monthsOfStock !== Infinity ? (
+                                <span className={`font-mono font-bold px-2 py-1 rounded text-xs ${r.monthsOfStock < 1 ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
+                                  {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(r.monthsOfStock)} m
+                                </span>
+                              ) : (
+                                <span className="text-xs font-bold text-gray-400">Sin req.</span>
                               )}
                             </td>
                           </tr>
@@ -813,64 +917,55 @@ export function InsumosControlReport() {
                     <div className="space-y-4">
                       <h4 className="font-bold text-xs text-gray-700 uppercase tracking-widest block">Análisis de Ingredientes para el Plan</h4>
                       
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {programCrossover.requiredInsumosAgg.map(item => {
-                          const percentCovered = item.requiredKg > 0 ? (item.stockKg / item.requiredKg) * 100 : 100;
-                          
-                          return (
-                            <div key={item.insumoName} className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                              <div className="flex justify-between items-start gap-1 mb-2">
-                                <div>
-                                  <span className="font-bold text-xs text-gray-800 block truncate max-w-[200px]" title={item.insumoName}>
-                                    {item.insumoName}
-                                  </span>
-                                  <span className="text-[10px] text-gray-400">
-                                    Requerido: <strong>{Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.requiredKg)} kg</strong>
-                                  </span>
-                                </div>
-
-                                <div className="text-right">
-                                  {item.requiredKg === 0 ? (
-                                    <span className="bg-gray-200 text-gray-600 text-[9px] font-black uppercase px-2 py-0.5 rounded">
-                                      Sin programar
+                      <div className="overflow-x-auto mt-4">
+                        <table className="min-w-full divide-y divide-gray-200">
+                          <thead>
+                            <tr className="bg-slate-50 text-slate-500 font-bold uppercase text-xs tracking-wide">
+                              <th className="px-4 py-3 text-left">Insumo</th>
+                              <th className="px-4 py-3 text-right text-indigo-700">Req. Semanal</th>
+                              <th className="px-4 py-3 text-right">Stock (kg)</th>
+                              <th className="px-4 py-3 text-center">Estado (Semanal)</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100 bg-white text-sm">
+                            {programCrossover.requiredInsumosAgg.map(item => {
+                              const percentCovered = item.requiredKg > 0 ? (item.stockKg / item.requiredKg) * 100 : 100;
+                              
+                              return (
+                                <tr key={item.insumoName} className="hover:bg-slate-50 transition-colors">
+                                  <td className="px-4 py-3">
+                                    <span className="font-bold text-gray-900 block truncate max-w-[200px]" title={item.insumoName}>
+                                      {item.insumoName}
                                     </span>
-                                  ) : item.isMet ? (
-                                    <span className="bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase px-2 py-0.5 rounded flex items-center gap-1">
-                                      <CheckCircle2 className="w-3 h-3 text-emerald-600" /> OK
+                                  </td>
+                                  <td className="px-4 py-3 text-right">
+                                    <span className="font-semibold text-indigo-700">
+                                      {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.requiredKg)}
                                     </span>
-                                  ) : (
-                                    <span className="bg-red-100 text-red-800 text-[9px] font-black uppercase px-2 py-0.5 rounded flex items-center gap-1">
-                                      <TrendingDown className="w-3 h-3 text-red-600 animate-pulse" /> FALTAN {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.deficit)} kg
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div className="space-y-1">
-                                <div className="flex justify-between text-[10px] font-medium text-gray-500">
-                                  <span>Stock: {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)} kg</span>
-                                  {item.requiredKg > 0 && (
-                                    <span>
-                                      {Math.min(100, Math.round(percentCovered))}%
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
-                                  <div 
-                                    className={`h-full rounded-full transition-all duration-300 ${
-                                      item.requiredKg === 0 
-                                        ? 'bg-gray-400' 
-                                        : item.isMet 
-                                          ? 'bg-emerald-500' 
-                                          : 'bg-red-500'
-                                    }`} 
-                                    style={{ width: `${Math.min(100, percentCovered)}%` }} 
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
+                                  </td>
+                                  <td className="px-4 py-3 text-right font-medium text-gray-800">
+                                    {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}
+                                  </td>
+                                  <td className="px-4 py-3 text-center">
+                                    {item.requiredKg === 0 ? (
+                                      <span className="bg-gray-200 text-gray-600 text-[10px] font-black uppercase px-2 py-1 rounded">
+                                        Sin programar
+                                      </span>
+                                    ) : item.isMet ? (
+                                      <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase px-2 py-1 rounded inline-flex items-center gap-1">
+                                        <CheckCircle2 className="w-3 h-3 text-emerald-600" /> OK
+                                      </span>
+                                    ) : (
+                                      <span className="bg-red-100 text-red-800 text-[10px] font-black uppercase px-2 py-1 rounded inline-flex items-center gap-1 leading-tight">
+                                        <TrendingDown className="w-3 h-3 text-red-600" /> Falta {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.deficit)}kg
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
 
