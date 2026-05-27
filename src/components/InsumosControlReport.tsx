@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAppConfig } from '../hooks/useAppConfig';
-import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { 
   RefreshCw, 
@@ -42,6 +42,7 @@ export function InsumosControlReport() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [insumoMappings, setInsumoMappings] = useState<Record<string, string>>({});
+  const [lastUpdatedCached, setLastUpdatedCached] = useState<string | null>(null);
   
   // Weekly selection for calculations
   const [selectedWeek, setSelectedWeek] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
@@ -79,6 +80,24 @@ export function InsumosControlReport() {
     }
   };
 
+  const fetchCachedStock = async () => {
+    try {
+      const cachedRef = doc(db, 'config', 'sql_last_insumos_stock');
+      const docSnap = await getDoc(cachedRef);
+      if (docSnap.exists()) {
+        const cached = docSnap.data();
+        if (cached && Array.isArray(cached.data)) {
+          setStockData(cached.data);
+          if (cached.updatedAt) {
+            setLastUpdatedCached(cached.updatedAt);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Error fetching cached stock:", err);
+    }
+  };
+
   const fetchStock = async () => {
     setRefreshing(true);
     setError(null);
@@ -92,7 +111,21 @@ export function InsumosControlReport() {
       if (!result.success) {
         throw new Error(result.error || result.details || "Error desconocido");
       }
-      setStockData(result.data || []);
+      const fetchedData = result.data || [];
+      setStockData(fetchedData);
+      setSimulationMode(false);
+
+      // Save to Firestore so they are stored as historical/defaults
+      try {
+        const nowStr = new Date().toISOString();
+        await setDoc(doc(db, 'config', 'sql_last_insumos_stock'), {
+          data: fetchedData,
+          updatedAt: nowStr
+        });
+        setLastUpdatedCached(nowStr);
+      } catch (saveErr) {
+        console.error("Error saving cached stock to Firestore:", saveErr);
+      }
     } catch (err: any) {
       console.error("Fetch stock error:", err);
       // If there's a connection error, suggest simulation mode
@@ -113,7 +146,11 @@ export function InsumosControlReport() {
       config.insumos.forEach((insumo: string) => {
         // Find existing simulated or pre-calculated SQL stock if present
         const mappedCode = insumoMappings[insumo];
-        const sqlMatch = stockData.find(s => (s.codigo_articulo || '').toString().trim() === (mappedCode || '').toString().trim());
+        const sqlMatch = stockData.find(s => {
+          const dbCode = (s.codigo_articulo || '').toString().trim().toLowerCase();
+          const mapCode = (mappedCode || '').toString().trim().toLowerCase();
+          return dbCode === mapCode && mapCode !== '';
+        });
         
         if (sqlMatch) {
           initialSims[insumo] = sqlMatch.stock_almacen;
@@ -158,7 +195,9 @@ export function InsumosControlReport() {
   }, [startDateStr, endDateStr]);
 
   useEffect(() => {
-    fetchMappings().then(() => fetchStock());
+    fetchMappings()
+      .then(() => fetchCachedStock())
+      .then(() => fetchStock());
   }, []);
 
   const handleUpdateSimulatedStock = (insumoName: string, value: number) => {
@@ -175,7 +214,11 @@ export function InsumosControlReport() {
     }
     const sqlCode = insumoMappings[insumoName];
     if (sqlCode) {
-      const match = stockData.find(s => (s.codigo_articulo || '').toString().trim() === sqlCode.toString().trim());
+      const match = stockData.find(s => {
+        const dbCode = (s.codigo_articulo || '').toString().trim().toLowerCase();
+        const mapCode = (sqlCode || '').toString().trim().toLowerCase();
+        return dbCode === mapCode && mapCode !== '';
+      });
       if (match) return match.stock_almacen;
     }
     return 0; // fallback if no code / no match
@@ -339,9 +382,20 @@ export function InsumosControlReport() {
             </div>
             <div>
               <h2 className="text-2xl font-black text-gray-900 tracking-tight">Control de Insumos</h2>
-              <p className="text-sm text-gray-500 flex items-center gap-1.5 mt-0.5 font-medium">
+              <p className="text-sm text-gray-500 flex flex-wrap items-center gap-1.5 mt-0.5 font-medium">
                 <Database className="w-4 h-4 text-gray-400" />
-                Módulo de cubicación industrial y proyección de requerimientos
+                <span>Módulo de cubicación industrial y proyección de requerimientos</span>
+                {lastUpdatedCached && (
+                  <span className="text-xs text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-full font-bold ml-2">
+                    Última sincronización SQL: {(() => {
+                      try {
+                        return format(new Date(lastUpdatedCached), "dd/MM/yyyy HH:mm:ss");
+                      } catch (e) {
+                        return lastUpdatedCached;
+                      }
+                    })()}
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -436,9 +490,39 @@ export function InsumosControlReport() {
             </div>
 
             {simulationMode && (
-              <p className="text-[11px] text-amber-700 leading-relaxed mb-4 bg-amber-50 p-2.5 rounded-lg border border-amber-100">
-                Ajuste los valores de stock (Kg) en los campos a continuación para ver cómo se recalculan inmediatamente los limitantes y el programa.
-              </p>
+              <div className="space-y-3 mb-4">
+                <p className="text-[11px] text-amber-700 leading-relaxed bg-amber-50 p-2.5 rounded-lg border border-amber-100">
+                  Ajuste los valores de stock (Kg) en los campos a continuación para ver cómo se recalculan inmediatamente los limitantes y el programa.
+                </p>
+                <button
+                  id="reset-simulation-btn"
+                  onClick={() => {
+                    const reseted: Record<string, number> = {};
+                    config?.insumos?.forEach((insumo: string) => {
+                      const mappedCode = insumoMappings[insumo];
+                      const sqlMatch = stockData.find(s => {
+                        const dbCode = (s.codigo_articulo || '').toString().trim().toLowerCase();
+                        const mapCode = (mappedCode || '').toString().trim().toLowerCase();
+                        return dbCode === mapCode && mapCode !== '';
+                      });
+                      if (sqlMatch) {
+                        reseted[insumo] = sqlMatch.stock_almacen;
+                      } else {
+                        if (insumo.toLowerCase().includes('azúcar')) reseted[insumo] = 6500;
+                        else if (insumo.toLowerCase().includes('benzoato')) reseted[insumo] = 250;
+                        else if (insumo.toLowerCase().includes('sorbato')) reseted[insumo] = 180;
+                        else if (insumo.toLowerCase().includes('citrico') || insumo.toLowerCase().includes('cítrico')) reseted[insumo] = 400;
+                        else if (insumo.toLowerCase().includes('esencia') || insumo.toLowerCase().includes('emulsión')) reseted[insumo] = 150;
+                        else reseted[insumo] = 800;
+                      }
+                    });
+                    setSimulatedStocks(reseted);
+                  }}
+                  className="w-full text-center px-3 py-2 bg-gray-50 hover:bg-gray-100 text-gray-700 hover:text-gray-900 border border-gray-200 rounded-xl text-xs font-bold transition-all uppercase tracking-wider shadow-sm animate-fade-in"
+                >
+                  Restablecer a valores de SQL
+                </button>
+              </div>
             )}
 
             <div className="space-y-4 max-h-[480px] overflow-y-auto pr-1">

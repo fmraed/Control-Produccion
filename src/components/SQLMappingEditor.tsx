@@ -92,11 +92,32 @@ export function SQLMappingEditor() {
     setMessage(null);
     try {
       if (activeTab === 'products') {
-        await setDoc(doc(db, 'config', 'sql_mappings'), productMappings);
+        const cleanedProductMappings: Record<string, string> = {};
+        generatedProductKeys.forEach(key => {
+          if (productMappings[key] !== undefined) {
+            cleanedProductMappings[key] = productMappings[key];
+          }
+        });
+        await setDoc(doc(db, 'config', 'sql_mappings'), cleanedProductMappings);
+        setProductMappings(cleanedProductMappings);
       } else if (activeTab === 'syrups') {
-        await setDoc(doc(db, 'config', 'sql_syrup_mappings'), syrupMappings);
+        const cleanedSyrupMappings: Record<string, string> = {};
+        generatedSyrupKeys.forEach(key => {
+          if (syrupMappings[key] !== undefined) {
+            cleanedSyrupMappings[key] = syrupMappings[key];
+          }
+        });
+        await setDoc(doc(db, 'config', 'sql_syrup_mappings'), cleanedSyrupMappings);
+        setSyrupMappings(cleanedSyrupMappings);
       } else {
-        await setDoc(doc(db, 'config', 'sql_insumo_mappings'), insumoMappings);
+        const cleanedInsumoMappings: Record<string, string> = {};
+        generatedInsumoKeys.forEach(key => {
+          if (insumoMappings[key] !== undefined) {
+            cleanedInsumoMappings[key] = insumoMappings[key];
+          }
+        });
+        await setDoc(doc(db, 'config', 'sql_insumo_mappings'), cleanedInsumoMappings);
+        setInsumoMappings(cleanedInsumoMappings);
       }
       setMessage({ type: 'success', text: `Mapeos de ${activeTab === 'products' ? 'productos' : activeTab === 'syrups' ? 'jarabes' : 'insumos'} guardados.` });
       setTimeout(() => setMessage(null), 3000);
@@ -148,7 +169,7 @@ export function SQLMappingEditor() {
     return config?.insumos || [];
   }, [config?.insumos]);
 
-  if (loading) {
+  if (loading || !config) {
     return (
       <div className="flex justify-center py-8">
         <RefreshCw className="w-6 h-6 text-blue-600 animate-spin" />
