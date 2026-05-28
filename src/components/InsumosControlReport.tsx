@@ -37,7 +37,7 @@ interface InsumoStock {
 
 export function InsumosControlReport() {
   const { config } = useAppConfig();
-  const [activeTab, setActiveTab] = useState<'capacity' | 'insumos' | 'azucar' | 'program'>('capacity');
+  const [activeTab, setActiveTab] = useState<'capacity' | 'insumos' | 'empaque' | 'azucar' | 'program'>('capacity');
   
   // SQL and Firebase data state
   const [stockData, setStockData] = useState<InsumoStock[]>([]);
@@ -130,7 +130,12 @@ export function InsumosControlReport() {
 
   // Filter plans to only those whose scheduled date falls in the selected week range
   const weeklyPlansOnly = useMemo(() => {
-    return plans.filter(p => p.date >= startDateStr && p.date <= endDateStr);
+    return plans.filter(p => {
+      const planDate = parseISO(p.date); // Assuming p.date is YYYY-MM-DD or similar parsable
+      const start = parseISO(startDateStr);
+      const end = parseISO(endDateStr);
+      return planDate >= start && planDate <= end;
+    });
   }, [plans, startDateStr, endDateStr]);
 
   const fetchMappings = async () => {
@@ -387,6 +392,16 @@ export function InsumosControlReport() {
     }
     return false;
   }, [config]);
+
+  const getPackingCategory = useCallback((insumoName: string) => {
+    const lower = insumoName.toLowerCase();
+    if (lower.includes('preforma')) return 'Preformas';
+    if (lower.includes('tapa')) return 'Tapas';
+    if (lower.includes('termo')) return 'Termocontraíble';
+    if (lower.includes('stretch')) return 'Film Stretch';
+    if (lower.includes('etiqueta')) return 'Etiquetas';
+    return 'Otros Empaques';
+  }, []);
 
   // 1. Calculations for Tab 1: Capacity estimation
   const capacityResults = useMemo(() => {
@@ -646,6 +661,13 @@ export function InsumosControlReport() {
     const etiquetasAgg: Record<string, number> = {};
 
     weeklyPlansOnly.forEach(plan => {
+      // Ensure the plan is within the weekly range and not in the past
+      const planDate = parseISO(plan.date);
+      const start = parseISO(startDateStr);
+      const end = parseISO(endDateStr);
+      const today = parseISO(format(new Date(), 'yyyy-MM-dd'));
+      if (planDate < start || planDate > end || planDate < today) return;
+      
       const { marca, sabor, tamano, plannedPacks, linea } = plan;
       const { beverageLiters, syrupLitersNeeded } = processCrossoverData(marca, sabor, tamano, plannedPacks, insumosRequiredSum);
       
@@ -816,7 +838,10 @@ export function InsumosControlReport() {
                                   (config?.tapaConfig || []).some(t => t.name === item.insumoName);
       const isTapaOrLabel = item.insumoName.startsWith('Tapa ') || item.insumoName.startsWith('Etiqueta ') || item.insumoName.startsWith('Tapas ');
       
-      return isIngredient || isConfiguredPackage || (isTapaOrLabel && item.requiredKg > 0);
+      // Check for packaging items that are part of compatiblePackagingGroups
+      const isPartOfCompatiblePackagingGroups = config?.compatiblePackagingGroups && Object.values(config.compatiblePackagingGroups).some(group => group.some(member => item.insumoName.includes(member)));
+
+      return isIngredient || isConfiguredPackage || isPartOfCompatiblePackagingGroups || (isTapaOrLabel && item.requiredKg > 0);
     });
 
     return {
@@ -1052,6 +1077,17 @@ export function InsumosControlReport() {
         >
           <Layers className="w-4 h-4" />
           Control por Insumo
+        </button>
+        <button
+          onClick={() => setActiveTab('empaque')}
+          className={`flex-1 py-3 px-4 text-xs font-black uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 ${
+            activeTab === 'empaque' 
+              ? 'bg-white text-orange-700 shadow-sm' 
+              : 'text-gray-500 hover:text-gray-900'
+          }`}
+        >
+          <ShoppingBag className="w-4 h-4" />
+          Empaque
         </button>
         <button
           onClick={() => setActiveTab('azucar')}
@@ -1741,58 +1777,72 @@ export function InsumosControlReport() {
                   </table>
                 </div>
               </div>
+            </div>
+          )}
 
-              {/* Empaque */}
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 relative">
-                  <div>
-                    <h3 className="text-lg font-bold text-gray-800">Materiales de Empaque</h3>
-                    <p className="text-xs text-gray-500">Analice sus existencias calculando su duración según ritmo mensual</p>
-                  </div>
-                </div>
+          {/* CONTROL POR EMPAQUE TAB */}
+          {activeTab === 'empaque' && (
+            <div className="space-y-6">
+              {/* Empaque Grupos */}
+              {(() => {
+                const items = [...programCrossover.requiredInsumosAgg].filter(item => isEmpaqueItem(item.insumoName));
+                const groups: Record<string, typeof items> = {};
+                items.forEach(item => {
+                  const cat = getPackingCategory(item.insumoName);
+                  if (!groups[cat]) groups[cat] = [];
+                  groups[cat].push(item);
+                });
+                
+                return Object.keys(groups).sort().map(cat => (
+                  <div key={cat} className="bg-white rounded-2xl shadow-sm border border-orange-100 p-6">
+                    <div className="mb-6">
+                       <h3 className="text-lg font-bold text-orange-900">{cat}</h3>
+                    </div>
 
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200 text-sm">
-                    <thead>
-                      <tr className="bg-orange-50 text-orange-900 border-t border-orange-100 text-xs font-black uppercase tracking-wider">
-                        <th className="px-5 py-4 text-left font-sans">Material</th>
-                        <th className="px-4 py-4 text-right font-sans">Stock</th>
-                        <th className="px-4 py-4 text-right text-orange-700 font-sans">Consumo Mensual</th>
-                        <th className="px-4 py-4 text-right text-orange-700 rounded-tr-lg font-sans">Meses Disp.</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100 bg-white text-sm">
-                      {[...programCrossover.requiredInsumosAgg].filter(item => isEmpaqueItem(item.insumoName)).sort((a, b) => a.monthsOfStock - b.monthsOfStock).map(item => {
-                        const lowerName = item.insumoName.toLowerCase();
-                        const isUnit = lowerName.includes('preforma') || lowerName.includes('tapa') || lowerName.includes('etiqueta');
-                        const unitStr = isUnit ? ' u.' : ' kg';
-                        return (
-                          <tr key={item.insumoName} className="hover:bg-orange-50/30 transition-colors">
-                            <td className="px-5 py-4 font-bold text-gray-900 border-l-[3px] border-l-transparent hover:border-l-orange-500">
-                              {item.insumoName}
-                            </td>
-                            <td className="px-4 py-4 text-right font-medium text-gray-800">
-                              {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}{unitStr}
-                            </td>
-                            <td className="px-4 py-4 text-right font-bold text-orange-700 bg-orange-50/50">
-                              {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.monthlyRequiredKg)}{unitStr}
-                            </td>
-                            <td className="px-4 py-4 text-right">
-                              {item.monthsOfStock === Infinity ? (
-                                <span className="text-xs font-bold text-gray-400">0 Consumo</span>
-                              ) : (
-                                <span className={`font-sans font-bold px-2.5 py-1.5 rounded text-[13px] tracking-wide ${item.monthsOfStock < 0.5 ? 'bg-red-100 text-red-800' : item.monthsOfStock < 1 ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}`}>
-                                  {Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(item.monthsOfStock)} m
-                                </span>
-                              )}
-                            </td>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200 text-sm">
+                        <thead>
+                          <tr className="bg-orange-50 text-orange-900 border-t border-orange-100 text-xs font-black uppercase tracking-wider">
+                            <th className="px-5 py-4 text-left font-sans">Material</th>
+                            <th className="px-4 py-4 text-right font-sans">Stock</th>
+                            <th className="px-4 py-4 text-right text-orange-700 font-sans">Consumo Mensual</th>
+                            <th className="px-4 py-4 text-right text-orange-700 rounded-tr-lg font-sans">Meses Disp.</th>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 bg-white text-sm">
+                          {groups[cat].sort((a,b) => a.monthsOfStock - b.monthsOfStock).map(item => {
+                            const lowerName = item.insumoName.toLowerCase();
+                            const isUnit = lowerName.includes('preforma') || lowerName.includes('tapa') || lowerName.includes('etiqueta');
+                            const unitStr = isUnit ? ' u.' : ' kg';
+                            return (
+                              <tr key={item.insumoName} className="hover:bg-orange-50/30 transition-colors">
+                                <td className="px-5 py-4 font-bold text-gray-900 border-l-[3px] border-l-transparent hover:border-l-orange-500">
+                                  {item.insumoName}
+                                </td>
+                                <td className="px-4 py-4 text-right font-medium text-gray-800">
+                                  {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}{unitStr}
+                                </td>
+                                <td className="px-4 py-4 text-right font-bold text-orange-700 bg-orange-50/50">
+                                  {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.monthlyRequiredKg)}{unitStr}
+                                </td>
+                                <td className="px-4 py-4 text-right">
+                                  {item.monthsOfStock === Infinity ? (
+                                    <span className="text-xs font-bold text-gray-400">0 Consumo</span>
+                                  ) : (
+                                    <span className={`font-sans font-bold px-2.5 py-1.5 rounded text-[13px] tracking-wide ${item.monthsOfStock < 0.5 ? 'bg-red-100 text-red-800' : item.monthsOfStock < 1 ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}`}>
+                                      {Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(item.monthsOfStock)} m
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ));
+              })()}
             </div>
           )}
 
@@ -1932,62 +1982,74 @@ export function InsumosControlReport() {
                         </div>
                       </div>
 
-                      {/* Empaque */}
-                      <div className="bg-white rounded-xl border border-gray-100 p-4 mt-6">
-                        <h4 className="font-bold text-xs text-orange-900 uppercase tracking-widest block">Materiales de Empaque para el Plan</h4>
-                        <div className="overflow-x-auto mt-4">
-                          <table className="min-w-full divide-y divide-gray-200">
-                            <thead>
-                              <tr className="bg-orange-50/50 text-orange-800 font-bold uppercase text-xs tracking-wide">
-                                <th className="px-4 py-3 text-left">Insumo</th>
-                                <th className="px-4 py-3 text-right text-orange-700">Req. Semanal</th>
-                                <th className="px-4 py-3 text-right">Stock</th>
-                                <th className="px-4 py-3 text-center">Estado (Semanal)</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100 bg-white text-sm">
-                              {programCrossover.requiredInsumosAgg.filter(item => isEmpaqueItem(item.insumoName)).map(item => {
-                                const lowerName = item.insumoName.toLowerCase();
-                                const isUnit = lowerName.includes('preforma') || lowerName.includes('tapa') || lowerName.includes('etiqueta');
-                                const unitStr = isUnit ? ' u.' : ' kg';
-                                
-                                return (
-                                  <tr key={item.insumoName} className="hover:bg-orange-50/30 transition-colors">
-                                    <td className="px-4 py-3">
-                                      <span className="font-bold text-gray-900 block truncate max-w-[200px]" title={item.insumoName}>
-                                        {item.insumoName}
-                                      </span>
-                                    </td>
-                                    <td className="px-4 py-3 text-right">
-                                      <span className="font-semibold text-orange-700">
-                                        {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.requiredKg)}{unitStr}
-                                      </span>
-                                    </td>
-                                    <td className="px-4 py-3 text-right font-medium text-gray-800">
-                                      {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}{unitStr}
-                                    </td>
-                                    <td className="px-4 py-3 text-center">
-                                      {item.requiredKg === 0 ? (
-                                        <span className="bg-gray-200 text-gray-600 text-[10px] font-black uppercase px-2 py-1 rounded">
-                                          Sin programar
-                                        </span>
-                                      ) : item.isMet ? (
-                                        <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase px-2 py-1 rounded inline-flex items-center gap-1">
-                                          <CheckCircle2 className="w-3 h-3 text-emerald-600" /> OK
-                                        </span>
-                                      ) : (
-                                        <span className="bg-red-100 text-red-800 text-[10px] font-black uppercase px-2 py-1 rounded inline-flex items-center gap-1 leading-tight">
-                                          <TrendingDown className="w-3 h-3 text-red-600" /> Falta {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.deficit)}{unitStr}
-                                        </span>
-                                      )}
-                                    </td>
+                      {/* Empaque Grupos */}
+                      {(() => {
+                        const items = [...programCrossover.requiredInsumosAgg].filter(item => isEmpaqueItem(item.insumoName));
+                        const groups: Record<string, typeof items> = {};
+                        items.forEach(item => {
+                          const cat = getPackingCategory(item.insumoName);
+                          if (!groups[cat]) groups[cat] = [];
+                          groups[cat].push(item);
+                        });
+                        
+                        return Object.keys(groups).sort().map(cat => (
+                          <div key={cat} className="mt-6">
+                            <h4 className="font-bold text-xs text-orange-900 uppercase tracking-widest block mb-4">{cat}</h4>
+                            <div className="overflow-x-auto">
+                              <table className="min-w-full divide-y divide-gray-200">
+                                <thead>
+                                  <tr className="bg-orange-50/50 text-orange-800 font-bold uppercase text-xs tracking-wide">
+                                    <th className="px-4 py-3 text-left">Insumo</th>
+                                    <th className="px-4 py-3 text-right text-orange-700">Req. Semanal</th>
+                                    <th className="px-4 py-3 text-right">Stock</th>
+                                    <th className="px-4 py-3 text-center">Estado (Semanal)</th>
                                   </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 bg-white text-sm">
+                                  {groups[cat].map(item => {
+                                    const lowerName = item.insumoName.toLowerCase();
+                                    const isUnit = lowerName.includes('preforma') || lowerName.includes('tapa') || lowerName.includes('etiqueta');
+                                    const unitStr = isUnit ? ' u.' : ' kg';
+                                    
+                                    return (
+                                      <tr key={item.insumoName} className="hover:bg-orange-50/30 transition-colors">
+                                        <td className="px-4 py-3">
+                                          <span className="font-bold text-gray-900 block truncate max-w-[200px]" title={item.insumoName}>
+                                            {item.insumoName}
+                                          </span>
+                                        </td>
+                                        <td className="px-4 py-3 text-right">
+                                          <span className="font-semibold text-orange-700">
+                                            {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.requiredKg)}{unitStr}
+                                          </span>
+                                        </td>
+                                        <td className="px-4 py-3 text-right font-medium text-gray-800">
+                                          {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}{unitStr}
+                                        </td>
+                                        <td className="px-4 py-3 text-center">
+                                          {item.requiredKg === 0 ? (
+                                            <span className="bg-gray-200 text-gray-600 text-[10px] font-black uppercase px-2 py-1 rounded">
+                                              Sin programar
+                                            </span>
+                                          ) : item.isMet ? (
+                                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase px-2 py-1 rounded inline-flex items-center gap-1">
+                                              <CheckCircle2 className="w-3 h-3 text-emerald-600" /> OK
+                                            </span>
+                                          ) : (
+                                            <span className="bg-red-100 text-red-800 text-[10px] font-black uppercase px-2 py-1 rounded inline-flex items-center gap-1 leading-tight">
+                                              <TrendingDown className="w-3 h-3 text-red-600" /> Falta {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.deficit)}{unitStr}
+                                            </span>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        ));
+                      })()}
                     </div>
 
                     {/* Weekly Production Supplies Summary (Preformas, Termo, Stretch, Tapas, Etiquetas) */}
@@ -2122,7 +2184,9 @@ export function InsumosControlReport() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100 bg-white">
-                            {programCrossover.programSummary.map((planSummary) => {
+                            {programCrossover.programSummary
+                                .filter((p) => p.date >= format(new Date(), 'yyyy-MM-dd'))
+                                .map((planSummary) => {
                               const uniqueId = planSummary.id || `${planSummary.date}-${planSummary.linea}-${planSummary.shift}`;
                               const isExpanded = expandedPlanId === uniqueId;
 

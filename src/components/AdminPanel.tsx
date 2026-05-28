@@ -56,7 +56,7 @@ interface AppConfig {
   warehousePositions?: number;
   stackableFlavors?: string[];
   externalProducts?: Record<string, Record<string, string[]>>;
-  wasteWeights?: Record<string, { etiq: number; tapa: number; termo: number }>;
+  wasteWeights?: Record<string, { etiq: number; tapa: number; termo: number; stretch: number }>;
   syrupFormulas?: Record<string, Record<string, { liters: number; emulsion: number }>>;
   insumos?: string[];
   insumosMatrix?: Record<string, Record<string, Record<string, number>>>;
@@ -4095,14 +4095,15 @@ export function AdminPanel() {
                   <th className="px-6 py-4 text-left text-xs font-black text-gray-400 uppercase tracking-widest border-b border-gray-200 first:rounded-tl-xl">Calibre</th>
                   <th className="px-6 py-4 text-left text-xs font-black text-gray-400 uppercase tracking-widest border-b border-gray-200">Peso Etiqueta (g)</th>
                   <th className="px-6 py-4 text-left text-xs font-black text-gray-400 uppercase tracking-widest border-b border-gray-200">Peso Tapa (g)</th>
-                  <th className="px-6 py-4 text-left text-xs font-black text-gray-400 uppercase tracking-widest border-b border-gray-200 last:rounded-tr-xl">Peso Termo (kg/pack)</th>
+                  <th className="px-6 py-4 text-left text-xs font-black text-gray-400 uppercase tracking-widest border-b border-gray-200">Peso Termo (kg/pack)</th>
+                  <th className="px-6 py-4 text-left text-xs font-black text-gray-400 uppercase tracking-widest border-b border-gray-200 last:rounded-tr-xl">Peso Stretch (kg/paleta)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filteredSizesForWaste.length > 0 ? (
                   filteredSizesForWaste.map(size => {
                     const sizeStr = size.toString();
-                    const weights = config.wasteWeights?.[sizeStr] || { etiq: 0, tapa: 0, termo: 0 };
+                    const weights = config.wasteWeights?.[sizeStr] || { etiq: 0, tapa: 0, termo: 0, stretch: 0 };
                     return (
                       <tr key={size} className="hover:bg-blue-50/20 transition-colors group">
                         <td className="px-6 py-5 text-sm font-black text-gray-900 font-mono bg-gray-50/30 group-hover:bg-blue-50/50 transition-colors">{size} cc</td>
@@ -4160,12 +4161,30 @@ export function AdminPanel() {
                             className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none transition-all focus:bg-white"
                           />
                         </td>
+                        <td className="px-6 py-5">
+                          <input
+                            type="number"
+                            step="0.0001"
+                            value={weights.stretch}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setConfig({
+                                ...config,
+                                wasteWeights: {
+                                  ...(config.wasteWeights || {}),
+                                  [sizeStr]: { ...weights, stretch: val }
+                                }
+                              });
+                            }}
+                            className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none transition-all focus:bg-white"
+                          />
+                        </td>
                       </tr>
                     );
                   })
                 ) : (
                   <tr>
-                    <td colSpan={4} className="px-6 py-12 text-center text-gray-400 italic text-sm">
+                    <td colSpan={5} className="px-6 py-12 text-center text-gray-400 italic text-sm">
                       No hay calibres locales habilitados para configurar.
                     </td>
                   </tr>
