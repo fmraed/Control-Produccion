@@ -66,6 +66,7 @@ interface AppConfig {
   termoConfig?: TermoConfig[];
   stretchConfig?: StretchConfig[];
   tapaConfig?: TapaConfig[];
+  efficiencyExcludedDowntimes: string[];
 }
 
 export function AdminPanel() {
@@ -289,7 +290,8 @@ export function AdminPanel() {
           preformasConfig: data.preformasConfig || [],
           termoConfig: data.termoConfig || [],
           stretchConfig: data.stretchConfig || [],
-          tapaConfig: data.tapaConfig || []
+          tapaConfig: data.tapaConfig || [],
+          efficiencyExcludedDowntimes: data.efficiencyExcludedDowntimes || ['Sin programa', 'Mantenimiento programado', 'Otras ajenas a linea']
         };
         setConfig(mergedConfig);
       } else {
@@ -398,7 +400,8 @@ export function AdminPanel() {
           preformasConfig: [],
           termoConfig: [],
           stretchConfig: [],
-          tapaConfig: []
+          tapaConfig: [],
+          efficiencyExcludedDowntimes: ['Sin programa', 'Mantenimiento programado', 'Otras ajenas a linea']
         };
         setConfig(defaultConfig);
       }
@@ -1843,6 +1846,22 @@ export function AdminPanel() {
                 <p className="text-sm text-gray-500 italic col-span-2 text-center py-4">No hay sabores registrados</p>
               )}
             </div>
+          </section>
+
+          {/* Eficiencia Excluidos */}
+          <section className="bg-gray-50 p-4 rounded-xl border border-gray-200 lg:col-span-2">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Configuración de Eficiencia (Exclusiones de Paradas)</h3>
+            <p className="text-sm text-gray-600 mb-4">Ingrese las razones o categorías de paradas que deben ser excluidas de los cálculos de eficiencia (separadas por coma):</p>
+            <input
+              type="text"
+              value={config.efficiencyExcludedDowntimes?.join(', ') || ''}
+              onChange={e => {
+                const val = e.target.value.split(',').map(s => s.trim()).filter(s => s !== '');
+                setConfig({ ...config, efficiencyExcludedDowntimes: val });
+              }}
+              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+              placeholder="ej: Sin programa, Mantenimiento programado, OTRAS AJENAS A LINEA"
+            />
           </section>
 
           {/* Calibres */}

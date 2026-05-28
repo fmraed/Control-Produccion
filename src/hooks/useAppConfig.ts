@@ -63,6 +63,7 @@ interface AppConfig {
   termoConfig?: TermoConfig[];
   stretchConfig?: StretchConfig[];
   tapaConfig?: TapaConfig[];
+  efficiencyExcludedDowntimes: string[];
 }
 
 export function useAppConfig() {
@@ -118,6 +119,7 @@ export function useAppConfig() {
           termoConfig: data.termoConfig || [],
           stretchConfig: data.stretchConfig || [],
           tapaConfig: data.tapaConfig || [],
+          efficiencyExcludedDowntimes: data.efficiencyExcludedDowntimes || ['Sin programa', 'Mantenimiento programado', 'Otras ajenas a linea'],
           co2Volumes: (() => {
             const defaultVols = { ...CO2_VOLUMES };
             if (data.co2Volumes) {

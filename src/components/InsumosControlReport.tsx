@@ -839,7 +839,7 @@ export function InsumosControlReport() {
       const isTapaOrLabel = item.insumoName.startsWith('Tapa ') || item.insumoName.startsWith('Etiqueta ') || item.insumoName.startsWith('Tapas ');
       
       // Check for packaging items that are part of compatiblePackagingGroups
-      const isPartOfCompatiblePackagingGroups = config?.compatiblePackagingGroups && Object.values(config.compatiblePackagingGroups).some(group => group.some(member => item.insumoName.includes(member)));
+      const isPartOfCompatiblePackagingGroups = config?.compatiblePackagingGroups && Object.values(config.compatiblePackagingGroups as Record<string, string[]>).some(group => group.some(member => item.insumoName.includes(member)));
 
       return isIngredient || isConfiguredPackage || isPartOfCompatiblePackagingGroups || (isTapaOrLabel && item.requiredKg > 0);
     });

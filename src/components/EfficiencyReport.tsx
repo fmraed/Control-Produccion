@@ -12,7 +12,7 @@ import { useAppConfig } from '../hooks/useAppConfig';
 type Frequency = 'daily' | 'weekly' | 'monthly';
 
 export function EfficiencyReport() {
-  const { availableLines, getFilteredSizes, shouldShowReport } = useAppConfig();
+  const { availableLines, getFilteredSizes, shouldShowReport, config } = useAppConfig();
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
@@ -182,6 +182,13 @@ export function EfficiencyReport() {
         let paradasOperativas = 0;
 
         report.downtimes?.forEach(dt => {
+          // Check if this downtime should be excluded
+          const isExcluded = config?.efficiencyExcludedDowntimes?.some(excluded =>
+            (dt.category?.toLowerCase() || '') === excluded.toLowerCase() ||
+            (dt.reason?.toLowerCase() || '') === excluded.toLowerCase()
+          );
+          if (isExcluded) return;
+
           const mins = dt.totalMinutes || 0;
           if (dt.category === 'PARADAS DE LINEA' || dt.category === 'Paradas de Línea' || dt.category === 'Mecánica' || (dt.category === 'PARADAS LINEA')) {
             paradaMecanica += mins;
