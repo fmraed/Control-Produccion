@@ -1155,21 +1155,21 @@ export function ManagementSummary() {
   }
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto">
+    <div className="space-y-6 max-w-5xl mx-auto font-sans antialiased text-gray-800">
       {/* Header & Filter */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 flex flex-col sm:flex-row justify-between items-center gap-4">
-        <div className="flex items-center gap-2 text-gray-700 font-medium">
-          <BarChart3 className="w-5 h-5 text-blue-600" />
-          <h2 className="text-lg font-bold">Resumen Gerencial de Producción</h2>
+        <div className="flex items-center gap-2 text-gray-900 font-medium">
+          <BarChart3 className="w-5.5 h-5.5 text-blue-600" />
+          <h2 className="text-xl font-display font-extrabold tracking-tight">Resumen Gerencial de Producción</h2>
         </div>
         <div className="flex items-center gap-4">
           {managementStartDate && (
             <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-gray-500 uppercase tracking-widest">Gestión:</label>
+              <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Gestión:</label>
               <select
                 value={selectedGestion}
                 onChange={(e) => setSelectedGestion(e.target.value as any)}
-                className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+                className="rounded-xl border-gray-200 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-xs border p-2 bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer"
               >
                 <option value="all">Todas</option>
                 <option value="current">Actual</option>
@@ -1178,11 +1178,11 @@ export function ManagementSummary() {
             </div>
           )}
           <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-gray-400" />
+            <Calendar className="w-4 h-4 text-gray-500" />
             <select
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
-              className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2 min-w-[180px]"
+              className="rounded-xl border-gray-200 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-xs font-semibold border p-2 min-w-[180px] bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer"
             >
               {months.map(m => (
                 <option key={m} value={m}>
@@ -1193,13 +1193,13 @@ export function ManagementSummary() {
           </div>
 
           {snapshot && (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 border border-green-100 rounded-lg">
-              <Lock className="w-3 h-3 text-green-600" />
-              <span className="text-[10px] font-black text-green-700 uppercase tracking-widest">Histórico Cerrado</span>
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 border border-green-100 rounded-xl">
+              <Lock className="w-3.5 h-3.5 text-green-600" />
+              <span className="text-[10px] font-bold text-green-700 uppercase tracking-wider">Histórico Cerrado</span>
               {isAdmin && (
                 <button 
                   onClick={handleRefreshSnapshot}
-                  className="ml-2 p-1 hover:bg-green-100 rounded transition-colors"
+                  className="ml-2 p-1 hover:bg-green-100 rounded-lg transition-colors border border-green-200"
                   title="Recalcular y actualizar histórico"
                 >
                   <RefreshCw className="w-3 h-3 text-green-600" />
@@ -1208,9 +1208,9 @@ export function ManagementSummary() {
             </div>
           )}
           {!snapshot && selectedMonth < format(new Date(), 'yyyy-MM') && (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 border border-orange-100 rounded-lg">
-              <Unlock className="w-3 h-3 text-orange-600" />
-              <span className="text-[10px] font-black text-orange-700 uppercase tracking-widest">Datos Dinámicos</span>
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 border border-orange-100 rounded-xl">
+              <Unlock className="w-3.5 h-3.5 text-orange-600" />
+              <span className="text-[10px] font-bold text-orange-700 uppercase tracking-wider">Datos Dinámicos</span>
             </div>
           )}
         </div>
@@ -1220,103 +1220,103 @@ export function ManagementSummary() {
         {/* Left Column - Turnos */}
         <div className="lg:col-span-7 space-y-6">
           <div className="flex gap-6">
-            <div className="flex-1 bg-black text-white rounded-2xl overflow-hidden shadow-xl border border-gray-800">
+            <div className="flex-1 bg-slate-900 text-white rounded-2xl overflow-hidden shadow-xl border border-slate-800">
               <div className="p-6 space-y-4">
-                <div className="flex justify-between items-center border-b border-gray-800 pb-3">
-                  <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Capacidad Máxima (Turnos)</span>
-                  <span className="text-3xl font-black">{stats.turnosTotales}</span>
+                <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-300">Capacidad Máxima (Turnos)</span>
+                  <span className="text-3xl font-display font-extrabold text-white">{stats.turnosTotales}</span>
                 </div>
-                <div className="flex justify-between items-center border-b border-gray-800 pb-3">
-                  <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Turnos Operativos Planificados</span>
-                  <span className="text-3xl font-black">{stats.turnosOperativosPlanificados}</span>
+                <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-300">Turnos Operativos Planificados</span>
+                  <span className="text-3xl font-display font-extrabold text-white">{stats.turnosOperativosPlanificados}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Promedio Turnos p/día</span>
-                    <Info className="w-3 h-3 text-gray-500" title="Promedio de turnos en un día estándar (Lunes a Jueves)" />
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-300">Promedio Turnos p/día</span>
+                    <Info className="w-3.5 h-3.5 text-slate-400 cursor-help" title="Promedio de turnos en un día estándar (Lunes a Jueves)" />
                   </div>
-                  <span className="text-3xl font-black">{stats.standardDailyShifts.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}</span>
+                  <span className="text-3xl font-display font-extrabold text-white">{stats.standardDailyShifts.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}</span>
                 </div>
               </div>
             </div>
             <div className="hidden md:flex items-center justify-center px-4">
-              <UserCircle2 className="w-24 h-24 text-gray-200" />
+              <UserCircle2 className="w-24 h-24 text-gray-250 opacity-40" />
             </div>
           </div>
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="bg-gray-50 p-4 border-b border-gray-200 flex items-center justify-between">
+            <div className="bg-gray-50 px-5 py-4 border-b border-gray-200 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Users className="w-5 h-5 text-blue-600" />
-                <h3 className="font-bold text-gray-700 uppercase text-xs tracking-wider">Turnos Trabajados (Reales)</h3>
+                <h3 className="font-display font-bold text-gray-800 text-sm tracking-tight">Turnos Trabajados (Reales)</h3>
               </div>
-              <span className="text-xl font-black text-blue-700">{stats.turnosTrabajadosTotal.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}</span>
+              <span className="text-2xl font-display font-bold text-blue-750">{stats.turnosTrabajadosTotal.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}</span>
             </div>
-            <div className="divide-y divide-gray-100">
-              <div className="flex justify-between items-center p-4 hover:bg-gray-50 transition-colors">
-                <span className="text-sm font-bold text-gray-600 uppercase tracking-tight">Turnos Línea 1</span>
-                <span className="text-lg font-black text-gray-900">{stats.turnosPorLinea['1'].toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}</span>
+            <div className="divide-y divide-gray-150">
+              <div className="flex justify-between items-center px-5 py-4 hover:bg-gray-50/50 transition-colors">
+                <span className="text-sm font-medium text-gray-600">Turnos Línea 1</span>
+                <span className="text-lg font-display font-bold text-gray-900">{stats.turnosPorLinea['1'].toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}</span>
               </div>
-              <div className="flex justify-between items-center p-4 hover:bg-gray-50 transition-colors">
-                <span className="text-sm font-bold text-gray-600 uppercase tracking-tight">Turnos Línea 2</span>
-                <span className="text-lg font-black text-gray-900">{stats.turnosPorLinea['2'].toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}</span>
+              <div className="flex justify-between items-center px-5 py-4 hover:bg-gray-50/50 transition-colors">
+                <span className="text-sm font-medium text-gray-600">Turnos Línea 2</span>
+                <span className="text-lg font-display font-bold text-gray-900">{stats.turnosPorLinea['2'].toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}</span>
               </div>
-              <div className="flex justify-between items-center p-4 hover:bg-gray-50 transition-colors">
-                <span className="text-sm font-bold text-gray-600 uppercase tracking-tight">Turnos Línea 3</span>
-                <span className="text-lg font-black text-gray-900">{stats.turnosPorLinea['3'].toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}</span>
+              <div className="flex justify-between items-center px-5 py-4 hover:bg-gray-50/50 transition-colors">
+                <span className="text-sm font-medium text-gray-600">Turnos Línea 3</span>
+                <span className="text-lg font-display font-bold text-gray-900">{stats.turnosPorLinea['3'].toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}</span>
               </div>
             </div>
           </div>
 
-          <div className="bg-orange-50 rounded-2xl p-4 border border-orange-100 shadow-sm space-y-4">
+          <div className="bg-orange-50/60 rounded-2xl p-5 border border-orange-100 shadow-sm space-y-4">
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-3">
-                <div className="bg-orange-100 p-2 rounded-lg">
-                  <Clock className="w-5 h-5 text-orange-600" />
+                <div className="bg-orange-100 p-2.5 rounded-xl border border-orange-200">
+                  <Clock className="w-5.5 h-5.5 text-orange-600" />
                 </div>
                 <div>
-                  <span className="block text-[10px] font-black text-orange-400 uppercase tracking-widest">Horas Extras Totales</span>
-                  <span className="text-xs font-bold text-orange-700">Excedentes y fines de semana</span>
+                  <span className="block text-xs font-semibold text-orange-850 uppercase tracking-wider">Horas Extras Totales</span>
+                  <span className="text-xs text-orange-700/80 font-medium">Excedentes y fines de semana</span>
                 </div>
               </div>
-              <span className="text-3xl font-black text-orange-600">{stats.extraHours.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} <span className="text-sm">hs</span></span>
+              <span className="text-3xl font-display font-extrabold text-orange-850">{stats.extraHours.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} <span className="text-sm font-medium">hs</span></span>
             </div>
             
-            <div className="grid grid-cols-3 gap-4 pt-2 border-t border-orange-200/50">
+            <div className="grid grid-cols-3 gap-4 pt-4 border-t border-orange-200/50">
               <div>
-                <span className="block text-[9px] font-bold text-orange-400 uppercase tracking-tighter">Feriados</span>
-                <span className="text-lg font-black text-orange-700">{stats.holidayExtraHours.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} <span className="text-xs">hs</span></span>
+                <span className="block text-[10px] font-semibold text-orange-700 uppercase tracking-wider">Feriados</span>
+                <span className="text-xl font-display font-bold text-orange-900">{stats.holidayExtraHours.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} <span className="text-xs font-medium">hs</span></span>
               </div>
               <div>
-                <span className="block text-[9px] font-bold text-orange-400 uppercase tracking-tighter">Fines de Semana</span>
-                <span className="text-lg font-black text-orange-700">{stats.weekendExtraHours.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} <span className="text-xs">hs</span></span>
+                <span className="block text-[10px] font-semibold text-orange-700 uppercase tracking-wider">Fines de Semana</span>
+                <span className="text-xl font-display font-bold text-orange-900">{stats.weekendExtraHours.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} <span className="text-xs font-medium">hs</span></span>
               </div>
               <div>
-                <span className="block text-[9px] font-bold text-orange-400 uppercase tracking-tighter">Excedentes Comunes</span>
-                <span className="text-lg font-black text-orange-700">{stats.weekdayExtraHours.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} <span className="text-xs">hs</span></span>
+                <span className="block text-[10px] font-semibold text-orange-700 uppercase tracking-wider">Excedentes Comunes</span>
+                <span className="text-xl font-display font-bold text-orange-900">{stats.weekdayExtraHours.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} <span className="text-xs font-medium">hs</span></span>
               </div>
             </div>
           </div>
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mb-6">
-            <div className="bg-slate-50 p-6 border-b border-gray-200">
+            <div className="bg-slate-55 p-6 border-b border-gray-200">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
-                  <div className="bg-slate-200 p-2.5 rounded-xl">
-                    <ListChecks className="w-6 h-6 text-slate-700" />
+                  <div className="bg-slate-100 p-2.5 rounded-xl border border-slate-200">
+                    <ListChecks className="w-5.5 h-5.5 text-slate-700" />
                   </div>
                   <div>
-                    <h3 className="text-xl font-black text-slate-800 tracking-tight">Estabilidad del Programa</h3>
+                    <h3 className="text-lg font-display font-bold text-slate-800 tracking-tight">Estabilidad del Programa</h3>
                     <p className="text-xs text-slate-500 font-medium">Cumplimiento y cambios en los programas publicados</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="text-right">
-                    <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Índice de Estabilidad</span>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-4xl font-black ${
+                    <span className="block text-xs font-semibold text-slate-500 uppercase tracking-wider">Índice de Estabilidad</span>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className={`text-4xl font-display font-extrabold ${
                         stats.stability.index > 90 ? 'text-emerald-600' : 
-                        stats.stability.index > 75 ? 'text-amber-600' : 'text-red-600'
+                        stats.stability.index > 75 ? 'text-amber-600' : 'text-red-650'
                       }`}>{stats.stability.index}%</span>
                     </div>
                   </div>
@@ -1324,59 +1324,59 @@ export function ManagementSummary() {
               </div>
             </div>
 
-            <div className="p-6 grid grid-cols-1 md:grid-cols-4 gap-6">
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Items Planificados</span>
-                <span className="text-2xl font-black text-slate-700">{stats.stability.totalScheduledItems}</span>
+            <div className="p-5 grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-slate-55 p-4 rounded-xl border border-slate-200">
+                <span className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">Items Planificados</span>
+                <span className="text-2xl font-display font-bold text-slate-800">{stats.stability.totalScheduledItems}</span>
               </div>
-              <div className="bg-amber-50 p-4 rounded-xl border border-amber-100">
+              <div className="bg-amber-50/50 p-4 rounded-xl border border-amber-200">
                 <div className="flex justify-between items-start">
-                  <span className="block text-[10px] font-black text-amber-500 uppercase tracking-widest mb-1">Modificaciones</span>
-                  <Edit2 className="w-3 h-3 text-amber-400" />
+                  <span className="block text-xs font-semibold text-amber-805 uppercase tracking-wider mb-1">Modificaciones</span>
+                  <Edit2 className="w-3.5 h-3.5 text-amber-600" />
                 </div>
-                <span className="text-2xl font-black text-amber-700">{stats.stability.modifications}</span>
+                <span className="text-2xl font-display font-bold text-amber-900">{stats.stability.modifications}</span>
               </div>
-              <div className="bg-rose-50 p-4 rounded-xl border border-rose-100">
+              <div className="bg-rose-50/50 p-4 rounded-xl border border-rose-200">
                  <div className="flex justify-between items-start">
-                  <span className="block text-[10px] font-black text-rose-500 uppercase tracking-widest mb-1">Eliminaciones</span>
-                  <Trash2 className="w-3 h-3 text-rose-400" />
+                  <span className="block text-xs font-semibold text-rose-805 uppercase tracking-wider mb-1">Eliminaciones</span>
+                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
                 </div>
-                <span className="text-2xl font-black text-rose-700">{stats.stability.deletions}</span>
+                <span className="text-2xl font-display font-bold text-rose-900">{stats.stability.deletions}</span>
               </div>
-              <div className="bg-red-600 p-4 rounded-xl shadow-lg shadow-red-100">
+              <div className="bg-red-50 p-4 rounded-xl border border-red-200">
                 <div className="flex justify-between items-start">
-                  <span className="block text-[10px] font-black text-red-100 uppercase tracking-widest mb-1">Zona Roja (&lt;24h)</span>
-                  <AlertTriangle className="w-4 h-4 text-white animate-pulse" />
+                  <span className="block text-xs font-semibold text-red-800 uppercase tracking-wider mb-1">Zona Roja (&lt;24h)</span>
+                  <AlertTriangle className="w-4 h-4 text-red-600 animate-pulse" />
                 </div>
-                <span className="text-2xl font-black text-white">{stats.stability.criticalChanges}</span>
+                <span className="text-2xl font-display font-bold text-red-900">{stats.stability.criticalChanges}</span>
               </div>
             </div>
 
             {stats.stability.criticalLogs.length > 0 && (
               <div className="px-6 pb-6">
                 <div className="bg-red-50 rounded-xl border border-red-100 overflow-hidden">
-                  <div className="bg-red-100/50 px-4 py-2 flex items-center gap-2">
-                    <HistoryIcon className="w-3 h-3 text-red-600" />
-                    <span className="text-[10px] font-black text-red-700 uppercase tracking-wider">Últimos Cambios Críticos</span>
+                  <div className="bg-red-100/40 px-4 py-2.5 flex items-center gap-2">
+                    <HistoryIcon className="w-3.5 h-3.5 text-red-600" />
+                    <span className="text-xs font-semibold text-red-800 uppercase tracking-wider">Últimos Cambios Críticos</span>
                   </div>
                   <div className="divide-y divide-red-100">
                     {stats.stability.criticalLogs.map((log: any, i: number) => (
-                      <div key={i} className="p-3 flex items-center justify-between text-[11px]">
+                      <div key={i} className="p-3 flex items-center justify-between text-xs">
                         <div className="flex flex-col">
                           <span className="font-bold text-red-900">
                             Cambio para el {format(parseISO(log.datePlan), 'dd/MM')}
                           </span>
-                          <span className="text-red-600/70">
+                          <span className="text-red-605 font-medium text-[11px]">
                             Realizado el {format(parseISO(log.timestamp), 'dd/MM HH:mm')}
                           </span>
                         </div>
                         <div className="flex flex-col items-end">
                           {log.changes?.map((c: any, ci: number) => (
-                            <span key={ci} className="text-red-800 italic">
+                            <span key={ci} className="text-red-850 italic font-medium">
                               {c.field}: {c.oldValue} → {c.newValue}
                             </span>
                           ))}
-                          {log.action === 'delete' && <span className="text-red-800 font-bold uppercase text-[9px]">Eliminado</span>}
+                          {log.action === 'delete' && <span className="text-red-850 font-bold uppercase text-[10px]">Eliminado</span>}
                         </div>
                       </div>
                     ))}
@@ -1387,26 +1387,26 @@ export function ManagementSummary() {
           </div>
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mb-6">
-            <div className="bg-indigo-50 p-6 border-b border-indigo-200">
+            <div className="bg-indigo-50/70 p-6 border-b border-indigo-150">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
-                  <div className="bg-indigo-200 p-2.5 rounded-xl">
-                    <Calendar className="w-6 h-6 text-indigo-700" />
+                  <div className="bg-indigo-100 p-2.5 rounded-xl border border-indigo-200">
+                    <Calendar className="w-5.5 h-5.5 text-indigo-700" />
                   </div>
                   <div>
-                    <h3 className="text-xl font-black text-indigo-800 tracking-tight">Cumplimiento del Programa</h3>
-                    <p className="text-xs text-indigo-500 font-medium">Ejecución real vs planificación publicada (Sabor/Línea)</p>
+                    <h3 className="text-lg font-display font-bold text-indigo-900 tracking-tight">Cumplimiento del Programa</h3>
+                    <p className="text-xs text-indigo-600/80 font-medium">Ejecución real vs planificación publicada (Sabor/Línea)</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="text-right">
-                    <span className="block text-[10px] font-black text-indigo-400 uppercase tracking-widest">
+                    <span className="block text-xs font-semibold text-indigo-700 uppercase tracking-wider">
                       Índice de Cumplimiento {stats.fulfillment.isPartial ? '(Al día)' : ''}
                     </span>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-4xl font-black ${
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className={`text-4xl font-display font-extrabold ${
                         stats.fulfillment.index > 90 ? 'text-emerald-600' : 
-                        stats.fulfillment.index > 75 ? 'text-amber-600' : 'text-red-600'
+                        stats.fulfillment.index > 75 ? 'text-amber-600' : 'text-red-650'
                       }`}>{stats.fulfillment.index}%</span>
                     </div>
                   </div>
@@ -1414,26 +1414,26 @@ export function ManagementSummary() {
               </div>
             </div>
 
-            <div className="p-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100 flex flex-col items-center text-center">
-                <span className="block text-[10px] font-black text-emerald-500 uppercase tracking-widest mb-1">Totalmente Cumplidos</span>
-                <span className="text-3xl font-black text-emerald-700">{stats.fulfillment.fulfilledItems}</span>
-                <span className="text-[10px] text-emerald-600 font-medium">Sabor y Línea 100%</span>
+            <div className="p-5 grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-150 flex flex-col items-center text-center">
+                <span className="block text-xs font-semibold text-emerald-800 uppercase tracking-wider mb-1">Totalmente Cumplidos</span>
+                <span className="text-2xl font-display font-bold text-emerald-950">{stats.fulfillment.fulfilledItems}</span>
+                <span className="text-[10.5px] text-emerald-700 font-medium mt-1">Sabor y Línea 100%</span>
               </div>
-              <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 flex flex-col items-center text-center">
-                <span className="block text-[10px] font-black text-blue-500 uppercase tracking-widest mb-1">Parciales</span>
-                <span className="text-3xl font-black text-blue-700">{stats.fulfillment.partialItems}</span>
-                <span className="text-[10px] text-blue-600 font-medium">Cambio de sabor en el turno</span>
+              <div className="bg-blue-50/60 p-4 rounded-xl border border-blue-150 flex flex-col items-center text-center">
+                <span className="block text-xs font-semibold text-blue-800 uppercase tracking-wider mb-1">Parciales</span>
+                <span className="text-2xl font-display font-bold text-blue-950">{stats.fulfillment.partialItems}</span>
+                <span className="text-[10.5px] text-blue-700 font-medium mt-1">Cambio de sabor en el turno</span>
               </div>
-              <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 flex flex-col items-center text-center">
-                <span className="block text-[10px] font-black text-amber-500 uppercase tracking-widest mb-1">Desvíos Totales</span>
-                <span className="text-3xl font-black text-amber-700">{stats.fulfillment.deviationItems}</span>
-                <span className="text-[10px] text-amber-600 font-medium">Se produjo otro sabor</span>
+              <div className="bg-amber-50/60 p-4 rounded-xl border border-amber-150 flex flex-col items-center text-center">
+                <span className="block text-xs font-semibold text-amber-800 uppercase tracking-wider mb-1">Desvíos Totales</span>
+                <span className="text-2xl font-display font-bold text-amber-950">{stats.fulfillment.deviationItems}</span>
+                <span className="text-[10.5px] text-amber-700 font-medium mt-1">Se produjo otro sabor</span>
               </div>
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex flex-col items-center text-center">
-                <span className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">No Ejecutados</span>
-                <span className="text-3xl font-black text-slate-700">{stats.fulfillment.missedItems}</span>
-                <span className="text-[10px] text-slate-600 font-medium">Sin reporte en el turno</span>
+              <div className="bg-slate-50/70 p-4 rounded-xl border border-slate-150 flex flex-col items-center text-center">
+                <span className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">No Ejecutados</span>
+                <span className="text-2xl font-display font-bold text-slate-850">{stats.fulfillment.missedItems}</span>
+                <span className="text-[10.5px] text-slate-600 font-medium mt-1">Sin reporte en el turno</span>
               </div>
             </div>
             
@@ -1446,36 +1446,36 @@ export function ManagementSummary() {
           </div>
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="bg-gray-50 p-4 border-b border-gray-200 flex items-center justify-between">
+            <div className="bg-gray-50 px-5 py-4 border-b border-gray-200 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Users className="w-5 h-5 text-indigo-600" />
-                <h3 className="font-bold text-gray-700 uppercase text-xs tracking-wider">Cruce: Operarios vs Líneas Activas</h3>
+                <h3 className="font-display font-bold text-gray-800 text-sm tracking-tight">Cruce: Operarios vs Líneas Activas</h3>
               </div>
             </div>
             <div className="p-4 max-h-80 overflow-y-auto">
-              <div className="space-y-3">
+              <div className="space-y-2.5">
                 {stats.operatorsCrossOver.map((cross: any, idx: number) => {
                   const isUnderstaffed = cross.present < cross.required;
                   const isOverstaffed = cross.present > cross.required;
                   return (
-                    <div key={idx} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 rounded-xl border border-gray-100 bg-gray-50 gap-2">
+                    <div key={idx} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 rounded-xl border border-gray-150 bg-gray-50/50 hover:bg-gray-50 transition-colors gap-2">
                       <div className="flex flex-col">
-                         <span className="text-xs font-black text-gray-800 uppercase">{format(parseISO(cross.date), 'dd/MM/yyyy')} - {cross.shift}</span>
-                         <span className="text-[10px] text-emerald-600 font-bold mt-1">Líneas Simultáneas: {cross.activeLinesCount} ({cross.activeLines.length > 0 ? cross.activeLines.join(', ') : 'Ninguna'})</span>
+                         <span className="text-xs font-bold text-gray-700 uppercase tracking-wide">{format(parseISO(cross.date), 'dd/MM/yyyy')} — {cross.shift}</span>
+                         <span className="text-[11px] text-emerald-700 font-semibold mt-1">Líneas Simultáneas: {cross.activeLinesCount} ({cross.activeLines.length > 0 ? cross.activeLines.join(', ') : 'Ninguna'})</span>
                          {cross.inactiveLines.length > 0 && (
-                            <span className="text-[10px] text-gray-400 font-medium">Líneas Abajo: {cross.inactiveLines.join(', ')}</span>
-                         )}
+                             <span className="text-[11px] text-gray-500 font-medium">Líneas Abajo: {cross.inactiveLines.join(', ')}</span>
+                          )}
                       </div>
-                      <div className="flex gap-4 items-center">
+                      <div className="flex gap-4 items-center sm:self-center">
                         <div className="flex flex-col items-end">
-                           <span className="text-[10px] font-bold text-gray-400 uppercase">Presentes</span>
-                           <span className={`text-xl font-black ${isUnderstaffed ? 'text-red-600' : isOverstaffed ? 'text-yellow-600' : 'text-green-600'}`}>
+                           <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Presentes</span>
+                           <span className={`text-lg font-display font-bold ${isUnderstaffed ? 'text-red-650 font-extrabold' : isOverstaffed ? 'text-amber-600' : 'text-green-600'}`}>
                              {cross.present}
                            </span>
                         </div>
                         <div className="flex flex-col items-end">
-                           <span className="text-[10px] font-bold text-gray-400 uppercase">Requeridos (Máx)</span>
-                           <span className="text-xl font-black text-gray-800">
+                           <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Requeridos (Máx)</span>
+                           <span className="text-lg font-display font-medium text-gray-800">
                              {cross.required}
                            </span>
                         </div>
@@ -1484,7 +1484,7 @@ export function ManagementSummary() {
                   );
                 })}
                 {stats.operatorsCrossOver.length === 0 && (
-                   <div className="text-center text-sm text-gray-500 py-4 italic">No hay datos de cruce para el mes seleccionado.</div>
+                   <div className="text-center text-sm text-gray-500 py-4 italic font-medium">No hay datos de cruce para el mes seleccionado.</div>
                 )}
               </div>
             </div>
@@ -1495,41 +1495,41 @@ export function ManagementSummary() {
         <div className="lg:col-span-5 space-y-6">
           {/* Monthly Projection */}
           {selectedMonth === format(new Date(), 'yyyy-MM') && (
-            <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl shadow-lg border border-blue-500 overflow-hidden text-white">
-              <div className="p-4 border-b border-blue-400/30 flex items-center justify-between">
+            <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-2xl shadow-lg border border-slate-800 overflow-hidden text-white">
+              <div className="bg-slate-950/40 p-4 border-b border-slate-800/60 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <RefreshCw className="w-5 h-5 text-blue-200" />
-                  <h3 className="font-bold uppercase text-xs tracking-wider">Proyección Mensual</h3>
+                  <RefreshCw className="w-5 h-5 text-indigo-400" />
+                  <h3 className="font-display font-bold uppercase text-xs tracking-wider text-slate-200">Proyección Mensual</h3>
                 </div>
-                <span className="text-[10px] bg-blue-500/50 px-2 py-0.5 rounded font-bold">ESTIMADO</span>
+                <span className="text-[10px] bg-amber-500/10 text-amber-400 px-2.5 py-0.5 rounded-lg border border-amber-500/20 font-bold uppercase tracking-wider">ESTIMADO</span>
               </div>
-              <div className="p-6 space-y-5">
-                <div className="space-y-3 border-b border-blue-400/20 pb-4">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] font-bold text-blue-200 uppercase tracking-widest">Días Laborales Pendientes:</span>
-                    <span className="text-xl font-black">{(stats.pendingPlannedShifts / (stats.standardDailyShifts || 1)).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}</span>
+              <div className="p-5 space-y-5">
+                <div className="space-y-2.5 border-b border-slate-800 pb-4">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-medium text-slate-350">Días Laborales Pendientes:</span>
+                    <span className="font-display font-bold text-lg text-white">{(stats.pendingPlannedShifts / (stats.standardDailyShifts || 1)).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}</span>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] font-bold text-blue-200 uppercase tracking-widest">Turnos-Lineas Laborales Pendientes:</span>
-                    <span className="text-xl font-black">{Math.round(stats.pendingPlannedShifts)}</span>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-medium text-slate-350">Turnos-Líneas Laborales Pendientes:</span>
+                    <span className="font-display font-bold text-lg text-white">{Math.round(stats.pendingPlannedShifts)}</span>
                   </div>
                 </div>
                 
                 <div className="space-y-4">
                   <div className="flex justify-between items-center">
                     <div className="flex flex-col">
-                      <span className="text-[10px] font-bold text-blue-200 uppercase tracking-widest">Producción Proyectada PENDIENTE:</span>
-                      <span className="text-[9px] text-blue-300 font-bold opacity-80">Promedio {Math.round(stats.avgPacksPerShift)} paq/turno</span>
+                      <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Plan Proyectado PENDIENTE</span>
+                      <span className="text-[10.5px] text-slate-400 font-medium font-mono mt-0.5">Promedio {Math.round(stats.avgPacksPerShift)} paq/turno</span>
                     </div>
-                    <span className="text-xl font-black text-blue-100">{Math.round(stats.projectedPendingPacks).toLocaleString('es-AR')} <span className="text-xs font-normal">paquetes</span></span>
+                    <span className="text-[22px] font-display font-bold text-sky-400">{Math.round(stats.projectedPendingPacks).toLocaleString('es-AR')} <span className="text-xs font-normal text-slate-400">paq</span></span>
                   </div>
                   
-                  <div className="bg-white/10 p-4 rounded-xl border border-white/20 shadow-inner">
-                    <div className="flex justify-between items-baseline">
-                      <span className="text-[10px] font-bold text-white uppercase tracking-widest">Producción Proyectada TOTAL:</span>
+                  <div className="bg-slate-950/50 px-4 py-3.5 border border-slate-800/80 rounded-xl shadow-inner">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-bold text-indigo-300 uppercase tracking-wider">Proyección Total ESTIMADA:</span>
                       <div className="flex items-baseline gap-2">
-                        <span className="text-3xl font-black">{Math.round(stats.projectedTotalPacks).toLocaleString('es-AR')}</span>
-                        <span className="text-[10px] font-bold opacity-80 uppercase">Paquetes</span>
+                        <span className="text-2xl font-display font-extrabold text-emerald-400">{Math.round(stats.projectedTotalPacks).toLocaleString('es-AR')}</span>
+                        <span className="text-[10px] font-semibold text-emerald-500 uppercase tracking-wide">Paquetes</span>
                       </div>
                     </div>
                   </div>
@@ -1539,106 +1539,106 @@ export function ManagementSummary() {
           )}
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="bg-gray-50 p-4 border-b border-gray-200 flex items-center justify-between">
+            <div className="bg-gray-50 px-5 py-4 border-b border-gray-200 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Package className="w-5 h-5 text-indigo-600" />
-                <h3 className="font-bold text-gray-700 uppercase text-xs tracking-wider">Producción Paquetes</h3>
+                <h3 className="font-display font-bold text-gray-800 text-sm tracking-tight">Producción Paquetes</h3>
               </div>
-              <span className="text-xl font-black text-indigo-700">{stats.totalPacks.toLocaleString('es-AR')}</span>
+              <span className="text-2xl font-display font-bold text-indigo-750">{stats.totalPacks.toLocaleString('es-AR')}</span>
             </div>
-            <div className="divide-y divide-gray-100">
-              <div className="flex justify-between items-center p-4 hover:bg-gray-50 transition-colors">
-                <span className="text-sm font-bold text-gray-600 uppercase tracking-tight">Paq. Línea 1</span>
-                <span className="text-lg font-black text-gray-900">{stats.packsPorLinea['1'].toLocaleString('es-AR')}</span>
+            <div className="divide-y divide-gray-150">
+              <div className="flex justify-between items-center px-5 py-4 hover:bg-gray-50/50 transition-colors">
+                <span className="text-sm font-medium text-gray-600">Paq. Línea 1</span>
+                <span className="text-lg font-display font-bold text-gray-900">{stats.packsPorLinea['1'].toLocaleString('es-AR')}</span>
               </div>
-              <div className="flex justify-between items-center p-4 hover:bg-gray-50 transition-colors">
-                <span className="text-sm font-bold text-gray-600 uppercase tracking-tight">Paq. Línea 2</span>
-                <span className="text-lg font-black text-gray-900">{stats.packsPorLinea['2'].toLocaleString('es-AR')}</span>
+              <div className="flex justify-between items-center px-5 py-4 hover:bg-gray-50/50 transition-colors">
+                <span className="text-sm font-medium text-gray-600">Paq. Línea 2</span>
+                <span className="text-lg font-display font-bold text-gray-900">{stats.packsPorLinea['2'].toLocaleString('es-AR')}</span>
               </div>
-              <div className="flex justify-between items-center p-4 hover:bg-gray-50 transition-colors">
-                <span className="text-sm font-bold text-gray-600 uppercase tracking-tight">Paq. Línea 3</span>
-                <span className="text-lg font-black text-gray-900">{stats.packsPorLinea['3'].toLocaleString('es-AR')}</span>
+              <div className="flex justify-between items-center px-5 py-4 hover:bg-gray-50/50 transition-colors">
+                <span className="text-sm font-medium text-gray-600">Paq. Línea 3</span>
+                <span className="text-lg font-display font-bold text-gray-900">{stats.packsPorLinea['3'].toLocaleString('es-AR')}</span>
               </div>
             </div>
           </div>
 
           <div className="flex gap-4">
             <div className="flex-1 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-              <div className="bg-gray-50 p-4 border-b border-gray-200">
+              <div className="bg-gray-50 px-5 py-4 border-b border-gray-200">
                 <div className="flex items-center gap-2">
                   <Droplets className="w-5 h-5 text-cyan-600" />
-                  <h3 className="font-bold text-gray-700 uppercase text-xs tracking-wider">Eficiencia Volumen</h3>
+                  <h3 className="font-display font-bold text-gray-800 text-sm tracking-tight">Eficiencia Volumen</h3>
                 </div>
               </div>
-              <div className="p-4 space-y-4">
-                <div className="border-b border-gray-100 pb-3">
-                  <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Cajas Unitarias</span>
-                  <span className="text-2xl font-black text-cyan-700">{Math.round(stats.cajasUnitarias).toLocaleString('es-AR')}</span>
+              <div className="p-5 space-y-4">
+                <div className="border-b border-gray-150 pb-3">
+                  <span className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Cajas Unitarias</span>
+                  <span className="text-2xl font-display font-bold text-cyan-705">{Math.round(stats.cajasUnitarias).toLocaleString('es-AR')}</span>
                 </div>
-                <div className="grid grid-cols-1 gap-4">
-                  <div>
-                    <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Rel. Litros/Bot</span>
-                    <span className="text-lg font-black text-gray-800">{stats.relacionLitrosBotellas.toFixed(2)}</span>
+                <div className="grid grid-cols-1 gap-3.5">
+                  <div className="flex justify-between items-center border-b border-gray-100 pb-2">
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Rel. Litros/Bot</span>
+                    <span className="text-base font-display font-semibold text-gray-850">{stats.relacionLitrosBotellas.toFixed(2)}</span>
                   </div>
-                  <div>
-                    <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Prod. Activos</span>
-                    <span className="text-lg font-black text-gray-800">{stats.producedProductsCount}/{stats.totalActiveProducts}</span>
+                  <div className="flex justify-between items-center border-b border-gray-100 pb-2">
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Prod. Activos</span>
+                    <span className="text-base font-display font-semibold text-gray-850">{stats.producedProductsCount}/{stats.totalActiveProducts}</span>
                   </div>
-                  <div>
-                    <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Unit/Físicas</span>
-                    <span className="text-lg font-black text-gray-800">{stats.cajasUnitariasFisicasRatio.toFixed(2)}</span>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Unit/Físicas</span>
+                    <span className="text-base font-display font-semibold text-gray-850">{stats.cajasUnitariasFisicasRatio.toFixed(2)}</span>
                   </div>
                 </div>
               </div>
             </div>
             <div className="hidden sm:flex items-end pb-6">
-              <BottleIcon className="w-20 h-20 text-gray-200" />
+              <BottleIcon className="w-20 h-20 text-gray-250 opacity-40" />
             </div>
           </div>
 
           {/* Card: Transformaciones y Cambios de Sabor */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="bg-gradient-to-r from-blue-50 to-indigo-50/50 p-4 border-b border-gray-200 flex items-center justify-between">
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50/50 px-5 py-4 border-b border-gray-200 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <RefreshCw className="w-5 h-5 text-blue-600" />
-                <h3 className="font-bold text-gray-700 uppercase text-xs tracking-wider">Cambios y Transformaciones</h3>
+                <h3 className="font-display font-bold text-gray-855 text-sm tracking-tight">Cambios y Transformaciones</h3>
               </div>
-              <span className="text-[10px] font-black bg-blue-100 text-blue-700 px-2 py-0.5 rounded tracking-widest uppercase">KPIs de Setups</span>
+              <span className="text-[10px] font-bold bg-blue-100 text-blue-750 px-2.5 py-0.5 rounded-lg tracking-wider uppercase">KPIs de Setups</span>
             </div>
             
-            <div className="p-4 space-y-4">
+            <div className="p-5 space-y-5">
               {/* Transformaciones de Línea */}
-              <div className="pb-4 border-b border-gray-100">
+              <div className="pb-4 border-b border-gray-150">
                 <div className="flex justify-between items-baseline mb-1">
                   <div className="flex flex-col">
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Transformaciones de Línea</span>
-                    <span className="text-xs text-gray-400 font-medium">Cambios de calibre (tamaño) en la línea</span>
+                    <span className="text-xs font-semibold text-slate-650 uppercase tracking-wider">Transformaciones de Línea</span>
+                    <span className="text-xs text-slate-500 font-medium">Cambios de calibre (tamaño) en la línea</span>
                   </div>
-                  <span className="text-3xl font-black text-slate-800">
+                  <span className="text-3xl font-display font-bold text-slate-800">
                     {stats.transformations?.total ?? 0}
                   </span>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-3 mt-3">
-                  <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                    <span className="block text-[8px] font-bold text-gray-400 uppercase tracking-tighter">Con Personal (Consecutivas)</span>
-                    <span className="text-base font-black text-slate-700 mt-1 block">{stats.transformations?.consecutive ?? 0}</span>
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <span className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Con Personal (Consecutivas)</span>
+                    <span className="text-lg font-display font-bold text-slate-800 mt-1 block">{stats.transformations?.consecutive ?? 0}</span>
                   </div>
-                  <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                    <span className="block text-[8px] font-bold text-gray-400 uppercase tracking-tighter">Sin Personal (Faltantes)</span>
-                    <span className="text-base font-black text-slate-700 mt-1 block">{stats.transformations?.nonConsecutive ?? 0}</span>
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <span className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Sin Personal (Faltantes)</span>
+                    <span className="text-lg font-display font-bold text-slate-800 mt-1 block">{stats.transformations?.nonConsecutive ?? 0}</span>
                   </div>
                 </div>
               </div>
 
               {/* Cambios de Sabor */}
-              <div className="pb-4 border-b border-gray-100">
+              <div className="pb-4 border-b border-gray-150 border-dashed">
                 <div className="flex justify-between items-baseline">
                   <div className="flex flex-col">
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Cambios de Sabor</span>
-                    <span className="text-xs text-gray-400 font-medium">Misma línea y calibre, consecutivas</span>
+                    <span className="text-xs font-semibold text-slate-655 uppercase tracking-wider">Cambios de Sabor</span>
+                    <span className="text-xs text-slate-500 font-medium">Misma línea y calibre, consecutivas</span>
                   </div>
-                  <span className="text-3xl font-black text-blue-600">
+                  <span className="text-3xl font-display font-bold text-blue-600">
                     {stats.transformations?.flavorChanges ?? 0}
                   </span>
                 </div>
@@ -1648,39 +1648,39 @@ export function ManagementSummary() {
               <div>
                 <div className="flex justify-between items-baseline mb-3">
                   <div className="flex flex-col">
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Arranques de línea y planta</span>
-                    <span className="text-xs text-gray-400 font-medium">Puestas en marcha de líneas de producción</span>
+                    <span className="text-xs font-semibold text-slate-655 uppercase tracking-wider">Arranques de línea y planta</span>
+                    <span className="text-xs text-slate-500 font-medium">Puestas en marcha de líneas de producción</span>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 mb-3">
-                  <div className="bg-amber-50/50 p-2.5 rounded-xl border border-amber-100/70 shadow-sm">
-                    <span className="block text-[8px] font-black text-amber-700 uppercase tracking-tight">Arranque de Fábrica</span>
+                  <div className="bg-amber-50/50 p-2.5 rounded-xl border border-amber-100 shadow-sm">
+                    <span className="block text-[10px] font-semibold text-amber-800 uppercase tracking-wider">Arranque de Fábrica</span>
                     <div className="flex items-baseline gap-1 mt-1">
-                      <span className="text-xl font-black text-amber-800">{stats.transformations?.factoryStartups ?? 0}</span>
-                      <span className="text-[8px] text-amber-600 font-bold uppercase tracking-widest">Planta</span>
+                      <span className="text-xl font-display font-bold text-amber-900">{stats.transformations?.factoryStartups ?? 0}</span>
+                      <span className="text-[10px] text-amber-600 font-semibold uppercase tracking-wider">Planta</span>
                     </div>
                   </div>
-                  <div className="bg-indigo-50/50 p-2.5 rounded-xl border border-indigo-100/70 shadow-sm">
-                    <span className="block text-[8px] font-black text-indigo-700 uppercase tracking-tight">Arranques de Línea</span>
+                  <div className="bg-indigo-50/50 p-2.5 rounded-xl border border-indigo-100 shadow-sm">
+                    <span className="block text-[10px] font-semibold text-indigo-800 uppercase tracking-wider">Arranques de Línea</span>
                     <div className="flex items-baseline gap-1 mt-1">
-                      <span className="text-xl font-black text-indigo-800">{stats.transformations?.lineStartupsTotal ?? 0}</span>
-                      <span className="text-[8px] text-indigo-600 font-bold uppercase tracking-widest">Totales</span>
+                      <span className="text-xl font-display font-bold text-indigo-900">{stats.transformations?.lineStartupsTotal ?? 0}</span>
+                      <span className="text-[10px] text-indigo-600 font-semibold uppercase tracking-wider">Totales</span>
                     </div>
                   </div>
                 </div>
 
                 {/* Desglose de Arranques por Línea */}
-                <div className="bg-gray-50 rounded-xl p-3 border border-gray-100 space-y-2">
-                  <span className="block text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Desglose de Arranques</span>
+                <div className="bg-gray-50 rounded-xl p-3 border border-gray-150 space-y-2">
+                  <span className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Desglose de Arranques</span>
                   <div className="grid grid-cols-3 gap-2">
                     {availableLines.map(line => {
                       const normLine = line.replace(/\D/g, '') || line.toLowerCase().trim();
                       const count = stats.transformations?.lineStartupsBreakdown?.[normLine] ?? 0;
                       return (
-                        <div key={line} className="bg-white p-2 rounded-lg border border-gray-100 flex flex-col items-center justify-center shadow-sm">
-                          <span className="text-[9px] font-bold text-gray-500">{line}</span>
-                          <span className="text-sm font-black text-gray-800 mt-1">{count}</span>
+                        <div key={line} className="bg-white p-2 rounded-lg border border-gray-150 flex flex-col items-center justify-center shadow-sm">
+                          <span className="text-[10px] font-bold text-gray-600">{line}</span>
+                          <span className="text-sm font-display font-bold text-gray-900 mt-1">{count}</span>
                         </div>
                       );
                     })}
@@ -1692,9 +1692,9 @@ export function ManagementSummary() {
         </div>
       </div>
 
-      <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 flex items-start gap-3">
-        <Info className="w-5 h-5 text-blue-500 mt-0.5" />
-        <div className="text-[10px] text-blue-700 space-y-1 font-medium">
+      <div className="bg-blue-50/60 p-4 rounded-2xl border border-blue-100 flex items-start gap-3">
+        <Info className="w-5 h-5 text-blue-550 mt-0.5" />
+        <div className="text-xs text-blue-800 space-y-1.5 font-medium leading-relaxed">
           <p><strong>Turnos Totales:</strong> 3 líneas × 3 turnos × días del mes.</p>
           <p><strong>Turnos Hábiles:</strong> Lunes a Viernes (3 turnos) y Sábado (1 turno mañana) por cada línea.</p>
           <p><strong>Turnos Trabajados:</strong> Minutos de Marcha Bruta / 480 min por turno estándar.</p>
@@ -1704,17 +1704,17 @@ export function ManagementSummary() {
       </div>
 
       {/* Calculation Breakdown for Transparency */}
-      <div className="mt-12 border-t border-gray-200 pt-8">
+      <div className="mt-12 border-t border-gray-205 pt-8">
         <details className="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden group">
-          <summary className="p-4 cursor-pointer hover:bg-gray-100 transition-colors flex items-center justify-between font-bold text-gray-600 text-sm uppercase tracking-wider">
+          <summary className="p-4 cursor-pointer hover:bg-gray-100 transition-colors flex items-center justify-between font-display font-semibold text-gray-700 text-sm tracking-tight select-none">
             <span>Detalle Técnico de Cálculos (Revisión)</span>
-            <span className="text-xs font-normal normal-case text-gray-400 group-open:hidden">Haga clic para ver el desglose</span>
+            <span className="text-xs font-normal text-gray-400 group-open:hidden">Haga clic para ver el desglose</span>
           </summary>
-          <div className="p-6 space-y-6 bg-white border-t border-gray-200">
-            <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg flex items-start gap-3 mb-4">
+          <div className="p-6 space-y-6 bg-white border-t border-gray-150">
+            <div className="bg-amber-50 border border-amber-200 p-3.5 rounded-xl flex items-start gap-3 mb-4">
               <Info className="w-4 h-4 text-amber-600 mt-0.5" />
-              <div className="text-[10px] text-amber-800 space-y-1">
-                <p className="font-bold uppercase">Reglas de Conversión y Jornada:</p>
+              <div className="text-[11px] text-amber-900 space-y-1 font-medium leading-relaxed">
+                <p className="font-bold uppercase tracking-wide">Reglas de Conversión y Jornada:</p>
                 <ul className="list-disc list-inside space-y-0.5">
                   <li><strong>Unidad Estándar:</strong> 1 Turno = 480 minutos.</li>
                   <li><strong>Turnos Reducidos:</strong> 360 min = 0.75 turnos. 300 min (Sábados) = 0.625 turnos.</li>
@@ -1725,54 +1725,54 @@ export function ManagementSummary() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div>
-                <h4 className="font-black text-blue-700 text-xs uppercase mb-3">1. Planificación y Feriados</h4>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between border-b pb-1">
-                    <span className="text-gray-500">Días en el mes:</span>
-                    <span className="font-bold">{stats.breakdown.daysInMonth}</span>
+                <h4 className="font-display font-bold text-blue-900 text-xs uppercase tracking-wide mb-3">1. Planificación y Feriados</h4>
+                <div className="space-y-2 text-sm font-medium">
+                  <div className="flex justify-between border-b border-gray-100 pb-1.5 text-gray-600">
+                    <span>Días en el mes:</span>
+                    <span className="font-bold text-gray-900">{stats.breakdown.daysInMonth}</span>
                   </div>
-                  <div className="flex justify-between border-b pb-1">
-                    <span className="text-gray-500">Feriados detectados:</span>
-                    <span className="font-bold">{stats.breakdown.holidays.length}</span>
+                  <div className="flex justify-between border-b border-gray-100 pb-1.5 text-gray-600">
+                    <span>Feriados detectados:</span>
+                    <span className="font-bold text-gray-900">{stats.breakdown.holidays.length}</span>
                   </div>
-                  <div className="flex justify-between border-b pb-1">
-                    <span className="text-gray-500">Duración Noche Feriado:</span>
-                    <span className="font-bold text-orange-600">{stats.breakdown.holidayNightDuration} min</span>
+                  <div className="flex justify-between border-b border-gray-100 pb-1.5 text-gray-600">
+                    <span>Duración Noche Feriado:</span>
+                    <span className="font-bold text-orange-650">{stats.breakdown.holidayNightDuration} min</span>
                   </div>
-                  <div className="flex justify-between border-b pb-1">
-                    <span className="text-gray-500 font-bold text-blue-600">Promedio Lun-Jue (Config):</span>
-                    <span className="font-black text-blue-600">{stats.breakdown.standardDailyShifts.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}</span>
+                  <div className="flex justify-between border-b border-gray-100 pb-1.5 text-blue-700">
+                    <span>Promedio Lun-Jue (Config):</span>
+                    <span className="font-display font-bold">{stats.breakdown.standardDailyShifts.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}</span>
                   </div>
                   
                   {/* Debug Extras List */}
                   {stats.breakdown.extraShiftsDebug.length > 0 && (
                     <div className="mt-4">
-                      <span className="text-[10px] text-gray-400 font-bold uppercase">Detalle de Excedentes ({stats.breakdown.extraShiftsDebug.length}):</span>
-                      <div className="mt-1 max-h-40 overflow-y-auto border border-gray-100 rounded bg-gray-50/50">
-                        <table className="min-w-full text-[9px]">
-                          <thead className="bg-gray-100 sticky top-0">
+                      <span className="text-xs text-gray-500 font-semibold uppercase tracking-wider">Detalle de Excedentes ({stats.breakdown.extraShiftsDebug.length}):</span>
+                      <div className="mt-1.5 max-h-40 overflow-y-auto border border-gray-200 rounded-xl bg-gray-50/50">
+                        <table className="min-w-full text-[11px] font-medium text-gray-700">
+                          <thead className="bg-gray-100 sticky top-0 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
                             <tr>
-                              <th className="px-2 py-1 text-left">Fecha</th>
-                              <th className="px-2 py-1 text-left">Turno</th>
-                              <th className="px-2 py-1 text-center">Plan (min)</th>
-                              <th className="px-2 py-1 text-center">Real (min)</th>
-                              <th className="px-2 py-1 text-right">Extra (hs)</th>
-                              <th className="px-2 py-1 text-center">Tipo</th>
+                              <th className="px-3 py-1.5 text-left">Fecha</th>
+                              <th className="px-3 py-1.5 text-left">Turno</th>
+                              <th className="px-3 py-1.5 text-center">Plan (m)</th>
+                              <th className="px-3 py-1.5 text-center">Real (m)</th>
+                              <th className="px-3 py-1.5 text-right">Extra (hs)</th>
+                              <th className="px-3 py-1.5 text-center">Tipo</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-gray-100">
+                          <tbody className="divide-y divide-gray-150">
                             {stats.breakdown.extraShiftsDebug.map((ex, i) => (
-                              <tr key={i} className="hover:bg-white">
-                                <td className="px-2 py-1">{format(parseISO(ex.date), 'dd/MM')}</td>
-                                <td className="px-2 py-1">{ex.shift}</td>
-                                <td className="px-2 py-1 text-center text-gray-400">{ex.planned}</td>
-                                <td className="px-2 py-1 text-center text-gray-400">{ex.duration}</td>
-                                <td className="px-2 py-1 text-right font-bold">{ex.extra.toFixed(2)}</td>
-                                <td className="px-2 py-1 text-center">
-                                  <span className={`px-1 rounded ${
-                                    ex.type === 'Feriado' ? 'bg-purple-100 text-purple-700' :
-                                    ex.type === 'Finde' ? 'bg-orange-100 text-orange-700' : 
-                                    'bg-blue-100 text-blue-700'
+                              <tr key={i} className="hover:bg-white transition-colors">
+                                <td className="px-3 py-1.5">{format(parseISO(ex.date), 'dd/MM')}</td>
+                                <td className="px-3 py-1.5">{ex.shift}</td>
+                                <td className="px-3 py-1.5 text-center text-gray-400">{ex.planned}</td>
+                                <td className="px-3 py-1.5 text-center text-gray-400">{ex.duration}</td>
+                                <td className="px-3 py-1.5 text-right font-display font-bold text-gray-900">{ex.extra.toFixed(2)}</td>
+                                <td className="px-3 py-1.5 text-center">
+                                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${
+                                    ex.type === 'Feriado' ? 'bg-purple-100 text-purple-700 border border-purple-200' :
+                                    ex.type === 'Finde' ? 'bg-orange-100 text-orange-700 border border-orange-200' : 
+                                    'bg-blue-100 text-blue-700 border border-blue-200'
                                   }`}>
                                     {ex.type === 'Feriado' ? 'H' : (ex.type === 'Finde' ? 'F' : 'C')}
                                   </span>
@@ -1785,37 +1785,37 @@ export function ManagementSummary() {
                     </div>
                   )}
 
-                  <div className="mt-2">
-                    <span className="text-[10px] text-gray-400 font-bold uppercase">Regla de Feriados:</span>
-                    <p className="text-[10px] text-gray-600 italic">
+                  <div className="mt-3 leading-relaxed">
+                    <span className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Regla de Feriados:</span>
+                    <p className="text-[11px] text-gray-500 italic mt-0.5">
                       * Planta cierra 22:00 víspera (Cancela Noche anterior).<br/>
                       * Planta retoma 00:00 día siguiente (Noche feriado se trabaja).
                     </p>
                   </div>
-                  <div className="mt-2">
-                    <span className="text-[10px] text-gray-400 font-bold uppercase">Fechas Feriados:</span>
-                    <div className="flex flex-wrap gap-1 mt-1">
+                  <div className="mt-3">
+                    <span className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Fechas Feriados:</span>
+                    <div className="flex flex-wrap gap-1 mt-1.5">
                       {stats.breakdown.holidays.map(h => (
-                        <span key={h} className="bg-red-50 text-red-600 px-2 py-0.5 rounded text-[10px] font-bold border border-red-100">{h}</span>
+                        <span key={h} className="bg-red-50 text-red-600 px-2 py-0.5 rounded text-[10px] font-semibold border border-red-100">{h}</span>
                       ))}
-                      {stats.breakdown.holidays.length === 0 && <span className="text-gray-400 italic text-xs">Ninguno</span>}
+                      {stats.breakdown.holidays.length === 0 && <span className="text-gray-450 italic text-xs">Ninguno</span>}
                     </div>
                   </div>
                 </div>
               </div>
               
               <div>
-                <h4 className="font-black text-orange-700 text-xs uppercase mb-3">2. Horas Extras</h4>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between border-b pb-1">
-                    <span className="text-gray-500">Fines de Semana:</span>
-                    <span className="font-bold">{stats.breakdown.weekendExtraHours?.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 }) || '0'} hs</span>
+                <h4 className="font-display font-bold text-orange-900 text-xs uppercase tracking-wide mb-3">2. Horas Extras</h4>
+                <div className="space-y-2 text-sm font-medium">
+                  <div className="flex justify-between border-b border-gray-100 pb-1.5 text-gray-600">
+                    <span>Fines de Semana:</span>
+                    <span className="font-bold text-gray-900">{stats.breakdown.weekendExtraHours?.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 }) || '0'} hs</span>
                   </div>
-                  <div className="flex justify-between border-b pb-1">
-                    <span className="text-gray-500">Excedentes Plan:</span>
-                    <span className="font-bold">{stats.breakdown.weekdayExtraHours?.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 }) || '0'} hs</span>
+                  <div className="flex justify-between border-b border-gray-100 pb-1.5 text-gray-600">
+                    <span>Excedentes Plan:</span>
+                    <span className="font-bold text-gray-900">{stats.breakdown.weekdayExtraHours?.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 }) || '0'} hs</span>
                   </div>
-                  <p className="text-[10px] text-gray-400 mt-2 italic">
+                  <p className="text-[11px] text-gray-500 mt-3 leading-relaxed italic">
                     * Fines de semana: Sábados {'>'} 13hs y Domingos.<br/>
                     * Excedentes: Reportes reales que superan la planificación del día.
                   </p>
@@ -1823,31 +1823,31 @@ export function ManagementSummary() {
               </div>
             </div>
 
-              <div className="md:col-span-2">
-                <h4 className="font-black text-indigo-700 text-xs uppercase mb-3">Catálogo de Productos Activos ({stats.totalActiveProducts})</h4>
-                <div className="max-h-[400px] overflow-y-auto border border-gray-100 rounded bg-gray-50/30 p-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2">
-                    {[...(stats.breakdown.activeProductsList || [])].sort((a, b) => a.name.localeCompare(b.name)).map((prod, i) => {
-                      const isProduced = (stats.producedProducts || []).includes(prod.key);
-                      return (
-                        <div key={i} className="text-[10px] py-1 border-b border-gray-100/50 flex justify-between items-center group">
-                          <span className={`${isProduced ? 'text-gray-900 font-bold' : 'text-gray-500'} uppercase transition-colors`}>{prod.name}</span>
-                          {isProduced ? 
-                            <span className="text-[8px] bg-green-100 text-green-700 px-1 rounded font-black">PRODUCIDO</span> :
-                            <span className="text-[8px] text-gray-300 font-medium">SIN MOV.</span>
-                          }
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-                <div className="mt-3 bg-blue-50 border border-blue-100 p-3 rounded-lg text-[9px] text-blue-700 italic">
-                  * La lista considera Marcas, Calibres y Sabores habilitados, cruzados con la disponibilidad de Calibres en las Líneas operativas configuradas.
+            <div className="mt-8 pt-6 border-t border-gray-150">
+              <h4 className="font-display font-bold text-indigo-900 text-xs uppercase tracking-wide mb-3">Catálogo de Productos Activos ({stats.totalActiveProducts})</h4>
+              <div className="max-h-[300px] overflow-y-auto border border-gray-200 rounded-xl bg-gray-50/20 p-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2">
+                  {[...(stats.breakdown.activeProductsList || [])].sort((a, b) => a.name.localeCompare(b.name)).map((prod, i) => {
+                    const isProduced = (stats.producedProducts || []).includes(prod.key);
+                    return (
+                      <div key={i} className="text-[11px] py-1 border-b border-gray-100 flex justify-between items-center group font-medium text-gray-700">
+                        <span className={`${isProduced ? 'text-gray-950 font-bold' : 'text-gray-400'} uppercase transition-colors`}>{prod.name}</span>
+                        {isProduced ? 
+                          <span className="text-[9px] bg-green-100 text-green-700 px-2 py-0.5 rounded font-semibold border border-green-200">PRODUCIDO</span> :
+                          <span className="text-[9px] text-gray-300 font-medium">SIN MOV.</span>
+                        }
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
+              <div className="mt-3 bg-blue-50/50 border border-blue-100 p-3 rounded-xl text-[10px] text-blue-800 leading-relaxed italic">
+                * La lista considera Marcas, Calibres y Sabores habilitados, cruzados con la disponibilidad de Calibres en las Líneas operativas configuradas.
+              </div>
+            </div>
 
-            <div className="mt-6">
-              <h4 className="font-black text-gray-700 text-xs uppercase mb-3">3. Desglose Diario: Reales (No Extra) vs Planificados</h4>
+            <div className="mt-8 pt-6 border-t border-gray-150">
+              <h4 className="font-display font-bold text-gray-800 text-xs uppercase tracking-wider mb-3">3. Desglose Diario: Reales (No Extra) vs Planificados</h4>
               <div className="grid grid-cols-4 sm:grid-cols-7 md:grid-cols-10 gap-2">
                 {Object.entries(stats.breakdown.dailyPlan).map(([date, planned]) => {
                   const actualMinutes = stats.breakdown.minutesByDay[date] || 0;
@@ -1855,18 +1855,18 @@ export function ManagementSummary() {
                   const plannedCount = Number(planned) || 0;
                   const isExceeded = actualShifts > (plannedCount + 0.1); // Small buffer for rounding
                   return (
-                    <div key={date} className={`p-2 rounded border text-center ${plannedCount === 0 && actualShifts === 0 ? 'bg-gray-50 border-gray-100 opacity-50' : plannedCount === 0 && actualShifts > 0 ? 'bg-orange-50 border-orange-200' : isExceeded ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-200'}`}>
-                      <span className="block text-[9px] font-bold text-gray-400">{date.split('-')[2]}</span>
-                      <div className="flex flex-col">
-                        <span className={`text-sm font-black ${isExceeded ? 'text-blue-600' : 'text-gray-700'}`}>{actualShifts.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 3 })}</span>
+                    <div key={date} className={`p-2 rounded-xl border text-center transition-all ${plannedCount === 0 && actualShifts === 0 ? 'bg-gray-50 border-gray-100 opacity-40' : plannedCount === 0 && actualShifts > 0 ? 'bg-orange-50/60 border-orange-200' : isExceeded ? 'bg-blue-50/60 border-blue-200 shadow-sm' : 'bg-white border-gray-200 hover:border-gray-300'}`}>
+                      <span className="block text-[10px] font-bold text-gray-450">{date.split('-')[2]}</span>
+                      <div className="flex flex-col mt-0.5">
+                        <span className={`text-sm font-display font-bold ${isExceeded ? 'text-blue-600' : 'text-gray-700'}`}>{actualShifts.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}</span>
                         <div className="w-full h-px bg-gray-100 my-1"></div>
-                        <span className="text-[10px] font-bold text-gray-400">{plannedCount}</span>
+                        <span className="text-[10px] font-semibold text-gray-400">{plannedCount}</span>
                       </div>
                     </div>
                   );
                 })}
               </div>
-              <p className="text-[9px] text-gray-400 mt-3 italic">
+              <p className="text-[10px] text-gray-450 mt-3 italic leading-relaxed">
                 * Formato: [Turnos Reales (basado en minutos) / Planificados]. Los reales aquí incluyen todos los turnos trabajados en la jornada operativa.
               </p>
             </div>

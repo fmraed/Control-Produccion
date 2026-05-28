@@ -366,26 +366,79 @@ export function SQLIntegration() {
                   const groupedSql: Record<string, any> = {};
                   const activeMappingVals = productType === 'products' ? Object.values(sqlMappings) : Object.values(sqlSyrupMappings);
 
-                  results.forEach(row => {
-                    const code = row.codigo_abreviado;
-                    // Only process rows that correspond to our current mapping
-                    if (!activeMappingVals.includes(code)) return;
-                    
-                    const groupKey = code;
-                    const displayDesc = row.descripcion_articulo;
-                    
-                    if (!groupedSql[groupKey]) {
-                      groupedSql[groupKey] = {
-                        ...row,
-                        codigo_abreviado: groupKey,
-                        descripcion_articulo: displayDesc,
+                  if (productType === 'syrups') {
+                    // Inicializar con todos los jarabes mapeados en config para asegurar que se muestren todos
+                    Object.entries(sqlSyrupMappings).forEach(([key, code]) => {
+                      if (!code) return;
+                      const codeStr = code as string;
+                      const parts = key.split('-');
+                      const label = parts.length >= 2 ? `Jarabe ${parts[1]} (${parts[0]})` : `Jarabe ${key}`;
+                      groupedSql[codeStr] = {
+                        codigo_abreviado: codeStr,
+                        descripcion_articulo: label,
                         nu_cantFabri: 0,
                         ordenes: [],
                       };
-                    }
-                    groupedSql[groupKey].nu_cantFabri += row.nu_cantFabri || 0;
-                    groupedSql[groupKey].ordenes.push(row.nu_ordenProduccion);
-                  });
+                    });
+
+                    // Cargar y sumar los resultados de SQL Server
+                    (results || []).forEach(row => {
+                      const code = row.codigo_abreviado;
+                      if (!activeMappingVals.includes(code)) return;
+
+                      if (!groupedSql[code]) {
+                        groupedSql[code] = {
+                          codigo_abreviado: code,
+                          descripcion_articulo: row.descripcion_articulo || `Jarabe ${code}`,
+                          nu_cantFabri: 0,
+                          ordenes: [],
+                        };
+                      }
+                      groupedSql[code].nu_cantFabri += row.nu_cantFabri || 0;
+                      if (row.nu_ordenProduccion && !groupedSql[code].ordenes.includes(row.nu_ordenProduccion)) {
+                        groupedSql[code].ordenes.push(row.nu_ordenProduccion);
+                      }
+                    });
+                  } else {
+                    // Para productos, incluimos códigos que tengan datos en SQL Server o en Firestore
+                    const keySet = new Set<string>();
+                    (results || []).forEach(row => {
+                      if (activeMappingVals.includes(row.codigo_abreviado)) {
+                        keySet.add(row.codigo_abreviado);
+                      }
+                    });
+                    Object.keys(firestoreTotals).forEach(code => {
+                      if (activeMappingVals.includes(code)) {
+                        keySet.add(code);
+                      }
+                    });
+
+                    keySet.forEach(code => {
+                      const sqlRows = (results || []).filter(row => row.codigo_abreviado === code);
+                      const sqlPacksSum = sqlRows.reduce((acc, row) => acc + (row.nu_cantFabri || 0), 0);
+                      const sqlOrders = Array.from(new Set(sqlRows.map(row => row.nu_ordenProduccion).filter(Boolean)));
+
+                      let description = '';
+                      if (sqlRows.length > 0 && sqlRows[0].descripcion_articulo) {
+                        description = sqlRows[0].descripcion_articulo;
+                      } else {
+                        const entry = Object.entries(sqlMappings).find(([_, val]) => val === code);
+                        if (entry) {
+                          const parts = entry[0].split('-');
+                          description = parts.length >= 3 ? `${parts[0]} ${parts[1]} ${parts[2]}ml` : parts.join(' ');
+                        } else {
+                          description = `Producto ${code}`;
+                        }
+                      }
+
+                      groupedSql[code] = {
+                        codigo_abreviado: code,
+                        descripcion_articulo: description,
+                        nu_cantFabri: sqlPacksSum,
+                        ordenes: sqlOrders,
+                      };
+                    });
+                  }
 
                   return Object.values(groupedSql).map((row: any, i) => {
                     const sqlPacks = row.nu_cantFabri || 0;
