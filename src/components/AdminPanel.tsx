@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment, useMemo } from 'react';
 import { collection, query, orderBy, onSnapshot, doc, getDoc, setDoc, addDoc, deleteDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
-import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, CO2_VOLUMES, SABORES_SIN_JARABE, RANGOS_MIXTO, WASTE_WEIGHTS, DEFAULT_INSUMOS } from '../constants';
+import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, CO2_VOLUMES, SABORES_SIN_JARABE, RANGOS_MIXTO, WASTE_WEIGHTS, DEFAULT_INSUMOS, PreformaConfig, TermoConfig, StretchConfig, TapaConfig } from '../constants';
 import { Settings, Save, CheckCircle2, XCircle, AlertCircle, Plus, Trash2, Users, Database, FlaskConical, Link2, Clock, Calendar, ShieldCheck, UserCog, Briefcase, AlertTriangle, Hash, Package, TrendingUp, Scale } from 'lucide-react';
 import { UserProfile, UserRole, RolePermissions } from '../types';
 import { SQLIntegration } from './SQLIntegration';
@@ -37,6 +37,9 @@ interface AppConfig {
     };
     weeklyPlan: Record<string, Record<string, { count: number, duration: number }>>;
     holidays?: string[];
+    holidayNightDuration?: number;
+    changeDate?: string;
+    previousWeeklyPlan?: Record<string, Record<string, { count: number, duration: number }>>;
   };
   historicalSettings?: {
     showHistoricalGlobal: boolean;
@@ -57,6 +60,12 @@ interface AppConfig {
   syrupFormulas?: Record<string, Record<string, { liters: number; emulsion: number }>>;
   insumos?: string[];
   insumosMatrix?: Record<string, Record<string, Record<string, number>>>;
+  compatibleInsumoGroups?: Record<string, string[]>;
+  compatiblePackagingGroups?: Record<string, string[]>;
+  preformasConfig?: PreformaConfig[];
+  termoConfig?: TermoConfig[];
+  stretchConfig?: StretchConfig[];
+  tapaConfig?: TapaConfig[];
 }
 
 export function AdminPanel() {
@@ -65,6 +74,7 @@ export function AdminPanel() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [activeTab, setActiveTab] = useState<'config' | 'sql' | 'mappings' | 'shifts' | 'users' | 'permissions' | 'formulas' | 'danger' | 'salaries' | 'counters' | 'waste'>('config');
+  const [editingPreviousScheme, setEditingPreviousScheme] = useState(false);
 
   const getFlavorsForBrand = (brand: string) => {
     if (!config) return [];
@@ -137,6 +147,7 @@ export function AdminPanel() {
   const [newChemist, setNewChemist] = useState('');
   const [newInsumo, setNewInsumo] = useState('');
   const [newCompatibleGroup, setNewCompatibleGroup] = useState<string[]>([]);
+  const [newCompatiblePackagingGroup, setNewCompatiblePackagingGroup] = useState<string[]>([]);
   
   // Deletion confirmation state
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'brand' | 'line' | 'flavor' | 'size' | 'supervisor' | 'chemist' | 'insumo', id: string | number, step: number } | null>(null);
@@ -156,6 +167,15 @@ export function AdminPanel() {
     ((u.displayName || '').toLowerCase().includes(userSearch.toLowerCase()) || 
     (u.email || '').toLowerCase().includes(userSearch.toLowerCase()))
   );
+
+  const allPackagingItems = useMemo(() => {
+    const items: string[] = [];
+    (config?.preformasConfig || []).forEach(p => items.push(p.name));
+    (config?.termoConfig || []).forEach(t => items.push(t.name));
+    (config?.stretchConfig || []).forEach(s => items.push(s.name));
+    (config?.tapaConfig || []).forEach(t => items.push(t.name));
+    return items;
+  }, [config?.preformasConfig, config?.termoConfig, config?.stretchConfig, config?.tapaConfig]);
 
   useEffect(() => {
     const configRef = doc(db, 'config', 'production');
@@ -178,34 +198,41 @@ export function AdminPanel() {
           }
         };
 
-        // Normalize weeklyPlan if it's in the old format
-        if (shiftConfig.weeklyPlan) {
-          const normalizedWeeklyPlan: any = {};
+        const normalizePlanFn = (planToNormalize: any) => {
+          if (!planToNormalize) return null;
+          const normalized: any = {};
           const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
           const enabledLinesCount = data.lines?.filter((l: string) => data.enabledLines?.[l] !== false).length || 3;
           
           days.forEach(day => {
-            const val = shiftConfig.weeklyPlan[day];
-            normalizedWeeklyPlan[day] = {};
+            const val = planToNormalize[day];
+            normalized[day] = {};
             
             ['Mañana', 'Tarde', 'Noche'].forEach(shift => {
               if (Array.isArray(val)) {
                 // Format from previous turn (array of strings)
                 const isActive = val.includes(shift);
-                normalizedWeeklyPlan[day][shift] = {
+                normalized[day][shift] = {
                   count: isActive ? enabledLinesCount : 0,
-                  duration: shiftConfig.shiftDurations?.[shift] || 480
+                  duration: (shiftConfig.shiftDurations?.[shift] || 480)
                 };
               } else if (typeof val === 'object' && val !== null && val[shift]) {
                 // Already in new format
-                normalizedWeeklyPlan[day][shift] = val[shift];
+                normalized[day][shift] = val[shift];
               } else {
                 // Old numeric format or missing
-                normalizedWeeklyPlan[day][shift] = { count: 0, duration: 480 };
+                normalized[day][shift] = { count: 0, duration: 480 };
               }
             });
           });
-          shiftConfig.weeklyPlan = normalizedWeeklyPlan;
+          return normalized;
+        };
+
+        if (shiftConfig.weeklyPlan) {
+          shiftConfig.weeklyPlan = normalizePlanFn(shiftConfig.weeklyPlan);
+        }
+        if (shiftConfig.previousWeeklyPlan) {
+          shiftConfig.previousWeeklyPlan = normalizePlanFn(shiftConfig.previousWeeklyPlan);
         }
 
         // Ensure shiftDurations exists
@@ -256,7 +283,13 @@ export function AdminPanel() {
           wasteWeights: data.wasteWeights || WASTE_WEIGHTS,
           syrupFormulas: data.syrupFormulas || {},
           insumos: data.insumos || DEFAULT_INSUMOS,
-          insumosMatrix: data.insumosMatrix || {}
+          insumosMatrix: data.insumosMatrix || {},
+          compatibleInsumoGroups: data.compatibleInsumoGroups || {},
+          compatiblePackagingGroups: data.compatiblePackagingGroups || {},
+          preformasConfig: data.preformasConfig || [],
+          termoConfig: data.termoConfig || [],
+          stretchConfig: data.stretchConfig || [],
+          tapaConfig: data.tapaConfig || []
         };
         setConfig(mergedConfig);
       } else {
@@ -359,7 +392,13 @@ export function AdminPanel() {
           co2Volumes: CO2_VOLUMES,
           syrupFormulas: {},
           insumos: DEFAULT_INSUMOS,
-          insumosMatrix: {}
+          insumosMatrix: {},
+          compatibleInsumoGroups: {},
+          compatiblePackagingGroups: {},
+          preformasConfig: [],
+          termoConfig: [],
+          stretchConfig: [],
+          tapaConfig: []
         };
         setConfig(defaultConfig);
       }
@@ -1196,13 +1235,117 @@ export function AdminPanel() {
           </div>
 
           <div className="max-w-4xl space-y-8">
+            <div className="bg-slate-50 border border-slate-250 rounded-xl p-5 space-y-4">
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="enable-shift-change"
+                  checked={!!(config.shiftConfig as any)?.changeDate}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    if (enabled) {
+                      setConfig({
+                        ...config,
+                        shiftConfig: {
+                          ...config.shiftConfig!,
+                          changeDate: new Date().toISOString().split('T')[0],
+                          previousWeeklyPlan: JSON.parse(JSON.stringify(config.shiftConfig!.weeklyPlan))
+                        }
+                      });
+                    } else {
+                      setConfig({
+                        ...config,
+                        shiftConfig: {
+                          ...config.shiftConfig!,
+                          changeDate: '',
+                          previousWeeklyPlan: undefined
+                        }
+                      });
+                      setEditingPreviousScheme(false);
+                    }
+                  }}
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                <label htmlFor="enable-shift-change" className="text-sm font-bold text-slate-800 select-none">
+                  Hubo un cambio de esquema de planificación de turnos en este mes
+                </label>
+              </div>
+
+              {!!(config.shiftConfig as any)?.changeDate && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-gray-250">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">
+                      Fecha de entrada en vigencia del Esquema Nuevo
+                    </label>
+                    <input
+                      type="date"
+                      value={(config.shiftConfig as any)?.changeDate || ''}
+                      onChange={(e) => {
+                        setConfig({
+                          ...config,
+                          shiftConfig: {
+                            ...config.shiftConfig!,
+                            changeDate: e.target.value
+                          }
+                        });
+                      }}
+                      className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+                    />
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Antes de esta fecha se usará el <b>Esquema Anterior</b>. A partir de esta fecha (inclusive) se utilizará el <b>Esquema Nuevo</b>.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">
+                      Esquema a Visualizar/Editar abajo
+                    </label>
+                    <div className="grid grid-cols-2 gap-2 mt-1">
+                      <button
+                        type="button"
+                        onClick={() => setEditingPreviousScheme(false)}
+                        className={`px-3 py-2 text-xs font-bold rounded-lg border transition-all ${
+                          !editingPreviousScheme
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                            : 'bg-white text-slate-700 hover:bg-slate-50 border-slate-200'
+                        }`}
+                      >
+                        Esquema Nuevo
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingPreviousScheme(true)}
+                        className={`px-3 py-2 text-xs font-bold rounded-lg border transition-all ${
+                          editingPreviousScheme
+                            ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                            : 'bg-white text-slate-700 hover:bg-slate-50 border-slate-200'
+                        }`}
+                      >
+                        Esquema Anterior (Viejo)
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      {!editingPreviousScheme ? (
+                        <span className="text-blue-600 font-medium">Editando plan vigente a partir del {(config.shiftConfig as any)?.changeDate}</span>
+                      ) : (
+                        <span className="text-amber-600 font-medium">Editando plan histórico anterior al {(config.shiftConfig as any)?.changeDate}</span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <section>
               <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
                 <Calendar className="w-5 h-5 text-gray-400" />
-                Planificación Semanal Detallada
+                Planificación Semanal Detallada {editingPreviousScheme ? '(Esquema Anterior)' : '(Esquema Nuevo)'}
               </h3>
               <p className="text-sm text-gray-500 mb-4">
-                Configura la cantidad de turnos (líneas activas) y la duración específica para cada turno por día.
+                Configura la cantidad de turnos (líneas activas) y la duración específica para cada turno por día para el 
+                <span className="font-semibold text-blue-600 ml-1">
+                  {editingPreviousScheme ? 'Esquema Anterior' : 'Esquema Nuevo'}
+                </span>.
               </p>
               
               <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
@@ -1228,7 +1371,10 @@ export function AdminPanel() {
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map((day) => {
-                      const dayPlan = config.shiftConfig?.weeklyPlan[day] || {};
+                      const currentWeeklyPlan = (editingPreviousScheme && config.shiftConfig?.previousWeeklyPlan) 
+                        ? config.shiftConfig.previousWeeklyPlan 
+                        : (config.shiftConfig?.weeklyPlan || {});
+                      const dayPlan = currentWeeklyPlan[day] || {};
                       let totalDayShifts = 0;
                       Object.values(dayPlan).forEach((p: any) => totalDayShifts += (p.count || 0));
                       
@@ -1256,12 +1402,14 @@ export function AdminPanel() {
                                     value={p.count}
                                     onChange={(e) => {
                                       const count = Math.max(0, Number(e.target.value));
+                                      const targetKey = editingPreviousScheme ? 'previousWeeklyPlan' : 'weeklyPlan';
+                                      const currentTargetPlan = config.shiftConfig?.[targetKey] || {};
                                       setConfig({
                                         ...config,
                                         shiftConfig: {
                                           ...config.shiftConfig!,
-                                          weeklyPlan: {
-                                            ...config.shiftConfig!.weeklyPlan,
+                                          [targetKey]: {
+                                            ...currentTargetPlan,
                                             [day]: {
                                               ...dayPlan,
                                               [shift]: { ...p, count }
@@ -1280,12 +1428,14 @@ export function AdminPanel() {
                                     value={p.duration}
                                     onChange={(e) => {
                                       const duration = Math.max(0, Number(e.target.value));
+                                      const targetKey = editingPreviousScheme ? 'previousWeeklyPlan' : 'weeklyPlan';
+                                      const currentTargetPlan = config.shiftConfig?.[targetKey] || {};
                                       setConfig({
                                         ...config,
                                         shiftConfig: {
                                           ...config.shiftConfig!,
-                                          weeklyPlan: {
-                                            ...config.shiftConfig!.weeklyPlan,
+                                          [targetKey]: {
+                                            ...currentTargetPlan,
                                             [day]: {
                                               ...dayPlan,
                                               [shift]: { ...p, duration }
@@ -1311,11 +1461,14 @@ export function AdminPanel() {
               </div>
 
               <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-100">
-                <h4 className="text-sm font-bold text-blue-800 mb-2">Resumen de Horas Semanales Planificadas:</h4>
+                <h4 className="text-sm font-bold text-blue-800 mb-2">Resumen de Horas Semanales Planificadas {editingPreviousScheme ? '(Esquema Anterior)' : '(Esquema Nuevo)'}:</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                   {['Mañana', 'Tarde', 'Noche'].map(shift => {
                     let weeklyHours = 0;
-                    Object.values(config.shiftConfig?.weeklyPlan || {}).forEach((dayPlan: any) => {
+                    const currentWeeklyPlan = (editingPreviousScheme && config.shiftConfig?.previousWeeklyPlan) 
+                      ? config.shiftConfig.previousWeeklyPlan 
+                      : (config.shiftConfig?.weeklyPlan || {});
+                    Object.values(currentWeeklyPlan).forEach((dayPlan: any) => {
                       const p = dayPlan[shift];
                       if (p && p.count > 0) {
                         // We calculate hours per line (duration of the shift)
@@ -1333,8 +1486,11 @@ export function AdminPanel() {
                   {(() => {
                     const standardDays = ['monday', 'tuesday', 'wednesday', 'thursday'];
                     let standardDaysSum = 0;
+                    const currentWeeklyPlan = (editingPreviousScheme && config.shiftConfig?.previousWeeklyPlan) 
+                      ? config.shiftConfig.previousWeeklyPlan 
+                      : (config.shiftConfig?.weeklyPlan || {});
                     standardDays.forEach(day => {
-                      const dayPlan = config.shiftConfig?.weeklyPlan[day] || {};
+                      const dayPlan = currentWeeklyPlan[day] || {};
                       ['Mañana', 'Tarde', 'Noche'].forEach(shift => {
                         standardDaysSum += (dayPlan[shift]?.count || 0);
                       });
@@ -2973,7 +3129,7 @@ export function AdminPanel() {
 
                  <div className="space-y-8">
                    {config.brands.map(brand => {
-                     const brandFlavors = getFlavorsForBrand(brand).filter(sabor => !(config.saboresSinJarabe || SABORES_SIN_JARABE).includes(sabor));
+                     const brandFlavors = getFlavorsForBrand(brand);
                      if (brandFlavors.length === 0) return null;
 
                      const visibleInsumos = config.insumos?.filter(insumo => {
@@ -3074,6 +3230,716 @@ export function AdminPanel() {
                        </div>
                      )
                    })}
+                 </div>
+              </section>
+
+              {/* ENVASES Y MATERIALES DE EMBALAJE */}
+              <section className="bg-gray-50 p-6 rounded-xl border border-gray-200 lg:col-span-2 space-y-6">
+                 <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 border-b border-gray-200 pb-4">
+                   <div>
+                     <h3 className="text-lg font-bold text-gray-800">Envases y Materiales de Embalaje</h3>
+                     <p className="text-xs text-gray-500 mt-1">Configure las clases de Preformas, Plásticos Termocontraíbles, Film Stretch, Tapas y sus compatibilidades.</p>
+                   </div>
+                   <button
+                     type="button"
+                     onClick={() => {
+                       if (confirm("¿Estás seguro de que deseas limpiar todas las clases precargadas de Preformas, Termocontraíble, Stretch, Tapas y sus compatibilidades? Se borrarán todos los datos y podrás cargar los tuyos de cero. Al finalizar, recuerda presionar el botón 'Guardar Cambios' al principio de la pestaña.")) {
+                         setConfig({
+                           ...config,
+                           preformasConfig: [],
+                           termoConfig: [],
+                           stretchConfig: [],
+                           tapaConfig: [],
+                           compatiblePackagingGroups: {}
+                         });
+                       }
+                     }}
+                     className="px-3.5 py-2 hover:bg-rose-50 text-rose-600 font-bold text-xs uppercase tracking-wider rounded-lg border border-rose-200 bg-white shadow-sm transition-all self-start md:self-center"
+                   >
+                     Limpiar Clases Precargadas
+                   </button>
+                 </div>
+
+                 {/* Packaging Compatibles / Equivalentes */}
+                 <div className="p-4 bg-orange-50 border border-orange-100 rounded-xl mb-6">
+                   <div className="flex flex-col md:flex-row gap-6">
+                     <div className="flex-1">
+                       <h4 className="text-sm font-bold text-orange-900 mb-2 flex items-center gap-2">
+                         <Link2 className="w-4 h-4" /> 
+                         Grupos de Empaque Equivalentes
+                       </h4>
+                       <p className="text-xs text-orange-700 mb-4 max-w-lg">
+                         Cree grupos de insumos de empaque que se pueden usar de forma intercambiable (ej. diferentes marcas de tapas del mismo calibre).
+                       </p>
+                       
+                       <div className="space-y-2 mb-4">
+                         {Object.entries(config.compatiblePackagingGroups || {}).map(([groupId, group]) => {
+                           const groupArray = group as string[];
+                           return (
+                           <div key={groupId} className="flex items-center justify-between bg-white px-3 py-2 border border-orange-200 rounded-lg shadow-sm">
+                             <div className="flex flex-wrap gap-1.5 items-center">
+                               {groupArray.map((item, i) => (
+                                 <span key={item} className="flex items-center text-xs font-semibold text-orange-800 bg-orange-100 px-2 py-0.5 rounded">
+                                   {item}
+                                   {i < groupArray.length - 1 && <span className="mx-1 text-orange-400">/</span>}
+                                 </span>
+                               ))}
+                             </div>
+                             <button
+                               onClick={() => {
+                                 const updatedGroups = { ...(config.compatiblePackagingGroups || {}) };
+                                 delete updatedGroups[groupId];
+                                 setConfig({
+                                   ...config,
+                                   compatiblePackagingGroups: updatedGroups
+                                 });
+                               }}
+                               className="text-orange-400 hover:text-red-500 p-1 rounded transition-colors ml-2"
+                               title="Eliminar grupo"
+                             >
+                               <Trash2 className="w-4 h-4" />
+                             </button>
+                           </div>
+                         )})}
+                         {(!config.compatiblePackagingGroups || Object.keys(config.compatiblePackagingGroups).length === 0) && (
+                           <div className="text-xs text-orange-600/70 italic bg-white/50 px-3 py-2 rounded border border-orange-200/50">
+                             No hay grupos de empaque equivalentes creados.
+                           </div>
+                         )}
+                       </div>
+                     </div>
+                     <div className="flex-1 md:max-w-sm bg-white p-4 rounded-lg border border-orange-100 shadow-sm">
+                       <h5 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-3">Nuevo Grupo de Equivalencia</h5>
+                       <div className="space-y-3">
+                         <div className="max-h-[160px] overflow-y-auto border border-gray-200 rounded p-2 bg-gray-50 space-y-1">
+                           {allPackagingItems.map(item => {
+                             const isChecked = newCompatiblePackagingGroup.includes(item);
+                             return (
+                               <label key={item} className={`flex items-center gap-2 p-1.5 rounded cursor-pointer transition-colors ${isChecked ? 'bg-orange-50 text-orange-800 font-medium' : 'hover:bg-gray-100 text-gray-600'}`}>
+                                 <input
+                                   type="checkbox"
+                                   className="rounded text-orange-600 focus:ring-orange-500 w-3.5 h-3.5"
+                                   checked={isChecked}
+                                   onChange={(e) => {
+                                     if (e.target.checked) {
+                                       setNewCompatiblePackagingGroup([...newCompatiblePackagingGroup, item]);
+                                     } else {
+                                       setNewCompatiblePackagingGroup(newCompatiblePackagingGroup.filter(i => i !== item));
+                                     }
+                                   }}
+                                 />
+                                 <span className="text-xs">{item}</span>
+                               </label>
+                             );
+                           })}
+                         </div>
+                         <button
+                           onClick={() => {
+                             if (newCompatiblePackagingGroup.length >= 2) {
+                               const groupId = newCompatiblePackagingGroup.join('-');
+                               const updatedGroups = { ...(config.compatiblePackagingGroups || {}) };
+                               updatedGroups[groupId] = [...newCompatiblePackagingGroup];
+                               setConfig({
+                                 ...config,
+                                 compatiblePackagingGroups: updatedGroups
+                               });
+                               setNewCompatiblePackagingGroup([]);
+                             }
+                           }}
+                           disabled={newCompatiblePackagingGroup.length < 2}
+                           className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded shadow-sm transition-colors uppercase tracking-wide"
+                         >
+                           <Plus className="w-3.5 h-3.5" /> Guardar Grupo ({newCompatiblePackagingGroup.length})
+                         </button>
+                       </div>
+                     </div>
+                   </div>
+                 </div>
+
+                 {/* PREFORMAS */}
+                 <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm space-y-4">
+                   <div className="flex justify-between items-center border-b pb-3 mb-2">
+                     <div className="flex items-center gap-2">
+                       <Package className="w-5 h-5 text-blue-600" />
+                       <h4 className="font-bold text-gray-800 text-sm">Clases de Preformas</h4>
+                     </div>
+                     <button
+                       onClick={() => {
+                         const current = config.preformasConfig || [];
+                         setConfig({
+                           ...config,
+                           preformasConfig: [
+                             ...current,
+                             { name: 'Nueva Preforma', sizes: [3000], line: '', sqlCode: '' }
+                           ]
+                         });
+                       }}
+                       className="text-xs bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 rounded px-2.5 py-1.5 font-bold flex items-center gap-1 transition-all"
+                     >
+                       <Plus className="w-3.5 h-3.5" /> Agregar Preforma
+                     </button>
+                   </div>
+                   
+                   <div className="overflow-x-auto">
+                     <table className="w-full text-xs text-left">
+                       <thead>
+                         <tr className="bg-gray-50 text-gray-500 uppercase tracking-wider font-extrabold text-[10px] border-b">
+                           <th className="px-4 py-2.5">Nombre / Clase de Preforma</th>
+                           <th className="px-4 py-2.5">Calibres Asociados (cc)</th>
+                           <th className="px-4 py-2.5">Sabores (Opcional)</th>
+                           <th className="px-4 py-2.5">Línea (Opcional)</th>
+                           <th className="px-4 py-2.5">Código SQL</th>
+                           <th className="px-4 py-2.5 text-right">Acción</th>
+                         </tr>
+                       </thead>
+                       <tbody className="divide-y divide-gray-100">
+                         {(config.preformasConfig || []).map((preforma, idx) => (
+                           <tr key={idx} className="hover:bg-gray-50/50">
+                             <td className="px-4 py-3 align-top">
+                               <input
+                                 type="text"
+                                 value={preforma.name}
+                                 onChange={(e) => {
+                                   const updated = [...(config.preformasConfig || [])];
+                                   updated[idx].name = e.target.value;
+                                   setConfig({ ...config, preformasConfig: updated });
+                                 }}
+                                 className="w-full bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-xs font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none"
+                               />
+                             </td>
+                             <td className="px-4 py-3 align-top">
+                               <div className="flex flex-wrap gap-1">
+                                 {TAMANOS.map(size => {
+                                   const isSelected = preforma.sizes.includes(size);
+                                   return (
+                                     <button
+                                       key={size}
+                                       type="button"
+                                       onClick={() => {
+                                         const updated = [...(config.preformasConfig || [])];
+                                         const currentSizes = updated[idx].sizes || [];
+                                         if (isSelected) {
+                                           updated[idx].sizes = currentSizes.filter(s => s !== size);
+                                         } else {
+                                           updated[idx].sizes = [...currentSizes, size];
+                                         }
+                                         setConfig({ ...config, preformasConfig: updated });
+                                       }}
+                                       className={`px-2 py-1 rounded text-[10px] font-black tracking-tight transition-all ${
+                                         isSelected
+                                           ? 'bg-blue-600 text-white shadow-sm'
+                                           : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                                       }`}
+                                     >
+                                       {size}
+                                     </button>
+                                   );
+                                 })}
+                               </div>
+                             </td>
+                             <td className="px-4 py-3 align-top">
+                               <div className="flex flex-col gap-1 w-full max-h-[100px] overflow-y-auto">
+                                 {config.flavors.map(flavor => {
+                                   const isSelected = (preforma.flavors || []).includes(flavor);
+                                   return (
+                                     <button
+                                       key={flavor}
+                                       type="button"
+                                       onClick={() => {
+                                         const updated = [...(config.preformasConfig || [])];
+                                         const currentFlavors = updated[idx].flavors || [];
+                                         if (isSelected) {
+                                           updated[idx].flavors = currentFlavors.filter(s => s !== flavor);
+                                         } else {
+                                           updated[idx].flavors = [...currentFlavors, flavor];
+                                         }
+                                         setConfig({ ...config, preformasConfig: updated });
+                                       }}
+                                       className={`px-2 py-1 text-left rounded text-[10px] font-medium transition-all ${
+                                         isSelected
+                                           ? 'bg-amber-100 text-amber-800 border border-amber-300 shadow-sm'
+                                           : 'bg-white text-gray-400 border border-gray-200 hover:border-gray-300 hover:text-gray-600'
+                                       }`}
+                                     >
+                                       {flavor}
+                                     </button>
+                                   );
+                                 })}
+                               </div>
+                             </td>
+                             <td className="px-4 py-3 align-top">
+                               <select
+                                 value={preforma.line || ''}
+                                 onChange={(e) => {
+                                   const updated = [...(config.preformasConfig || [])];
+                                   updated[idx].line = e.target.value;
+                                   setConfig({ ...config, preformasConfig: updated });
+                                 }}
+                                 className="bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-xs focus:bg-white text-gray-800 outline-none w-24 font-bold"
+                               >
+                                 <option value="">Todas</option>
+                                 {LINEAS.map(l => (
+                                   <option key={l} value={l}>Línea {l}</option>
+                                 ))}
+                               </select>
+                             </td>
+                             <td className="px-4 py-3 align-top">
+                               <input
+                                 type="text"
+                                 value={preforma.sqlCode || ''}
+                                 placeholder="Sin Código"
+                                 onChange={(e) => {
+                                   const updated = [...(config.preformasConfig || [])];
+                                   updated[idx].sqlCode = e.target.value;
+                                   setConfig({ ...config, preformasConfig: updated });
+                                 }}
+                                 className="w-28 font-mono bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-xs focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none"
+                               />
+                             </td>
+                             <td className="px-4 py-3 text-right">
+                               <button
+                                 onClick={() => {
+                                   const updated = (config.preformasConfig || []).filter((_, i) => i !== idx);
+                                   setConfig({ ...config, preformasConfig: updated });
+                                 }}
+                                 className="text-gray-400 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-colors"
+                                 title="Eliminar"
+                               >
+                                 <Trash2 className="w-4 h-4" />
+                               </button>
+                             </td>
+                           </tr>
+                         ))}
+                       </tbody>
+                     </table>
+                   </div>
+                 </div>
+
+                 {/* TERMO */}
+                 <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm space-y-4">
+                   <div className="flex justify-between items-center border-b pb-3 mb-2">
+                     <div className="flex items-center gap-2">
+                       <Scale className="w-5 h-5 text-orange-600" />
+                       <h4 className="font-bold text-gray-800 text-sm">Plásticos Termocontraíbles (Termo)</h4>
+                     </div>
+                     <button
+                       onClick={() => {
+                         const current = config.termoConfig || [];
+                         setConfig({
+                           ...config,
+                           termoConfig: [
+                             ...current,
+                             { name: 'Nuevo Plastico', sizes: [3000], sqlCode: '' }
+                           ]
+                         });
+                       }}
+                       className="text-xs bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100 rounded px-2.5 py-1.5 font-bold flex items-center gap-1 transition-all"
+                     >
+                       <Plus className="w-3.5 h-3.5" /> Agregar Termocontraíble
+                     </button>
+                   </div>
+                   
+                   <div className="overflow-x-auto">
+                     <table className="w-full text-xs text-left">
+                       <thead>
+                         <tr className="bg-gray-50 text-gray-500 uppercase tracking-wider font-extrabold text-[10px] border-b">
+                           <th className="px-4 py-2.5">Nombre / Medida del Termo</th>
+                           <th className="px-4 py-2.5">Calibres Asociados (cc)</th>
+                           <th className="px-4 py-2.5">Sabores (Opcional)</th>
+                           <th className="px-4 py-2.5">Código SQL</th>
+                           <th className="px-4 py-2.5 text-right">Acción</th>
+                         </tr>
+                       </thead>
+                       <tbody className="divide-y divide-gray-100">
+                         {(config.termoConfig || []).map((termo, idx) => (
+                           <tr key={idx} className="hover:bg-gray-50/50">
+                             <td className="px-4 py-3 align-top">
+                               <input
+                                 type="text"
+                                 value={termo.name}
+                                 onChange={(e) => {
+                                   const updated = [...(config.termoConfig || [])];
+                                   updated[idx].name = e.target.value;
+                                   setConfig({ ...config, termoConfig: updated });
+                                 }}
+                                 className="w-full bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-xs font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none"
+                               />
+                             </td>
+                             <td className="px-4 py-3 align-top">
+                               <div className="flex flex-wrap gap-1">
+                                 {TAMANOS.map(size => {
+                                   const isSelected = termo.sizes.includes(size);
+                                   return (
+                                     <button
+                                       key={size}
+                                       type="button"
+                                       onClick={() => {
+                                         const updated = [...(config.termoConfig || [])];
+                                         const currentSizes = updated[idx].sizes || [];
+                                         if (isSelected) {
+                                           updated[idx].sizes = currentSizes.filter(s => s !== size);
+                                         } else {
+                                           updated[idx].sizes = [...currentSizes, size];
+                                         }
+                                         setConfig({ ...config, termoConfig: updated });
+                                       }}
+                                       className={`px-2 py-1 rounded text-[10px] font-black tracking-tight transition-all ${
+                                         isSelected
+                                           ? 'bg-orange-600 text-white shadow-sm'
+                                           : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                                       }`}
+                                     >
+                                       {size}
+                                     </button>
+                                   );
+                                 })}
+                               </div>
+                             </td>
+                             <td className="px-4 py-3 align-top">
+                               <div className="flex flex-col gap-1 w-full max-h-[100px] overflow-y-auto">
+                                 {config.flavors.map(flavor => {
+                                   const isSelected = (termo.flavors || []).includes(flavor);
+                                   return (
+                                     <button
+                                       key={flavor}
+                                       type="button"
+                                       onClick={() => {
+                                         const updated = [...(config.termoConfig || [])];
+                                         const currentFlavors = updated[idx].flavors || [];
+                                         if (isSelected) {
+                                           updated[idx].flavors = currentFlavors.filter(s => s !== flavor);
+                                         } else {
+                                           updated[idx].flavors = [...currentFlavors, flavor];
+                                         }
+                                         setConfig({ ...config, termoConfig: updated });
+                                       }}
+                                       className={`px-2 py-1 text-left rounded text-[10px] font-medium transition-all ${
+                                         isSelected
+                                           ? 'bg-amber-100 text-amber-800 border border-amber-300 shadow-sm'
+                                           : 'bg-white text-gray-400 border border-gray-200 hover:border-gray-300 hover:text-gray-600'
+                                       }`}
+                                     >
+                                       {flavor}
+                                     </button>
+                                   );
+                                 })}
+                               </div>
+                             </td>
+                             <td className="px-4 py-3 align-top">
+                               <input
+                                 type="text"
+                                 value={termo.sqlCode || ''}
+                                 placeholder="Sin Código"
+                                 onChange={(e) => {
+                                   const updated = [...(config.termoConfig || [])];
+                                   updated[idx].sqlCode = e.target.value;
+                                   setConfig({ ...config, termoConfig: updated });
+                                 }}
+                                 className="w-28 font-mono bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-xs focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none"
+                               />
+                             </td>
+                             <td className="px-4 py-3 text-right align-top">
+                               <button
+                                 onClick={() => {
+                                   const updated = (config.termoConfig || []).filter((_, i) => i !== idx);
+                                   setConfig({ ...config, termoConfig: updated });
+                                 }}
+                                 className="text-gray-400 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-colors"
+                                 title="Eliminar"
+                               >
+                                 <Trash2 className="w-4 h-4" />
+                               </button>
+                             </td>
+                           </tr>
+                         ))}
+                       </tbody>
+                     </table>
+                   </div>
+                 </div>
+
+                 {/* FILM STRETCH */}
+                 <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm space-y-4">
+                   <div className="flex justify-between items-center border-b pb-3 mb-2">
+                     <div className="flex items-center gap-2">
+                       <TrendingUp className="w-5 h-5 text-purple-600" />
+                       <h4 className="font-bold text-gray-800 text-sm">Film Stretch</h4>
+                     </div>
+                     <button
+                       onClick={() => {
+                         const current = config.stretchConfig || [];
+                         setConfig({
+                           ...config,
+                           stretchConfig: [
+                             ...current,
+                             { name: 'Nueva Bobina', sizes: [3000], sqlCode: '' }
+                           ]
+                         });
+                       }}
+                       className="text-xs bg-purple-50 text-purple-600 border border-purple-200 hover:bg-purple-100 rounded px-2.5 py-1.5 font-bold flex items-center gap-1 transition-all"
+                     >
+                       <Plus className="w-3.5 h-3.5" /> Agregar Film Stretch
+                     </button>
+                   </div>
+                   
+                   <div className="overflow-x-auto">
+                     <table className="w-full text-xs text-left">
+                       <thead>
+                         <tr className="bg-gray-50 text-gray-500 uppercase tracking-wider font-extrabold text-[10px] border-b">
+                           <th className="px-4 py-2.5">Nombre / Medida del Stretch</th>
+                           <th className="px-4 py-2.5">Calibres Asociados (cc)</th>
+                           <th className="px-4 py-2.5">Sabores (Opcional)</th>
+                           <th className="px-4 py-2.5">Código SQL</th>
+                           <th className="px-4 py-2.5 text-right">Acción</th>
+                         </tr>
+                       </thead>
+                       <tbody className="divide-y divide-gray-100">
+                         {(config.stretchConfig || []).map((stretch, idx) => (
+                           <tr key={idx} className="hover:bg-gray-50/50">
+                             <td className="px-4 py-3 align-top">
+                               <input
+                                 type="text"
+                                 value={stretch.name}
+                                 onChange={(e) => {
+                                   const updated = [...(config.stretchConfig || [])];
+                                   updated[idx].name = e.target.value;
+                                   setConfig({ ...config, stretchConfig: updated });
+                                 }}
+                                 className="w-full bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-xs font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none"
+                               />
+                             </td>
+                             <td className="px-4 py-3 align-top">
+                               <div className="flex flex-wrap gap-1">
+                                 {TAMANOS.map(size => {
+                                   const isSelected = stretch.sizes.includes(size);
+                                   return (
+                                     <button
+                                       key={size}
+                                       type="button"
+                                       onClick={() => {
+                                         const updated = [...(config.stretchConfig || [])];
+                                         const currentSizes = updated[idx].sizes || [];
+                                         if (isSelected) {
+                                           updated[idx].sizes = currentSizes.filter(s => s !== size);
+                                         } else {
+                                           updated[idx].sizes = [...currentSizes, size];
+                                         }
+                                         setConfig({ ...config, stretchConfig: updated });
+                                       }}
+                                       className={`px-2 py-1 rounded text-[10px] font-black tracking-tight transition-all ${
+                                         isSelected
+                                           ? 'bg-purple-600 text-white shadow-sm'
+                                           : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                                       }`}
+                                     >
+                                       {size}
+                                     </button>
+                                   );
+                                 })}
+                               </div>
+                             </td>
+                             <td className="px-4 py-3 align-top">
+                               <div className="flex flex-col gap-1 w-full max-h-[100px] overflow-y-auto">
+                                 {config.flavors.map(flavor => {
+                                   const isSelected = (stretch.flavors || []).includes(flavor);
+                                   return (
+                                     <button
+                                       key={flavor}
+                                       type="button"
+                                       onClick={() => {
+                                         const updated = [...(config.stretchConfig || [])];
+                                         const currentFlavors = updated[idx].flavors || [];
+                                         if (isSelected) {
+                                           updated[idx].flavors = currentFlavors.filter(s => s !== flavor);
+                                         } else {
+                                           updated[idx].flavors = [...currentFlavors, flavor];
+                                         }
+                                         setConfig({ ...config, stretchConfig: updated });
+                                       }}
+                                       className={`px-2 py-1 text-left rounded text-[10px] font-medium transition-all ${
+                                         isSelected
+                                           ? 'bg-amber-100 text-amber-800 border border-amber-300 shadow-sm'
+                                           : 'bg-white text-gray-400 border border-gray-200 hover:border-gray-300 hover:text-gray-600'
+                                       }`}
+                                     >
+                                       {flavor}
+                                     </button>
+                                   );
+                                 })}
+                               </div>
+                             </td>
+                             <td className="px-4 py-3 align-top">
+                               <input
+                                 type="text"
+                                 value={stretch.sqlCode || ''}
+                                 placeholder="Sin Código"
+                                 onChange={(e) => {
+                                   const updated = [...(config.stretchConfig || [])];
+                                   updated[idx].sqlCode = e.target.value;
+                                   setConfig({ ...config, stretchConfig: updated });
+                                 }}
+                                 className="w-28 font-mono bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-xs focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none"
+                               />
+                             </td>
+                             <td className="px-4 py-3 text-right align-top">
+                               <button
+                                 onClick={() => {
+                                   const updated = (config.stretchConfig || []).filter((_, i) => i !== idx);
+                                   setConfig({ ...config, stretchConfig: updated });
+                                 }}
+                                 className="text-gray-400 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-colors"
+                                 title="Eliminar"
+                               >
+                                 <Trash2 className="w-4 h-4" />
+                               </button>
+                             </td>
+                           </tr>
+                         ))}
+                       </tbody>
+                     </table>
+                   </div>
+                 </div>
+               </section>
+
+               <section className="bg-gray-50 p-4 rounded-xl border border-gray-200 mt-8">
+                 <div className="flex justify-between items-center mb-4 border-b pb-2">
+                   <div>
+                     <h3 className="text-lg font-semibold text-gray-800">Tapas</h3>
+                     <p className="text-xs text-gray-500 mt-1">Configuración de Tapas.</p>
+                   </div>
+                   <button
+                     onClick={() => {
+                       const current = config.tapaConfig || [];
+                       setConfig({
+                         ...config,
+                         tapaConfig: [
+                           ...current,
+                           { name: 'Nueva Tapa', sizes: [3000], flavors: [], sqlCode: '' }
+                         ]
+                       });
+                     }}
+                     className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition flex items-center gap-1 shadow-sm"
+                   >
+                     <Plus className="w-4 h-4" /> Agregar
+                   </button>
+                 </div>
+                 
+                 <div className="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm">
+                   <div className="max-h-[300px] overflow-y-auto">
+                     <table className="w-full text-left border-collapse">
+                       <thead className="bg-gray-100 sticky top-0 z-10 shadow-sm">
+                         <tr>
+                           <th className="px-4 py-2 text-[10px] uppercase font-bold text-gray-500 w-[25%]">Insumo</th>
+                           <th className="px-4 py-2 text-[10px] uppercase font-bold text-gray-500 w-[35%]">Tamaños (cc)</th>
+                           <th className="px-4 py-2 text-[10px] uppercase font-bold text-gray-500 w-[20%]">Sabores (Opc)</th>
+                           <th className="px-4 py-2 text-[10px] uppercase font-bold text-gray-500 w-[10%]">Sistema</th>
+                           <th className="px-4 py-2 text-right"></th>
+                         </tr>
+                       </thead>
+                       <tbody className="divide-y divide-gray-100">
+                         {(config.tapaConfig || []).map((tapa, idx) => (
+                           <tr key={idx} className="hover:bg-gray-50/50">
+                             <td className="px-4 py-3 align-top">
+                               <input
+                                 type="text"
+                                 value={tapa.name}
+                                 onChange={(e) => {
+                                   const updated = [...(config.tapaConfig || [])];
+                                   updated[idx].name = e.target.value;
+                                   setConfig({ ...config, tapaConfig: updated });
+                                 }}
+                                 className="w-full bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-xs font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none"
+                               />
+                             </td>
+                             <td className="px-4 py-3 align-top">
+                               <div className="flex flex-wrap gap-1">
+                                 {TAMANOS.map(size => {
+                                   const isSelected = (tapa.sizes || []).includes(size);
+                                   return (
+                                     <button
+                                       key={size}
+                                       type="button"
+                                       onClick={() => {
+                                         const updated = [...(config.tapaConfig || [])];
+                                         const currentSizes = updated[idx].sizes || [];
+                                         if (isSelected) {
+                                           updated[idx].sizes = currentSizes.filter(s => s !== size);
+                                         } else {
+                                           updated[idx].sizes = [...currentSizes, size];
+                                         }
+                                         setConfig({ ...config, tapaConfig: updated });
+                                       }}
+                                       className={`px-2 py-1 rounded text-[10px] font-black tracking-tight transition-all ${
+                                         isSelected
+                                           ? 'bg-blue-100 text-blue-700 border border-blue-300 shadow-inner'
+                                           : 'bg-white text-gray-400 border border-gray-200 hover:border-gray-300 hover:text-gray-600'
+                                       }`}
+                                     >
+                                       {size}
+                                     </button>
+                                   );
+                                 })}
+                               </div>
+                             </td>
+                             <td className="px-4 py-3 align-top">
+                               <div className="flex flex-col gap-1 w-full max-h-[100px] overflow-y-auto">
+                                 {config.flavors.map(flavor => {
+                                   const isSelected = (tapa.flavors || []).includes(flavor);
+                                   return (
+                                     <button
+                                       key={flavor}
+                                       type="button"
+                                       onClick={() => {
+                                         const updated = [...(config.tapaConfig || [])];
+                                         const currentFlavors = updated[idx].flavors || [];
+                                         if (isSelected) {
+                                           updated[idx].flavors = currentFlavors.filter(s => s !== flavor);
+                                         } else {
+                                           updated[idx].flavors = [...currentFlavors, flavor];
+                                         }
+                                         setConfig({ ...config, tapaConfig: updated });
+                                       }}
+                                       className={`px-2 py-1 text-left rounded text-[10px] font-medium transition-all ${
+                                         isSelected
+                                           ? 'bg-amber-100 text-amber-800 border border-amber-300 shadow-sm'
+                                           : 'bg-white text-gray-400 border border-gray-200 hover:border-gray-300 hover:text-gray-600'
+                                       }`}
+                                     >
+                                       {flavor}
+                                     </button>
+                                   );
+                                 })}
+                               </div>
+                             </td>
+                             <td className="px-4 py-3 align-top">
+                               <input
+                                 type="text"
+                                 value={tapa.sqlCode || ''}
+                                 placeholder="Cód"
+                                 onChange={(e) => {
+                                   const updated = [...(config.tapaConfig || [])];
+                                   updated[idx].sqlCode = e.target.value;
+                                   setConfig({ ...config, tapaConfig: updated });
+                                 }}
+                                 className="w-full font-mono bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-xs focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none"
+                               />
+                             </td>
+                             <td className="px-4 py-3 text-right align-top">
+                               <button
+                                 onClick={() => {
+                                   const updated = (config.tapaConfig || []).filter((_, i) => i !== idx);
+                                   setConfig({ ...config, tapaConfig: updated });
+                                 }}
+                                 className="text-gray-400 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-colors"
+                                 title="Eliminar"
+                               >
+                                 <Trash2 className="w-4 h-4" />
+                               </button>
+                             </td>
+                           </tr>
+                         ))}
+                       </tbody>
+                     </table>
+                   </div>
                  </div>
               </section>
           </div>

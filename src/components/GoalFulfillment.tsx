@@ -223,7 +223,10 @@ export function GoalFulfillment() {
       const isHoliday = shiftConfig.holidays?.includes(dateStr);
       const isNextDayHoliday = shiftConfig.holidays?.includes(format(addDays(day, 1), 'yyyy-MM-dd'));
       
-      const dayPlan = shiftConfig.weeklyPlan?.[dayKey] || {};
+      let dayPlan = shiftConfig.weeklyPlan?.[dayKey] || {};
+      if (shiftConfig.previousWeeklyPlan && shiftConfig.changeDate && dateStr < shiftConfig.changeDate) {
+        dayPlan = (shiftConfig.previousWeeklyPlan as any)[dayKey] || {};
+      }
       
       // Calculate shifts for this day (representing general shifts: Mañana, Tarde, Noche)
       // Mañana/Tarde

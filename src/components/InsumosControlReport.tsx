@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, Fragment } from 'react';
 import { useAppConfig } from '../hooks/useAppConfig';
 import { collection, query, where, onSnapshot, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { startOfWeek, addDays, format, subDays, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { BOTELLAS_POR_PACK, SABORES_SIN_JARABE } from '../constants';
+import { BOTELLAS_POR_PACK, SABORES_SIN_JARABE, WASTE_WEIGHTS, PACKS_POR_PALETA } from '../constants';
 import { ProductionPlan, MonthlyGoal } from '../types';
 
 interface InsumoStock {
@@ -104,6 +104,8 @@ export function InsumosControlReport() {
     } catch(e) {}
     return {};
   });
+
+  const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null);
 
   useEffect(() => {
     localStorage.setItem('simulated_stocks_cache', JSON.stringify(simulatedStocks));
@@ -310,7 +312,26 @@ export function InsumosControlReport() {
     if (simulationMode) {
       return simulatedStocks[insumoName] || 0;
     }
-    const sqlCode = insumoMappings[insumoName];
+    let sqlCode = insumoMappings[insumoName];
+    if (!sqlCode && config) {
+      // Seek in preformasConfig
+      const pref = (config?.preformasConfig || []).find(p => p.name === insumoName);
+      if (pref) sqlCode = pref.sqlCode;
+      else {
+        // Seek in termoConfig
+        const tm = (config?.termoConfig || []).find(t => t.name === insumoName);
+        if (tm) sqlCode = tm.sqlCode;
+        else {
+          // Seek in stretchConfig
+          const str = (config?.stretchConfig || []).find(s => s.name === insumoName);
+          if (str) sqlCode = str.sqlCode;
+          else {
+            const tapa = (config?.tapaConfig || []).find(t => t.name === insumoName);
+            if (tapa) sqlCode = tapa.sqlCode;
+          }
+        }
+      }
+    }
     if (sqlCode) {
       const match = stockData.find(s => {
         const dbCode = (s.codigo_articulo || '').toString().trim().toLowerCase();
@@ -320,27 +341,52 @@ export function InsumosControlReport() {
       if (match) return match.stock_almacen;
     }
     return 0; // fallback if no code / no match
-  }, [simulationMode, simulatedStocks, insumoMappings, stockData]);
+  }, [config, simulationMode, simulatedStocks, insumoMappings, stockData]);
 
   // Helper to read effective stock considering equivalent groups
   const getEffectiveInsumoStock = useCallback((insumoName: string): number => {
     const rawStock = getRawInsumoStock(insumoName);
     
-    // Check if it belongs to a compatible group
-    if (config?.compatibleInsumoGroups) {
-      const groups = Object.values(config.compatibleInsumoGroups) as string[][];
-      const group = groups.find(g => g.includes(insumoName));
-      if (group) {
-        // Sum stock for all members in the group
-        let total = 0;
-        group.forEach((member: string) => {
-          total += getRawInsumoStock(member);
-        });
-        return total;
-      }
+    // Check if it belongs to a compatible group (ingredients or packaging)
+    const combinedGroups = [
+      ...(config?.compatibleInsumoGroups ? Object.values(config.compatibleInsumoGroups) : []),
+      ...(config?.compatiblePackagingGroups ? Object.values(config.compatiblePackagingGroups) : [])
+    ] as string[][];
+
+    const group = combinedGroups.find(g => g.includes(insumoName));
+    if (group) {
+      // Sum stock for all members in the group
+      let total = 0;
+      group.forEach((member: string) => {
+        total += getRawInsumoStock(member);
+      });
+      return total;
     }
     return rawStock;
-  }, [config?.compatibleInsumoGroups, getRawInsumoStock]);
+  }, [config?.compatibleInsumoGroups, config?.compatiblePackagingGroups, getRawInsumoStock]);
+
+  const isEmpaqueItem = useCallback((insumoName: string) => {
+    const lower = insumoName.toLowerCase();
+    if (lower.includes('preforma') || lower.includes('tapa') || lower.includes('etiqueta') || lower.includes('termo') || lower.includes('stretch')) return true;
+    
+    // Also check if any part of the name refers to standard packaging types
+    const partOfGroup = insumoName.split(' / ').some(part => {
+      const pLower = part.toLowerCase();
+      return pLower.includes('preforma') || pLower.includes('tapa') || pLower.includes('etiqueta') || pLower.includes('termo') || pLower.includes('stretch');
+    });
+    if (partOfGroup) return true;
+    
+    if (config?.preformasConfig?.some(p => p.name === insumoName)) return true;
+    if (config?.termoConfig?.some(p => p.name === insumoName)) return true;
+    if (config?.stretchConfig?.some(p => p.name === insumoName)) return true;
+    if (config?.tapaConfig?.some(p => p.name === insumoName)) return true;
+    
+    if (config?.compatiblePackagingGroups) {
+      if (Object.keys(config.compatiblePackagingGroups).some(k => insumoName.includes(k))) return true;
+      if (Object.values(config.compatiblePackagingGroups).some(g => (g as string[]).some(item => insumoName.includes(item)))) return true;
+    }
+    return false;
+  }, [config]);
 
   // 1. Calculations for Tab 1: Capacity estimation
   const capacityResults = useMemo(() => {
@@ -372,11 +418,14 @@ export function InsumosControlReport() {
     const monthlyGroupedRequirements: Record<string, number> = {};
     Object.keys(monthlyInsumosRequiredSum).forEach(insumo => {
       let groupKey = insumo;
-      if (config?.compatibleInsumoGroups) {
-        const groupMatch = (Object.values(config.compatibleInsumoGroups) as string[][]).find(g => g.includes(insumo));
-        if (groupMatch) {
-          groupKey = groupMatch.join(' / ');
-        }
+      const combinedGroups = [
+        ...(config?.compatibleInsumoGroups ? Object.values(config.compatibleInsumoGroups) : []),
+        ...(config?.compatiblePackagingGroups ? Object.values(config.compatiblePackagingGroups) : [])
+      ] as string[][];
+
+      const groupMatch = combinedGroups.find(g => g.includes(insumo));
+      if (groupMatch) {
+        groupKey = groupMatch.join(' / ');
       }
       monthlyGroupedRequirements[groupKey] = (monthlyGroupedRequirements[groupKey] || 0) + monthlyInsumosRequiredSum[insumo];
     });
@@ -386,7 +435,7 @@ export function InsumosControlReport() {
     config.brands.forEach(brand => {
       if (selectedBrand !== 'all' && selectedBrand !== brand) return;
 
-      const brandFlavors = getFlavorsForBrand(brand).filter(sabor => !(config.saboresSinJarabe || SABORES_SIN_JARABE).includes(sabor));
+      const brandFlavors = getFlavorsForBrand(brand);
       
       brandFlavors.forEach(sabor => {
         const matrixObj = config.insumosMatrix?.[brand]?.[sabor] || {};
@@ -410,11 +459,14 @@ export function InsumosControlReport() {
 
         requiredInsumos.forEach(insumoName => {
           let groupKey = insumoName;
-          if (config?.compatibleInsumoGroups) {
-             const groupMatch = (Object.values(config.compatibleInsumoGroups) as string[][]).find(g => g.includes(insumoName));
-             if (groupMatch) {
-               groupKey = groupMatch.join(' / ');
-             }
+          const combinedGroups = [
+            ...(config?.compatibleInsumoGroups ? Object.values(config.compatibleInsumoGroups) : []),
+            ...(config?.compatiblePackagingGroups ? Object.values(config.compatiblePackagingGroups) : [])
+          ] as string[][];
+
+          const groupMatch = combinedGroups.find(g => g.includes(insumoName));
+          if (groupMatch) {
+            groupKey = groupMatch.join(' / ');
           }
           if (evaluatedGroups.has(groupKey)) return; // Skip if we already evaluated this group
           evaluatedGroups.add(groupKey);
@@ -439,7 +491,7 @@ export function InsumosControlReport() {
 
         const litersPerUnit = config.syrupFormulas?.[brand]?.[sabor]?.liters || 0;
         const totalLitersSyrup = maxUnits * litersPerUnit;
-        const totalLitersBeverage = totalLitersSyrup * 6; // Formula given: liters syrup * 6
+        const totalLitersBeverage = litersPerUnit > 0 ? (totalLitersSyrup * 6) : (maxUnits * 1000); // 1 Unit fallback = 1000L finished beverage
 
         // Resolve months of stock. If multiple limiters, take the minimum month.
         let monthsOfStock = Infinity;
@@ -474,16 +526,93 @@ export function InsumosControlReport() {
 
   // 2. Calculations for Tab 2: Program Crossover Check
   const programCrossover = useMemo(() => {
-    if (!config) return { requiredInsumosAgg: {}, monthlyInsumosRequiredSum: {}, programSummary: [], statusOk: true };
+    if (!config) return { requiredInsumosAgg: [], monthlyInsumosRequiredSum: {}, programSummary: [], statusOk: true };
 
     const insumosRequiredSum: Record<string, number> = {};
     const monthlyInsumosRequiredSum: Record<string, number> = {};
     const listProductsAnalyzed: any[] = [];
 
+    // Helper functions to find custom configured packaging classes
+    const findPreformaForProduct = (tam: number, lin: string, sabor: string) => {
+      const list = config?.preformasConfig || [];
+      const matchFlavor = (p: any) => !p.flavors || p.flavors.length === 0 || p.flavors.includes(sabor);
+      
+      // 1. Match by size, line, and flavor
+      let matched = list.find(p => p.sizes.includes(tam) && p.line && p.line.toString() === lin.toString() && matchFlavor(p));
+      // 2. Match by size and flavor (no line, or any line with flavor)
+      if (!matched) {
+        matched = list.find(p => p.sizes.includes(tam) && !p.line && matchFlavor(p));
+      }
+      if (!matched) {
+        matched = list.find(p => p.sizes.includes(tam) && matchFlavor(p));
+      }
+      // 3. Generic matches (ignoring flavor constraint) if no flavor-specific matches found
+      if (!matched) {
+        matched = list.find(p => p.sizes.includes(tam) && p.line && p.line.toString() === lin.toString());
+      }
+      if (!matched) {
+        matched = list.find(p => p.sizes.includes(tam) && !p.line);
+      }
+      if (!matched) {
+        matched = list.find(p => p.sizes.includes(tam));
+      }
+      return matched;
+    };
+
+    const findTermoForProduct = (tam: number, sabor: string) => {
+      const list = config?.termoConfig || [];
+      const matchFlavor = (t: any) => !t.flavors || t.flavors.length === 0 || t.flavors.includes(sabor);
+      let matched = list.find(t => t.sizes.includes(tam) && matchFlavor(t));
+      if (!matched) {
+        matched = list.find(t => t.sizes.includes(tam));
+      }
+      return matched;
+    };
+
+    const findStretchForProduct = (tam: number, sabor: string) => {
+      const list = config?.stretchConfig || [];
+      const matchFlavor = (s: any) => !s.flavors || s.flavors.length === 0 || s.flavors.includes(sabor);
+      let matched = list.find(s => s.sizes.includes(tam) && matchFlavor(s));
+      if (!matched) {
+        matched = list.find(s => s.sizes.includes(tam));
+      }
+      return matched;
+    };
+
+    const findTapaForProduct = (tam: number, sabor: string) => {
+      const list = config?.tapaConfig || [];
+      let matched = list.find(t => t.sizes.includes(tam) && t.flavors && t.flavors.includes(sabor));
+      if (!matched) {
+        matched = list.find(t => t.sizes.includes(tam) && (!t.flavors || t.flavors.length === 0));
+      }
+      if (!matched) {
+        matched = list.find(t => t.sizes.includes(tam));
+      }
+      return matched;
+    };
+
     // Initialize required sums to 0 for all active config insumos so they appear in output
     config.insumos?.forEach((i: string) => {
       insumosRequiredSum[i] = 0;
       monthlyInsumosRequiredSum[i] = 0;
+    });
+
+    // Also initialize preformas, termo, and stretch configurations so they appear in output
+    (config?.preformasConfig || []).forEach(p => {
+      insumosRequiredSum[p.name] = 0;
+      monthlyInsumosRequiredSum[p.name] = 0;
+    });
+    (config?.termoConfig || []).forEach(t => {
+      insumosRequiredSum[t.name] = 0;
+      monthlyInsumosRequiredSum[t.name] = 0;
+    });
+    (config?.stretchConfig || []).forEach(s => {
+      insumosRequiredSum[s.name] = 0;
+      monthlyInsumosRequiredSum[s.name] = 0;
+    });
+    (config?.tapaConfig || []).forEach(t => {
+      insumosRequiredSum[t.name] = 0;
+      monthlyInsumosRequiredSum[t.name] = 0;
     });
 
     // Helper function to extract requirements based on product details and required quantity(packs)
@@ -494,7 +623,7 @@ export function InsumosControlReport() {
 
       const syrupLitersNeeded = beverageLiters / 6;
       const syrupLitersPerUnit = config.syrupFormulas?.[marca]?.[sabor]?.liters || 0;
-      const unitsRequired = syrupLitersPerUnit > 0 ? (syrupLitersNeeded / syrupLitersPerUnit) : 0;
+      const unitsRequired = syrupLitersPerUnit > 0 ? (syrupLitersNeeded / syrupLitersPerUnit) : (beverageLiters / 1000);
 
       const matrixObj = config.insumosMatrix?.[marca]?.[sabor] || {};
 
@@ -509,10 +638,61 @@ export function InsumosControlReport() {
       return { beverageLiters, syrupLitersNeeded };
     };
 
+    // Weekly packaging aggregates
+    const preformasAgg: Record<number, number> = {};
+    const termoAgg: Record<number, number> = {};
+    const stretchAgg: Record<number, number> = {};
+    const tapasAgg: Record<string, number> = {};
+    const etiquetasAgg: Record<string, number> = {};
+
     weeklyPlansOnly.forEach(plan => {
-      const { marca, sabor, tamano, plannedPacks } = plan;
+      const { marca, sabor, tamano, plannedPacks, linea } = plan;
       const { beverageLiters, syrupLitersNeeded } = processCrossoverData(marca, sabor, tamano, plannedPacks, insumosRequiredSum);
       
+      const botellasPorPack = config?.botellasPorPack?.[tamano] || BOTELLAS_POR_PACK[tamano] || 6;
+      const preformasNeeded = plannedPacks * botellasPorPack;
+      
+      const termoWeight = config?.wasteWeights?.[tamano.toString()]?.termo ?? WASTE_WEIGHTS[tamano]?.termo ?? 0;
+      const termoNeededKg = plannedPacks * termoWeight;
+      
+      const packsPerPaleta = PACKS_POR_PALETA[tamano] || 80;
+      const stretchNeededKg = (plannedPacks / packsPerPaleta) * 0.4;
+      
+      const tapasNeeded = preformasNeeded;
+      const etiquetasNeeded = preformasNeeded;
+
+      // Increment matching packaging materials in insumosRequiredSum
+      const prefConf = findPreformaForProduct(tamano, linea?.toString() || '', sabor);
+      if (prefConf) {
+        insumosRequiredSum[prefConf.name] = (insumosRequiredSum[prefConf.name] || 0) + preformasNeeded;
+      }
+
+      const termoConf = findTermoForProduct(tamano, sabor);
+      if (termoConf) {
+        insumosRequiredSum[termoConf.name] = (insumosRequiredSum[termoConf.name] || 0) + termoNeededKg;
+      }
+
+      const stretchConf = findStretchForProduct(tamano, sabor);
+      if (stretchConf) {
+        insumosRequiredSum[stretchConf.name] = (insumosRequiredSum[stretchConf.name] || 0) + stretchNeededKg;
+      }
+
+      const tapaConf = findTapaForProduct(tamano, sabor);
+      let localTapaKey = '';
+      if (tapaConf) {
+        insumosRequiredSum[tapaConf.name] = (insumosRequiredSum[tapaConf.name] || 0) + tapasNeeded;
+        localTapaKey = tapaConf.name;
+      }
+
+      // Aggregates
+      preformasAgg[tamano] = (preformasAgg[tamano] || 0) + preformasNeeded;
+      termoAgg[tamano] = (termoAgg[tamano] || 0) + termoNeededKg;
+      stretchAgg[tamano] = (stretchAgg[tamano] || 0) + stretchNeededKg;
+      
+      if (localTapaKey) {
+        tapasAgg[localTapaKey] = (tapasAgg[localTapaKey] || 0) + tapasNeeded;
+      }
+
       listProductsAnalyzed.push({
         id: plan.id,
         date: plan.date,
@@ -523,14 +703,59 @@ export function InsumosControlReport() {
         size: tamano,
         packs: plannedPacks,
         beverageLiters,
-        syrupLitersNeeded
+        syrupLitersNeeded,
+        preformasNeeded,
+        termoNeededKg,
+        stretchNeededKg,
+        tapasNeeded,
+        etiquetasNeeded
       });
+    });
+
+    // Populate etiquetasAgg dynamically from weekly insumosRequiredSum (only what has actual requirements based on formulas)
+    Object.keys(insumosRequiredSum).forEach(name => {
+      const lower = name.toLowerCase();
+      if ((lower.includes('etiqueta') || lower.includes('label')) && insumosRequiredSum[name] > 0) {
+        etiquetasAgg[name] = insumosRequiredSum[name];
+      }
     });
 
     goals.forEach(goal => {
       const { marca, sabor, tamano, quantity } = goal;
       if (quantity > 0) {
         processCrossoverData(marca, sabor, tamano, quantity, monthlyInsumosRequiredSum);
+
+        const botellasPorPack = config?.botellasPorPack?.[tamano] || BOTELLAS_POR_PACK[tamano] || 6;
+        const preformasNeeded = quantity * botellasPorPack;
+        
+        const termoWeight = config?.wasteWeights?.[tamano.toString()]?.termo ?? WASTE_WEIGHTS[tamano]?.termo ?? 0;
+        const termoNeededKg = quantity * termoWeight;
+        
+        const packsPerPaleta = PACKS_POR_PALETA[tamano] || 80;
+        const stretchNeededKg = (quantity / packsPerPaleta) * 0.4;
+        
+        const tapasNeeded = preformasNeeded;
+
+        // Increment matching packaging materials in monthlyInsumosRequiredSum
+        const prefConf = findPreformaForProduct(tamano, '', sabor);
+        if (prefConf) {
+          monthlyInsumosRequiredSum[prefConf.name] = (monthlyInsumosRequiredSum[prefConf.name] || 0) + preformasNeeded;
+        }
+
+        const termoConf = findTermoForProduct(tamano, sabor);
+        if (termoConf) {
+          monthlyInsumosRequiredSum[termoConf.name] = (monthlyInsumosRequiredSum[termoConf.name] || 0) + termoNeededKg;
+        }
+
+        const stretchConf = findStretchForProduct(tamano, sabor);
+        if (stretchConf) {
+          monthlyInsumosRequiredSum[stretchConf.name] = (monthlyInsumosRequiredSum[stretchConf.name] || 0) + stretchNeededKg;
+        }
+
+        const tapaConf = findTapaForProduct(tamano, sabor);
+        if (tapaConf) {
+          monthlyInsumosRequiredSum[tapaConf.name] = (monthlyInsumosRequiredSum[tapaConf.name] || 0) + tapasNeeded;
+        }
       }
     });
 
@@ -544,12 +769,14 @@ export function InsumosControlReport() {
       const monthlyReq = monthlyInsumosRequiredSum[insumo] || 0;
       
       let groupKey = insumo;
-      if (config?.compatibleInsumoGroups) {
-        const groups = Object.values(config.compatibleInsumoGroups) as string[][];
-        const group = groups.find(g => g.includes(insumo));
-        if (group) {
-          groupKey = group.join(' / ');
-        }
+      const combinedGroups = [
+        ...(config?.compatibleInsumoGroups ? Object.values(config.compatibleInsumoGroups) : []),
+        ...(config?.compatiblePackagingGroups ? Object.values(config.compatiblePackagingGroups) : [])
+      ] as string[][];
+
+      const groupMatch = combinedGroups.find(g => g.includes(insumo));
+      if (groupMatch) {
+        groupKey = groupMatch.join(' / ');
       }
       groupNameMap[insumo] = groupKey;
       groupedRequirements[groupKey] = (groupedRequirements[groupKey] || 0) + required;
@@ -580,12 +807,27 @@ export function InsumosControlReport() {
         isMet,
         deficit: isMet ? 0 : (required - stock)
       };
+    }).filter(item => {
+      // Show always standard ingredients, or packaging items that actually are planned/required to avoid listing unused flavors
+      const isIngredient = config.insumos?.includes(item.insumoName);
+      const isConfiguredPackage = (config?.preformasConfig || []).some(p => p.name === item.insumoName) ||
+                                  (config?.termoConfig || []).some(t => t.name === item.insumoName) ||
+                                  (config?.stretchConfig || []).some(s => s.name === item.insumoName) ||
+                                  (config?.tapaConfig || []).some(t => t.name === item.insumoName);
+      const isTapaOrLabel = item.insumoName.startsWith('Tapa ') || item.insumoName.startsWith('Etiqueta ') || item.insumoName.startsWith('Tapas ');
+      
+      return isIngredient || isConfiguredPackage || (isTapaOrLabel && item.requiredKg > 0);
     });
 
     return {
       requiredInsumosAgg: itemsList,
       programSummary: listProductsAnalyzed,
-      statusOk
+      statusOk,
+      preformasAgg,
+      termoAgg,
+      stretchAgg,
+      tapasAgg,
+      etiquetasAgg
     };
   }, [config, weeklyPlansOnly, goals, insumoMappings, stockData, simulatedStocks, simulationMode, getEffectiveInsumoStock]);
 
@@ -708,7 +950,7 @@ export function InsumosControlReport() {
   }, [sugarDays, plans, config, sugarStockKg, sugarManualUnitsByDay, sugarIncomingBagsByDay, sugarBagsPerUnit, BOTELLAS_POR_PACK]);
 
 
-  if (loading && Object.keys(simulatedStocks).length === 0) {
+  if (!config || (loading && Object.keys(simulatedStocks).length === 0)) {
     return (
       <div className="flex flex-col items-center justify-center p-16 bg-white rounded-2xl shadow-sm border border-gray-200">
         <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin mb-4" />
@@ -899,46 +1141,86 @@ export function InsumosControlReport() {
             )}
 
             <div className="space-y-4 max-h-[480px] overflow-y-auto pr-1">
-              {config?.insumos?.map((insumo: string) => {
-                const stockVal = getRawInsumoStock(insumo);
-                const sqlCode = insumoMappings[insumo] || 'S/M';
-                
-                return (
-                  <div key={insumo} className="bg-gray-50 p-3 rounded-xl border border-gray-100 space-y-2">
-                    <div className="flex justify-between items-start gap-1">
-                      <span className="text-xs font-bold text-gray-800 leading-tight block truncate max-w-[155px]" title={insumo}>
-                        {insumo}
-                      </span>
-                      <span className="text-[9px] font-mono text-gray-400 bg-white px-1.5 py-0.5 rounded border border-gray-200">
-                        {sqlCode}
-                      </span>
-                    </div>
+              {(() => {
+                const allList: { name: string }[] = [];
+                (config?.insumos || []).forEach((i: string) => allList.push({ name: i }));
+                (config?.preformasConfig || []).forEach(p => {
+                  if (!allList.some(x => x.name === p.name)) allList.push({ name: p.name });
+                });
+                (config?.termoConfig || []).forEach(t => {
+                  if (!allList.some(x => x.name === t.name)) allList.push({ name: t.name });
+                });
+                (config?.stretchConfig || []).forEach(s => {
+                  if (!allList.some(x => x.name === s.name)) allList.push({ name: s.name });
+                });
+                (config?.tapaConfig || []).forEach(t => {
+                  if (!allList.some(x => x.name === t.name)) allList.push({ name: t.name });
+                });
+                programCrossover.requiredInsumosAgg?.forEach(item => {
+                  const isTapaOrLabel = item.insumoName.startsWith('Tapa ') || item.insumoName.startsWith('Etiqueta ') || item.insumoName.startsWith('Tapas ');
+                  if (isTapaOrLabel && !allList.some(x => x.name === item.insumoName)) {
+                    allList.push({ name: item.insumoName });
+                  }
+                });
 
-                    {simulationMode ? (
-                      <div className="relative rounded-md shadow-sm">
-                        <input
-                          title={`Ver/Editar stock de ${insumo}`}
-                          type="number"
-                          value={simulatedStocks[insumo] !== undefined ? simulatedStocks[insumo] : stockVal}
-                          onChange={(e) => handleUpdateSimulatedStock(insumo, Number(e.target.value))}
-                          className="w-full bg-white border border-gray-300 rounded-lg pl-3 pr-8 py-1.5 text-xs text-right font-black focus:ring-2 focus:ring-amber-500 outline-none"
-                          min="0"
-                        />
-                        <span className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-[10px] font-black pointer-events-none text-gray-400">
-                          Kg
+                return allList.map(({ name: insumo }) => {
+                  const stockVal = getRawInsumoStock(insumo);
+                  let sqlCode = insumoMappings[insumo] || '';
+                  if (!sqlCode) {
+                    const pref = (config?.preformasConfig || []).find(p => p.name === insumo);
+                    if (pref) sqlCode = pref.sqlCode;
+                    else {
+                      const tm = (config?.termoConfig || []).find(t => t.name === insumo);
+                      if (tm) sqlCode = tm.sqlCode;
+                      else {
+                        const str = (config?.stretchConfig || []).find(s => s.name === insumo);
+                        if (str) sqlCode = str.sqlCode;
+                      }
+                    }
+                  }
+                  if (!sqlCode) sqlCode = 'S/M';
+
+                  const lowerName = insumo.toLowerCase();
+                  const isUnit = lowerName.includes('preforma') || lowerName.includes('tapa') || lowerName.includes('etiqueta');
+                  const unitStr = isUnit ? 'U.' : 'Kg';
+                  
+                  return (
+                    <div key={insumo} className="bg-gray-50 p-3 rounded-xl border border-gray-100 space-y-2">
+                      <div className="flex justify-between items-start gap-1">
+                        <span className="text-xs font-bold text-gray-800 leading-tight block truncate max-w-[155px]" title={insumo}>
+                          {insumo}
+                        </span>
+                        <span className="text-[9px] font-mono text-gray-400 bg-white px-1.5 py-0.5 rounded border border-gray-200" title={`Código SQL para ${insumo}`}>
+                          {sqlCode}
                         </span>
                       </div>
-                    ) : (
-                      <div className="flex justify-between items-baseline">
-                        <span className="text-[10px] text-gray-400 font-bold uppercase">Stock Almacén:</span>
-                        <span className="text-xs font-black text-indigo-700 font-mono">
-                          {Intl.NumberFormat('es-AR').format(stockVal)} kg
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+
+                      {simulationMode ? (
+                        <div className="relative rounded-md shadow-sm">
+                          <input
+                            title={`Ver/Editar stock simulado de ${insumo}`}
+                            type="number"
+                            value={simulatedStocks[insumo] !== undefined ? simulatedStocks[insumo] : stockVal}
+                            onChange={(e) => handleUpdateSimulatedStock(insumo, Number(e.target.value))}
+                            className="w-full bg-white border border-gray-300 rounded-lg pl-3 pr-8 py-1.5 text-xs text-right font-black focus:ring-2 focus:ring-amber-500 outline-none"
+                            min="0"
+                          />
+                          <span className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-[10px] font-black pointer-events-none text-gray-400 uppercase">
+                            {unitStr}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex justify-between items-baseline">
+                          <span className="text-[10px] text-gray-400 font-bold uppercase">Stock Almacén:</span>
+                          <span className="text-xs font-black text-indigo-700 font-mono">
+                            {Intl.NumberFormat('es-AR').format(stockVal)} {unitStr.toLowerCase()}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                });
+              })()}
               
               {(!config?.insumos || config.insumos.length === 0) && (
                 <p className="text-xs text-gray-400 italic text-center py-4">
@@ -1408,10 +1690,11 @@ export function InsumosControlReport() {
           {/* CONTROL POR INSUMO TAB */}
           {activeTab === 'insumos' && (
             <div className="space-y-6">
+              {/* Ingredientes */}
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 relative">
                   <div>
-                    <h3 className="text-lg font-bold text-gray-800">Control por Insumo</h3>
+                    <h3 className="text-lg font-bold text-gray-800">Materias Primas e Ingredientes</h3>
                     <p className="text-xs text-gray-500">Analice sus existencias agrupadas calculando su duración según ritmo mensual</p>
                   </div>
                 </div>
@@ -1421,34 +1704,91 @@ export function InsumosControlReport() {
                     <thead>
                       <tr className="bg-gray-50 text-gray-600 text-xs font-black uppercase tracking-wider">
                         <th className="px-5 py-4 text-left font-sans">Insumo / Grupo</th>
-                        <th className="px-4 py-4 text-right font-sans">Stock (Kg)</th>
-                        <th className="px-4 py-4 text-right text-indigo-700 font-sans">Consumo Mensual (Kg)</th>
+                        <th className="px-4 py-4 text-right font-sans">Stock</th>
+                        <th className="px-4 py-4 text-right text-indigo-700 font-sans">Consumo Mensual</th>
                         <th className="px-4 py-4 text-right text-blue-700 rounded-tr-lg font-sans">Meses Disp.</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 bg-white text-sm">
-                      {[...programCrossover.requiredInsumosAgg].sort((a, b) => a.monthsOfStock - b.monthsOfStock).map(item => (
-                        <tr key={item.insumoName} className="hover:bg-gray-50 transition-colors">
-                          <td className="px-5 py-4 font-bold text-gray-900 border-l-[3px] border-l-transparent hover:border-l-indigo-600">
-                            {item.insumoName}
-                          </td>
-                          <td className="px-4 py-4 text-right font-medium text-gray-800">
-                            {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}
-                          </td>
-                          <td className="px-4 py-4 text-right font-bold text-indigo-700 bg-indigo-50/30">
-                            {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.monthlyRequiredKg)}
-                          </td>
-                          <td className="px-4 py-4 text-right">
-                            {item.monthsOfStock === Infinity ? (
-                              <span className="text-xs font-bold text-gray-400">0 Consumo</span>
-                            ) : (
-                              <span className={`font-sans font-bold px-2.5 py-1.5 rounded text-[13px] tracking-wide ${item.monthsOfStock < 0.5 ? 'bg-red-100 text-red-800' : item.monthsOfStock < 1 ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800'}`}>
-                                {Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(item.monthsOfStock)} m
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                      {[...programCrossover.requiredInsumosAgg].filter(item => !isEmpaqueItem(item.insumoName)).sort((a, b) => a.monthsOfStock - b.monthsOfStock).map(item => {
+                        const lowerName = item.insumoName.toLowerCase();
+                        const isUnit = lowerName.includes('preforma') || lowerName.includes('tapa') || lowerName.includes('etiqueta');
+                        const unitStr = isUnit ? ' u.' : ' kg';
+                        return (
+                          <tr key={item.insumoName} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-5 py-4 font-bold text-gray-900 border-l-[3px] border-l-transparent hover:border-l-indigo-600">
+                              {item.insumoName}
+                            </td>
+                            <td className="px-4 py-4 text-right font-medium text-gray-800">
+                              {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}{unitStr}
+                            </td>
+                            <td className="px-4 py-4 text-right font-bold text-indigo-700 bg-indigo-50/30">
+                              {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.monthlyRequiredKg)}{unitStr}
+                            </td>
+                            <td className="px-4 py-4 text-right">
+                              {item.monthsOfStock === Infinity ? (
+                                <span className="text-xs font-bold text-gray-400">0 Consumo</span>
+                              ) : (
+                                <span className={`font-sans font-bold px-2.5 py-1.5 rounded text-[13px] tracking-wide ${item.monthsOfStock < 0.5 ? 'bg-red-100 text-red-800' : item.monthsOfStock < 1 ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800'}`}>
+                                  {Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(item.monthsOfStock)} m
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Empaque */}
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 relative">
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-800">Materiales de Empaque</h3>
+                    <p className="text-xs text-gray-500">Analice sus existencias calculando su duración según ritmo mensual</p>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 text-sm">
+                    <thead>
+                      <tr className="bg-orange-50 text-orange-900 border-t border-orange-100 text-xs font-black uppercase tracking-wider">
+                        <th className="px-5 py-4 text-left font-sans">Material</th>
+                        <th className="px-4 py-4 text-right font-sans">Stock</th>
+                        <th className="px-4 py-4 text-right text-orange-700 font-sans">Consumo Mensual</th>
+                        <th className="px-4 py-4 text-right text-orange-700 rounded-tr-lg font-sans">Meses Disp.</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 bg-white text-sm">
+                      {[...programCrossover.requiredInsumosAgg].filter(item => isEmpaqueItem(item.insumoName)).sort((a, b) => a.monthsOfStock - b.monthsOfStock).map(item => {
+                        const lowerName = item.insumoName.toLowerCase();
+                        const isUnit = lowerName.includes('preforma') || lowerName.includes('tapa') || lowerName.includes('etiqueta');
+                        const unitStr = isUnit ? ' u.' : ' kg';
+                        return (
+                          <tr key={item.insumoName} className="hover:bg-orange-50/30 transition-colors">
+                            <td className="px-5 py-4 font-bold text-gray-900 border-l-[3px] border-l-transparent hover:border-l-orange-500">
+                              {item.insumoName}
+                            </td>
+                            <td className="px-4 py-4 text-right font-medium text-gray-800">
+                              {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}{unitStr}
+                            </td>
+                            <td className="px-4 py-4 text-right font-bold text-orange-700 bg-orange-50/50">
+                              {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.monthlyRequiredKg)}{unitStr}
+                            </td>
+                            <td className="px-4 py-4 text-right">
+                              {item.monthsOfStock === Infinity ? (
+                                <span className="text-xs font-bold text-gray-400">0 Consumo</span>
+                              ) : (
+                                <span className={`font-sans font-bold px-2.5 py-1.5 rounded text-[13px] tracking-wide ${item.monthsOfStock < 0.5 ? 'bg-red-100 text-red-800' : item.monthsOfStock < 1 ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}`}>
+                                  {Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(item.monthsOfStock)} m
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1535,57 +1875,228 @@ export function InsumosControlReport() {
 
                     {/* Program Requirements Crossed Matrix */}
                     <div className="space-y-4">
-                      <h4 className="font-bold text-xs text-gray-700 uppercase tracking-widest block">Análisis de Ingredientes para el Plan</h4>
-                      
-                      <div className="overflow-x-auto mt-4">
-                        <table className="min-w-full divide-y divide-gray-200">
-                          <thead>
-                            <tr className="bg-slate-50 text-slate-500 font-bold uppercase text-xs tracking-wide">
-                              <th className="px-4 py-3 text-left">Insumo</th>
-                              <th className="px-4 py-3 text-right text-indigo-700">Req. Semanal</th>
-                              <th className="px-4 py-3 text-right">Stock (kg)</th>
-                              <th className="px-4 py-3 text-center">Estado (Semanal)</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100 bg-white text-sm">
-                            {programCrossover.requiredInsumosAgg.map(item => {
-                              const percentCovered = item.requiredKg > 0 ? (item.stockKg / item.requiredKg) * 100 : 100;
-                              
-                              return (
-                                <tr key={item.insumoName} className="hover:bg-slate-50 transition-colors">
-                                  <td className="px-4 py-3">
-                                    <span className="font-bold text-gray-900 block truncate max-w-[200px]" title={item.insumoName}>
-                                      {item.insumoName}
-                                    </span>
-                                  </td>
-                                  <td className="px-4 py-3 text-right">
-                                    <span className="font-semibold text-indigo-700">
-                                      {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.requiredKg)}
-                                    </span>
-                                  </td>
-                                  <td className="px-4 py-3 text-right font-medium text-gray-800">
-                                    {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}
-                                  </td>
-                                  <td className="px-4 py-3 text-center">
-                                    {item.requiredKg === 0 ? (
-                                      <span className="bg-gray-200 text-gray-600 text-[10px] font-black uppercase px-2 py-1 rounded">
-                                        Sin programar
+                      {/* Ingredientes */}
+                      <div className="bg-white rounded-xl border border-gray-100 p-4">
+                        <h4 className="font-bold text-xs text-gray-700 uppercase tracking-widest block">Materias Primas e Ingredientes para el Plan</h4>
+                        <div className="overflow-x-auto mt-4">
+                          <table className="min-w-full divide-y divide-gray-200">
+                            <thead>
+                              <tr className="bg-slate-50 text-slate-500 font-bold uppercase text-xs tracking-wide">
+                                <th className="px-4 py-3 text-left">Insumo</th>
+                                <th className="px-4 py-3 text-right text-indigo-700">Req. Semanal</th>
+                                <th className="px-4 py-3 text-right">Stock (kg)</th>
+                                <th className="px-4 py-3 text-center">Estado (Semanal)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 bg-white text-sm">
+                              {programCrossover.requiredInsumosAgg.filter(item => !isEmpaqueItem(item.insumoName)).map(item => {
+                                const lowerName = item.insumoName.toLowerCase();
+                                const isUnit = lowerName.includes('preforma') || lowerName.includes('tapa') || lowerName.includes('etiqueta');
+                                const unitStr = isUnit ? ' u.' : ' kg';
+                                
+                                return (
+                                  <tr key={item.insumoName} className="hover:bg-slate-50 transition-colors">
+                                    <td className="px-4 py-3">
+                                      <span className="font-bold text-gray-900 block truncate max-w-[200px]" title={item.insumoName}>
+                                        {item.insumoName}
                                       </span>
-                                    ) : item.isMet ? (
-                                      <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase px-2 py-1 rounded inline-flex items-center gap-1">
-                                        <CheckCircle2 className="w-3 h-3 text-emerald-600" /> OK
+                                    </td>
+                                    <td className="px-4 py-3 text-right">
+                                      <span className="font-semibold text-indigo-700">
+                                        {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.requiredKg)}{unitStr}
                                       </span>
-                                    ) : (
-                                      <span className="bg-red-100 text-red-800 text-[10px] font-black uppercase px-2 py-1 rounded inline-flex items-center gap-1 leading-tight">
-                                        <TrendingDown className="w-3 h-3 text-red-600" /> Falta {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.deficit)}kg
+                                    </td>
+                                    <td className="px-4 py-3 text-right font-medium text-gray-800">
+                                      {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}{unitStr}
+                                    </td>
+                                    <td className="px-4 py-3 text-center">
+                                      {item.requiredKg === 0 ? (
+                                        <span className="bg-gray-200 text-gray-600 text-[10px] font-black uppercase px-2 py-1 rounded">
+                                          Sin programar
+                                        </span>
+                                      ) : item.isMet ? (
+                                        <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase px-2 py-1 rounded inline-flex items-center gap-1">
+                                          <CheckCircle2 className="w-3 h-3 text-emerald-600" /> OK
+                                        </span>
+                                      ) : (
+                                        <span className="bg-red-100 text-red-800 text-[10px] font-black uppercase px-2 py-1 rounded inline-flex items-center gap-1 leading-tight">
+                                          <TrendingDown className="w-3 h-3 text-red-600" /> Falta {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.deficit)}{unitStr}
+                                        </span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* Empaque */}
+                      <div className="bg-white rounded-xl border border-gray-100 p-4 mt-6">
+                        <h4 className="font-bold text-xs text-orange-900 uppercase tracking-widest block">Materiales de Empaque para el Plan</h4>
+                        <div className="overflow-x-auto mt-4">
+                          <table className="min-w-full divide-y divide-gray-200">
+                            <thead>
+                              <tr className="bg-orange-50/50 text-orange-800 font-bold uppercase text-xs tracking-wide">
+                                <th className="px-4 py-3 text-left">Insumo</th>
+                                <th className="px-4 py-3 text-right text-orange-700">Req. Semanal</th>
+                                <th className="px-4 py-3 text-right">Stock</th>
+                                <th className="px-4 py-3 text-center">Estado (Semanal)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 bg-white text-sm">
+                              {programCrossover.requiredInsumosAgg.filter(item => isEmpaqueItem(item.insumoName)).map(item => {
+                                const lowerName = item.insumoName.toLowerCase();
+                                const isUnit = lowerName.includes('preforma') || lowerName.includes('tapa') || lowerName.includes('etiqueta');
+                                const unitStr = isUnit ? ' u.' : ' kg';
+                                
+                                return (
+                                  <tr key={item.insumoName} className="hover:bg-orange-50/30 transition-colors">
+                                    <td className="px-4 py-3">
+                                      <span className="font-bold text-gray-900 block truncate max-w-[200px]" title={item.insumoName}>
+                                        {item.insumoName}
                                       </span>
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
+                                    </td>
+                                    <td className="px-4 py-3 text-right">
+                                      <span className="font-semibold text-orange-700">
+                                        {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.requiredKg)}{unitStr}
+                                      </span>
+                                    </td>
+                                    <td className="px-4 py-3 text-right font-medium text-gray-800">
+                                      {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}{unitStr}
+                                    </td>
+                                    <td className="px-4 py-3 text-center">
+                                      {item.requiredKg === 0 ? (
+                                        <span className="bg-gray-200 text-gray-600 text-[10px] font-black uppercase px-2 py-1 rounded">
+                                          Sin programar
+                                        </span>
+                                      ) : item.isMet ? (
+                                        <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase px-2 py-1 rounded inline-flex items-center gap-1">
+                                          <CheckCircle2 className="w-3 h-3 text-emerald-600" /> OK
+                                        </span>
+                                      ) : (
+                                        <span className="bg-red-100 text-red-800 text-[10px] font-black uppercase px-2 py-1 rounded inline-flex items-center gap-1 leading-tight">
+                                          <TrendingDown className="w-3 h-3 text-red-600" /> Falta {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.deficit)}{unitStr}
+                                        </span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Weekly Production Supplies Summary (Preformas, Termo, Stretch, Tapas, Etiquetas) */}
+                    <div className="space-y-4 pt-4 border-t">
+                      <div>
+                        <h4 className="font-bold text-xs text-sidebar uppercase tracking-widest block">Resumen Semanal de Otros Insumos</h4>
+                        <p className="text-xs text-gray-500 mt-1">Suma total de materiales de producción requeridos para cumplir todo el plan publicado</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                        {/* Preformas */}
+                        <div className="bg-slate-50/80 border border-slate-200/80 rounded-xl p-4 flex flex-col justify-between shadow-sm hover:shadow-md transition-shadow">
+                          <div>
+                            <span className="text-[10px] uppercase font-black tracking-wider text-teal-850 bg-teal-100/60 px-2.5 py-1 rounded-md">Preformas</span>
+                            <div className="text-xl font-black text-teal-950 mt-2 font-mono">
+                              {Intl.NumberFormat('es-AR').format(
+                                (Object.values(programCrossover.preformasAgg || {}) as number[]).reduce((a, b) => a + b, 0)
+                              )} <span className="text-xs font-semibold text-teal-700">u.</span>
+                            </div>
+                          </div>
+                          <div className="mt-3 border-t border-slate-200/60 pt-2 space-y-1">
+                            {Object.entries(programCrossover.preformasAgg || {}).map(([size, value]) => (
+                              <div key={size} className="flex justify-between items-center text-[11px] font-medium text-slate-700">
+                                <span className="font-bold">{size} cc</span>
+                                <span className="font-bold font-mono text-teal-900 bg-teal-50 px-1.5 py-0.5 rounded">{Intl.NumberFormat('es-AR').format(value as number)} u.</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Termocontraible */}
+                        <div className="bg-slate-50/80 border border-slate-200/80 rounded-xl p-4 flex flex-col justify-between shadow-sm hover:shadow-md transition-shadow">
+                          <div>
+                            <span className="text-[10px] uppercase font-black tracking-wider text-amber-850 bg-amber-100/60 px-2.5 py-1 rounded-md">Termocontraible</span>
+                            <div className="text-xl font-black text-amber-950 mt-2 font-mono">
+                              {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(
+                                (Object.values(programCrossover.termoAgg || {}) as number[]).reduce((a, b) => a + b, 0)
+                              )} <span className="text-xs font-semibold text-amber-700">kg</span>
+                            </div>
+                          </div>
+                          <div className="mt-3 border-t border-slate-200/60 pt-2 space-y-1">
+                            {Object.entries(programCrossover.termoAgg || {}).map(([size, value]) => (
+                              <div key={size} className="flex justify-between items-center text-[11px] font-medium text-slate-700">
+                                <span className="font-bold">{size} cc</span>
+                                <span className="font-bold font-mono text-amber-900 bg-amber-50 px-1.5 py-0.5 rounded">{(value as number).toFixed(1)} kg</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Film Stretch */}
+                        <div className="bg-slate-50/80 border border-slate-200/80 rounded-xl p-4 flex flex-col justify-between shadow-sm hover:shadow-md transition-shadow">
+                          <div>
+                            <span className="text-[10px] uppercase font-black tracking-wider text-purple-850 bg-purple-100/60 px-2.5 py-1 rounded-md">Film Stretch</span>
+                            <div className="text-xl font-black text-purple-950 mt-2 font-mono">
+                              {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(
+                                (Object.values(programCrossover.stretchAgg || {}) as number[]).reduce((a, b) => a + b, 0)
+                              )} <span className="text-xs font-semibold text-purple-700">kg</span>
+                            </div>
+                          </div>
+                          <div className="mt-3 border-t border-slate-200/60 pt-2 space-y-1">
+                            {Object.entries(programCrossover.stretchAgg || {}).map(([size, value]) => (
+                              <div key={size} className="flex justify-between items-center text-[11px] font-medium text-slate-700">
+                                <span className="font-bold">{size} cc</span>
+                                <span className="font-bold font-mono text-purple-900 bg-purple-50 px-1.5 py-0.5 rounded">{(value as number).toFixed(1)} kg</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Tapas */}
+                        <div className="bg-slate-50/80 border border-slate-200/80 rounded-xl p-4 flex flex-col justify-between shadow-sm hover:shadow-md transition-shadow">
+                          <div>
+                            <span className="text-[10px] uppercase font-black tracking-wider text-blue-800 bg-blue-100/60 px-2.5 py-1 rounded-md">Tapas</span>
+                            <div className="text-xl font-black text-blue-950 mt-2 font-mono">
+                              {Intl.NumberFormat('es-AR').format(
+                                (Object.values(programCrossover.tapasAgg || {}) as number[]).reduce((a, b) => a + b, 0)
+                              )} <span className="text-xs font-semibold text-blue-700">u.</span>
+                            </div>
+                          </div>
+                          <div className="mt-3 border-t border-slate-200/60 pt-2 max-h-[120px] overflow-y-auto space-y-1.5 scrollbar-thin">
+                            {Object.entries(programCrossover.tapasAgg || {}).map(([key, value]) => (
+                              <div key={key} className="flex justify-between items-center text-[11px] font-medium text-slate-700">
+                                <span className="truncate max-w-[90px] font-semibold" title={key}>{key}</span>
+                                <span className="font-bold font-mono text-blue-900 bg-blue-50 px-1.5 py-0.5 rounded whitespace-nowrap">{Intl.NumberFormat('es-AR').format(value as number)} u.</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Etiquetas */}
+                        <div className="bg-slate-50/80 border border-slate-200/80 rounded-xl p-4 flex flex-col justify-between shadow-sm hover:shadow-md transition-shadow">
+                          <div>
+                            <span className="text-[10px] uppercase font-black tracking-wider text-rose-800 bg-rose-100/60 px-2.5 py-1 rounded-md">Etiquetas</span>
+                            <div className="text-xl font-black text-rose-950 mt-2 font-mono">
+                              {Intl.NumberFormat('es-AR').format(
+                                (Object.values(programCrossover.etiquetasAgg || {}) as number[]).reduce((a, b) => a + b, 0)
+                              )} <span className="text-xs font-semibold text-rose-700">u.</span>
+                            </div>
+                          </div>
+                          <div className="mt-3 border-t border-slate-200/60 pt-2 max-h-[120px] overflow-y-auto space-y-1.5 scrollbar-thin">
+                            {Object.entries(programCrossover.etiquetasAgg || {}).map(([key, value]) => (
+                              <div key={key} className="flex justify-between items-center text-[11px] font-medium text-slate-700">
+                                <span className="truncate max-w-[90px] font-semibold" title={key}>{key}</span>
+                                <span className="font-bold font-mono text-rose-950 bg-rose-50 px-1.5 py-0.5 rounded whitespace-nowrap">{Intl.NumberFormat('es-AR').format(value as number)} u.</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -1595,40 +2106,139 @@ export function InsumosControlReport() {
                       <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-gray-200 text-xs">
                           <thead>
-                            <tr className="bg-gray-50 text-gray-500 font-bold uppercase text-xs tracking-wider">
+                            <tr className="bg-gray-50 text-gray-500 font-bold uppercase text-[10px] tracking-wider">
                               <th className="px-3 py-2 text-left">Día / Turno</th>
                               <th className="px-3 py-2 text-left">Marca &amp; Sabor</th>
                               <th className="px-3 py-2 text-right">Tamaño</th>
-                              <th className="px-3 py-2 text-right">Cantidad de Packs</th>
-                              <th className="px-3 py-2 text-right text-emerald-600">Beverage L</th>
-                              <th className="px-3 py-2 text-right text-indigo-700">Syrup L</th>
+                              <th className="px-3 py-2 text-right">Packs</th>
+                              <th className="px-3 py-2 text-right text-emerald-700 font-bold">Bebida (L)</th>
+                              <th className="px-3 py-2 text-right text-indigo-700 font-bold">Jarabe (L)</th>
+                              <th className="px-3 py-2 text-right text-teal-700 font-bold">Preformas</th>
+                              <th className="px-3 py-2 text-right text-amber-700 font-bold">Termo</th>
+                              <th className="px-3 py-2 text-right text-purple-700 font-bold">Stretch</th>
+                              <th className="px-3 py-2 text-right text-blue-700 font-bold">Tapas</th>
+                              <th className="px-3 py-2 text-right text-rose-700 font-bold">Etiquetas</th>
+                              <th className="px-3 py-2 text-center text-gray-700 font-bold">Info</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100 bg-white">
                             {programCrossover.programSummary.map((planSummary) => {
+                              const uniqueId = planSummary.id || `${planSummary.date}-${planSummary.linea}-${planSummary.shift}`;
+                              const isExpanded = expandedPlanId === uniqueId;
+
                               return (
-                                <tr key={planSummary.id || `${planSummary.date}-${planSummary.linea}-${planSummary.shift}`} className="hover:bg-gray-50/55">
-                                  <td className="px-3 py-3 font-medium text-gray-900">
-                                    <div className="font-bold capitalize">{format(parseISO(planSummary.date), "dd/MM - EE", { locale: es })}</div>
-                                    <div className="text-xs text-gray-500">{planSummary.shift} (L{planSummary.linea})</div>
-                                  </td>
-                                  <td className="px-3 py-3">
-                                    <span className="text-xs font-bold text-indigo-600 uppercase block tracking-wide">{planSummary.brand}</span>
-                                    <span className="font-semibold text-gray-800">{planSummary.flavor}</span>
-                                  </td>
-                                  <td className="px-3 py-3 text-right text-gray-600">
-                                    {Intl.NumberFormat('es-AR').format(planSummary.size)} ml
-                                  </td>
-                                  <td className="px-3 py-3 text-right font-black text-gray-900 font-mono">
-                                    {Intl.NumberFormat('es-AR').format(planSummary.packs)} pks
-                                  </td>
-                                  <td className="px-3 py-3 text-right font-bold text-emerald-600 font-mono">
-                                    {Intl.NumberFormat('es-AR').format(Math.round(planSummary.beverageLiters))} L
-                                  </td>
-                                  <td className="px-3 py-3 text-right font-bold text-indigo-600 font-mono">
-                                    {Intl.NumberFormat('es-AR').format(Math.round(planSummary.syrupLitersNeeded))} L
-                                  </td>
-                                </tr>
+                                <Fragment key={uniqueId}>
+                                  <tr 
+                                    className={`hover:bg-slate-50 transition-colors cursor-pointer ${isExpanded ? 'bg-indigo-50/20' : ''}`}
+                                    onClick={() => setExpandedPlanId(isExpanded ? null : uniqueId)}
+                                  >
+                                    <td className="px-3 py-2.5 font-medium text-gray-900">
+                                      <div className="font-bold capitalize">{format(parseISO(planSummary.date), "dd/MM - EE", { locale: es })}</div>
+                                      <div className="text-[10px] text-gray-500 font-semibold">{planSummary.shift} (L{planSummary.linea})</div>
+                                    </td>
+                                    <td className="px-3 py-2.5">
+                                      <span className="text-[10px] font-black text-indigo-750 uppercase block tracking-wide">{planSummary.brand}</span>
+                                      <span className="font-bold text-gray-800">{planSummary.flavor}</span>
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-semibold text-gray-650">
+                                      {Intl.NumberFormat('es-AR').format(planSummary.size)} ml
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-black text-gray-900 font-mono">
+                                      {Intl.NumberFormat('es-AR').format(planSummary.packs)} pks
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-bold text-emerald-600 font-mono">
+                                      {Intl.NumberFormat('es-AR').format(Math.round(planSummary.beverageLiters))} L
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-bold text-indigo-600 font-mono">
+                                      {Intl.NumberFormat('es-AR').format(Math.round(planSummary.syrupLitersNeeded))} L
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-bold text-teal-650 font-mono">
+                                      {Intl.NumberFormat('es-AR').format(planSummary.preformasNeeded)} u.
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-bold text-amber-650 font-mono">
+                                      {planSummary.termoNeededKg.toFixed(2)} kg
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-bold text-purple-650 font-mono">
+                                      {planSummary.stretchNeededKg.toFixed(2)} kg
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-bold text-blue-650 font-mono">
+                                      {Intl.NumberFormat('es-AR').format(planSummary.tapasNeeded)} u.
+                                    </td>
+                                    <td className="px-3 py-2.5 text-right font-bold text-rose-650 font-mono">
+                                      {Intl.NumberFormat('es-AR').format(planSummary.etiquetasNeeded)} u.
+                                    </td>
+                                    <td className="px-3 py-2.5 text-center">
+                                      <button 
+                                        type="button"
+                                        className="text-[10px] font-black text-slate-500 hover:text-indigo-600 px-1.5 py-0.5 rounded-md border border-slate-200 bg-slate-50 hover:bg-indigo-50 hover:border-indigo-200 transition-colors"
+                                      >
+                                        {isExpanded ? "▲" : "▼"}
+                                      </button>
+                                    </td>
+                                  </tr>
+                                  {isExpanded && (
+                                    <tr className="bg-slate-50/50">
+                                      <td colSpan={12} className="px-4 py-3 border-y border-slate-200/80">
+                                        <div className="grid grid-cols-1 md:grid-cols-5 gap-3 p-1">
+                                          {/* Preformas Detail */}
+                                          <div className="bg-white p-2.5 rounded-lg border border-teal-100 shadow-xs">
+                                            <span className="text-[10px] font-black uppercase text-teal-850 tracking-wider">Preformas</span>
+                                            <div className="text-sm font-bold text-teal-950 mt-1 font-mono">
+                                              {Intl.NumberFormat('es-AR').format(planSummary.preformasNeeded)} u.
+                                            </div>
+                                            <div className="text-[10px] text-slate-500 font-semibold mt-1">
+                                              Calibre: <strong className="text-slate-700">{planSummary.size}cc</strong>
+                                            </div>
+                                          </div>
+
+                                          {/* Termocontraible Detail */}
+                                          <div className="bg-white p-2.5 rounded-lg border border-amber-100 shadow-xs">
+                                            <span className="text-[10px] font-black uppercase text-amber-850 tracking-wider">Termocontraible</span>
+                                            <div className="text-sm font-bold text-amber-950 mt-1 font-mono">
+                                              {planSummary.termoNeededKg.toFixed(2)} kg
+                                            </div>
+                                            <div className="text-[10px] text-slate-500 font-semibold mt-1">
+                                              Calibre: <strong className="text-slate-700">{planSummary.size}cc</strong>
+                                            </div>
+                                          </div>
+
+                                          {/* Stretch Detail */}
+                                          <div className="bg-white p-2.5 rounded-lg border border-purple-100 shadow-xs">
+                                            <span className="text-[10px] font-black uppercase text-purple-850 tracking-wider">Film Stretch</span>
+                                            <div className="text-sm font-bold text-purple-950 mt-1 font-mono">
+                                              {planSummary.stretchNeededKg.toFixed(2)} kg
+                                            </div>
+                                            <div className="text-[10px] text-slate-500 font-semibold mt-1">
+                                              Packs: <strong className="text-slate-700">{planSummary.packs} pks</strong>
+                                            </div>
+                                          </div>
+
+                                          {/* Tapas Detail */}
+                                          <div className="bg-white p-2.5 rounded-lg border border-blue-105 shadow-xs">
+                                            <span className="text-[10px] font-black uppercase text-blue-800 tracking-wider">Tapas</span>
+                                            <div className="text-sm font-bold text-blue-950 mt-1 font-mono">
+                                              {Intl.NumberFormat('es-AR').format(planSummary.tapasNeeded)} u.
+                                            </div>
+                                            <div className="text-[10px] text-slate-500 font-semibold mt-1">
+                                              Tapa <strong className="text-slate-700">{planSummary.size}cc - {planSummary.flavor}</strong>
+                                            </div>
+                                          </div>
+
+                                          {/* Etiquetas Detail */}
+                                          <div className="bg-white p-2.5 rounded-lg border border-rose-100 shadow-xs">
+                                            <span className="text-[10px] font-black uppercase text-rose-800 tracking-wider">Etiquetas</span>
+                                            <div className="text-sm font-bold text-rose-950 mt-1 font-mono">
+                                              {Intl.NumberFormat('es-AR').format(planSummary.etiquetasNeeded)} u.
+                                            </div>
+                                            <div className="text-[10px] text-slate-500 font-semibold mt-1">
+                                              Etiqueta <strong className="text-slate-700">{planSummary.flavor} ({planSummary.size}cc)</strong>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </Fragment>
                               );
                             })}
                           </tbody>

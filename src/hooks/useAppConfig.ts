@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
-import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, SABORES_SIN_JARABE, CO2_VOLUMES, WASTE_WEIGHTS, DEFAULT_INSUMOS } from '../constants';
+import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, SABORES_SIN_JARABE, CO2_VOLUMES, WASTE_WEIGHTS, DEFAULT_INSUMOS, DEFAULT_PREFORMAS, DEFAULT_TERMO, DEFAULT_STRETCH, DEFAULT_TAPAS, PreformaConfig, TermoConfig, StretchConfig, TapaConfig } from '../constants';
 
 interface AppConfig {
   flavors: string[];
@@ -58,6 +58,11 @@ interface AppConfig {
   insumos?: string[];
   insumosMatrix?: Record<string, Record<string, Record<string, number>>>;
   compatibleInsumoGroups?: Record<string, string[]>;
+  compatiblePackagingGroups?: Record<string, string[]>;
+  preformasConfig?: PreformaConfig[];
+  termoConfig?: TermoConfig[];
+  stretchConfig?: StretchConfig[];
+  tapaConfig?: TapaConfig[];
 }
 
 export function useAppConfig() {
@@ -108,6 +113,11 @@ export function useAppConfig() {
           insumos: data.insumos || DEFAULT_INSUMOS,
           insumosMatrix: data.insumosMatrix || {},
           compatibleInsumoGroups: data.compatibleInsumoGroups || {},
+          compatiblePackagingGroups: data.compatiblePackagingGroups || {},
+          preformasConfig: data.preformasConfig || [],
+          termoConfig: data.termoConfig || [],
+          stretchConfig: data.stretchConfig || [],
+          tapaConfig: data.tapaConfig || [],
           co2Volumes: (() => {
             const defaultVols = { ...CO2_VOLUMES };
             if (data.co2Volumes) {
@@ -178,7 +188,11 @@ export function useAppConfig() {
           wasteWeights: WASTE_WEIGHTS,
           syrupFormulas: {},
           insumos: DEFAULT_INSUMOS,
-          insumosMatrix: {}
+          insumosMatrix: {},
+          preformasConfig: [],
+          termoConfig: [],
+          stretchConfig: [],
+          tapaConfig: []
         });
       }
       setLoading(false);

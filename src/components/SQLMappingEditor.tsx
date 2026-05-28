@@ -98,6 +98,12 @@ export function SQLMappingEditor() {
             cleanedProductMappings[key] = productMappings[key];
           }
         });
+        // Preservar mapeos ya cargados en base de datos para no perderlos si no están en el lote actual
+        Object.entries(productMappings).forEach(([key, val]) => {
+          if (val && !cleanedProductMappings[key]) {
+            cleanedProductMappings[key] = val as string;
+          }
+        });
         await setDoc(doc(db, 'config', 'sql_mappings'), cleanedProductMappings);
         setProductMappings(cleanedProductMappings);
       } else if (activeTab === 'syrups') {
@@ -107,6 +113,12 @@ export function SQLMappingEditor() {
             cleanedSyrupMappings[key] = syrupMappings[key];
           }
         });
+        // Preservar mapeos ya cargados en base de datos para no perderlos si no están en el lote actual
+        Object.entries(syrupMappings).forEach(([key, val]) => {
+          if (val && !cleanedSyrupMappings[key]) {
+            cleanedSyrupMappings[key] = val as string;
+          }
+        });
         await setDoc(doc(db, 'config', 'sql_syrup_mappings'), cleanedSyrupMappings);
         setSyrupMappings(cleanedSyrupMappings);
       } else {
@@ -114,6 +126,12 @@ export function SQLMappingEditor() {
         generatedInsumoKeys.forEach(key => {
           if (insumoMappings[key] !== undefined) {
             cleanedInsumoMappings[key] = insumoMappings[key];
+          }
+        });
+        // Preservar mapeos ya cargados en base de datos para no perderlos si no están en el lote actual
+        Object.entries(insumoMappings).forEach(([key, val]) => {
+          if (val && !cleanedInsumoMappings[key]) {
+            cleanedInsumoMappings[key] = val as string;
           }
         });
         await setDoc(doc(db, 'config', 'sql_insumo_mappings'), cleanedInsumoMappings);
@@ -155,15 +173,16 @@ export function SQLMappingEditor() {
   const generatedSyrupKeys = useMemo(() => {
     const keys: string[] = [];
     availableBrands.forEach(brand => {
-      const allowedFlavors = getFilteredFlavors(brand);
-      allowedFlavors.forEach(flavor => {
+      // Usar todas las combinaciones de sabores para la marca según brandFlavorCombinations o fallback general
+      const brandCombos = config?.brandFlavorCombinations?.[brand] || availableFlavors || SABORES;
+      brandCombos.forEach(flavor => {
         if (!(config?.saboresSinJarabe || SABORES_SIN_JARABE).includes(flavor)) {
           keys.push(`${brand}-${flavor}`);
         }
       });
     });
     return keys;
-  }, [availableBrands, getFilteredFlavors]);
+  }, [availableBrands, availableFlavors, config?.brandFlavorCombinations, config?.saboresSinJarabe]);
 
   const generatedInsumoKeys = useMemo(() => {
     return config?.insumos || [];

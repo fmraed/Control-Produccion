@@ -106,7 +106,7 @@ async function startServer() {
       const query = `
         SELECT 
             op.[nu_ordenProduccion],
-            art.[co_codAbre] AS codigo_abreviado,
+            RTRIM(LTRIM(art.[co_codAbre])) AS codigo_abreviado,
             art.[no_descripcion] AS descripcion_articulo,
             maq.[no_descripcion] AS linea,
             op.[fe_inicio],
@@ -175,7 +175,7 @@ async function startServer() {
       // Simplified query using only the user-provided stock view
       const query = `
         SELECT 
-            a.[co_codAbre] AS codigo,
+            RTRIM(LTRIM(a.[co_codAbre])) AS codigo,
             a.[no_descripcion] AS descripcion,
             s.[nu_actual] AS stock_actual,
             0 AS salida_acumulada,
@@ -189,7 +189,7 @@ async function startServer() {
 
       const pendingQuery = `
         SELECT 
-            a.[co_codAbre] AS codigo,
+            RTRIM(LTRIM(a.[co_codAbre])) AS codigo,
             SUM(c.[nu_Cantidad]) as nu_Cantidad
         FROM [forDrink].[dbo].[pr_ca_control] c
         JOIN [forDrink].[dbo].[fc_articulos] a
@@ -231,7 +231,7 @@ async function startServer() {
       
       const query = `
         SELECT 
-            a.co_codAbre AS codigo_articulo,
+            RTRIM(LTRIM(a.co_codAbre)) AS codigo_articulo,
             a.no_descripcion AS nombre_articulo,
             ISNULL(s1.nu_actual,0) AS stock_almacen,
             ISNULL(s2.nu_actual,0) AS stock_piso,

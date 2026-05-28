@@ -249,25 +249,23 @@ export function ManagementSummary() {
 
     console.log("Current Shift Config being used:", shiftConfig);
 
-    // Normalize weeklyPlan if it's in the old format
-    // Normalize shiftConfig to ensure all days and shifts exist
-    if (shiftConfig.weeklyPlan) {
-      const normalizedWeeklyPlan: any = {};
+    // Normalize weeklyPlan and previousWeeklyPlan
+    const normalizePlan = (rawPlan: any) => {
+      if (!rawPlan) return null;
+      const normalizedPlan: any = {};
       const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
       const daysEs = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
       
       days.forEach((day, idx) => {
         const dayEs = daysEs[idx];
-        // Try to find the plan in English or Spanish, case-insensitive
-        const rawDayPlan = (shiftConfig.weeklyPlan as any)[day] || 
-                           (shiftConfig.weeklyPlan as any)[day.charAt(0).toUpperCase() + day.slice(1)] ||
-                           (shiftConfig.weeklyPlan as any)[dayEs] ||
-                           (shiftConfig.weeklyPlan as any)[dayEs.charAt(0).toUpperCase() + dayEs.slice(1)] ||
+        const rawDayPlan = (rawPlan as any)[day] || 
+                           (rawPlan as any)[day.charAt(0).toUpperCase() + day.slice(1)] ||
+                           (rawPlan as any)[dayEs] ||
+                           (rawPlan as any)[dayEs.charAt(0).toUpperCase() + dayEs.slice(1)] ||
                            {};
         
-        normalizedWeeklyPlan[day] = {};
+        normalizedPlan[day] = {};
         ['Mañana', 'Tarde', 'Noche'].forEach(shift => {
-          // Find shift key case-insensitively and without tildes
           const shiftKeys = Object.keys(rawDayPlan);
           const targetKey = shiftKeys.find(k => 
             k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 
@@ -277,19 +275,35 @@ export function ManagementSummary() {
           const val = targetKey ? rawDayPlan[targetKey] : null;
 
           if (Array.isArray(rawDayPlan) && rawDayPlan.some(s => s.toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === shift.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
-            normalizedWeeklyPlan[day][shift] = { count: 3, duration: 480 };
+            normalizedPlan[day][shift] = { count: 3, duration: 480 };
           } else if (val && typeof val === 'object') {
-            normalizedWeeklyPlan[day][shift] = {
+            normalizedPlan[day][shift] = {
               count: typeof val.count === 'number' ? val.count : 0,
               duration: typeof val.duration === 'number' ? val.duration : 480
             };
           } else {
-            normalizedWeeklyPlan[day][shift] = { count: 0, duration: 480 };
+            normalizedPlan[day][shift] = { count: 0, duration: 480 };
           }
         });
       });
-      shiftConfig = { ...shiftConfig, weeklyPlan: normalizedWeeklyPlan };
-    }
+      return normalizedPlan;
+    };
+
+    const normalizedWeeklyPlan = normalizePlan(shiftConfig.weeklyPlan) || shiftConfig.weeklyPlan;
+    const normalizedPreviousWeeklyPlan = rawShiftConfig?.previousWeeklyPlan ? normalizePlan(rawShiftConfig.previousWeeklyPlan) : null;
+    const shiftChangeDate = rawShiftConfig?.changeDate || '';
+
+    const getDayPlanForDate = (dateStr: string, dayKey: string) => {
+      if (normalizedPreviousWeeklyPlan && shiftChangeDate && dateStr < shiftChangeDate) {
+        return normalizedPreviousWeeklyPlan[dayKey] || {};
+      }
+      return normalizedWeeklyPlan[dayKey] || {};
+    };
+
+    shiftConfig = { 
+      ...shiftConfig, 
+      weeklyPlan: normalizedWeeklyPlan
+    };
 
     if (!shiftConfig.holidays) {
       shiftConfig = { ...shiftConfig, holidays: [] };
@@ -324,7 +338,7 @@ export function ManagementSummary() {
       const isNextDayHoliday = shiftConfig.holidays?.includes(nextDayStr);
       
       const dayKey = format(day, 'eeee').toLowerCase();
-      const dayPlan = shiftConfig.weeklyPlan[dayKey] || {};
+      const dayPlan = getDayPlanForDate(dateStr, dayKey);
       let plannedMinutes = 0;
       
       // Mañana and Tarde are affected by the current day being a holiday
@@ -435,7 +449,7 @@ export function ManagementSummary() {
       shiftCrossoverMap[crossoverKey].reports.push(r);
       
       // Use specific shift duration for this day/shift if available
-      const dayPlan = shiftConfig.weeklyPlan[dayKey] || {};
+      const dayPlan = getDayPlanForDate(logicalDate, dayKey);
       const shiftData = (dayPlan as any)[r.turno];
       let shiftDur = (shiftData && shiftData.duration) || shiftConfig.shiftDurations[r.turno as keyof typeof shiftConfig.shiftDurations] || shiftConfig.standardShiftDuration;
       
@@ -488,7 +502,7 @@ export function ManagementSummary() {
       const date = parseISO(dayStr);
       const dayOfWeek = getDay(date);
       const dayKey = format(date, 'eeee').toLowerCase();
-      const dayPlan = shiftConfig.weeklyPlan[dayKey] || {};
+      const dayPlan = getDayPlanForDate(dayStr, dayKey);
       const isHoliday = shiftConfig.holidays?.includes(dayStr);
       const nextDayStr = format(addDays(date, 1), 'yyyy-MM-dd');
       const isNextDayHoliday = shiftConfig.holidays?.includes(nextDayStr);
@@ -1495,41 +1509,41 @@ export function ManagementSummary() {
         <div className="lg:col-span-5 space-y-6">
           {/* Monthly Projection */}
           {selectedMonth === format(new Date(), 'yyyy-MM') && (
-            <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-2xl shadow-lg border border-slate-800 overflow-hidden text-white">
-              <div className="bg-slate-950/40 p-4 border-b border-slate-800/60 flex items-center justify-between">
+            <div className="bg-slate-950 rounded-2xl shadow-xl border border-slate-800 overflow-hidden text-white">
+              <div className="bg-slate-900/80 p-4 border-b border-slate-800 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <RefreshCw className="w-5 h-5 text-indigo-400" />
                   <h3 className="font-display font-bold uppercase text-xs tracking-wider text-slate-200">Proyección Mensual</h3>
                 </div>
                 <span className="text-[10px] bg-amber-500/10 text-amber-400 px-2.5 py-0.5 rounded-lg border border-amber-500/20 font-bold uppercase tracking-wider">ESTIMADO</span>
               </div>
-              <div className="p-5 space-y-5">
+              <div className="p-5 space-y-5 bg-slate-950">
                 <div className="space-y-2.5 border-b border-slate-800 pb-4">
                   <div className="flex justify-between items-center text-xs">
-                    <span className="font-medium text-slate-350">Días Laborales Pendientes:</span>
-                    <span className="font-display font-bold text-lg text-white">{(stats.pendingPlannedShifts / (stats.standardDailyShifts || 1)).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}</span>
+                    <span className="font-bold text-slate-350 text-slate-300">Días Laborales Pendientes:</span>
+                    <span className="font-display font-black text-lg text-white">{(stats.pendingPlannedShifts / (stats.standardDailyShifts || 1)).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}</span>
                   </div>
                   <div className="flex justify-between items-center text-xs">
-                    <span className="font-medium text-slate-350">Turnos-Líneas Laborales Pendientes:</span>
-                    <span className="font-display font-bold text-lg text-white">{Math.round(stats.pendingPlannedShifts)}</span>
+                    <span className="font-bold text-slate-350 text-slate-300">Turnos-Líneas Laborales Pendientes:</span>
+                    <span className="font-display font-black text-lg text-white">{Math.round(stats.pendingPlannedShifts)}</span>
                   </div>
                 </div>
                 
                 <div className="space-y-4">
                   <div className="flex justify-between items-center">
                     <div className="flex flex-col">
-                      <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Plan Proyectado PENDIENTE</span>
-                      <span className="text-[10.5px] text-slate-400 font-medium font-mono mt-0.5">Promedio {Math.round(stats.avgPacksPerShift)} paq/turno</span>
+                      <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">Plan Proyectado PENDIENTE</span>
+                      <span className="text-[10.5px] text-slate-450 text-slate-300 font-bold font-mono mt-0.5">Promedio {Math.round(stats.avgPacksPerShift)} paq/turno</span>
                     </div>
-                    <span className="text-[22px] font-display font-bold text-sky-400">{Math.round(stats.projectedPendingPacks).toLocaleString('es-AR')} <span className="text-xs font-normal text-slate-400">paq</span></span>
+                    <span className="text-2xl font-display font-black text-sky-400">{Math.round(stats.projectedPendingPacks).toLocaleString('es-AR')} <span className="text-xs font-normal text-slate-300">paq</span></span>
                   </div>
                   
-                  <div className="bg-slate-950/50 px-4 py-3.5 border border-slate-800/80 rounded-xl shadow-inner">
+                  <div className="bg-slate-900 px-4 py-3.5 border border-slate-800 rounded-xl shadow-inner">
                     <div className="flex justify-between items-center">
-                      <span className="text-xs font-bold text-indigo-300 uppercase tracking-wider">Proyección Total ESTIMADA:</span>
+                      <span className="text-xs font-black text-indigo-300 uppercase tracking-wider">Proyección Total ESTIMADA:</span>
                       <div className="flex items-baseline gap-2">
-                        <span className="text-2xl font-display font-extrabold text-emerald-400">{Math.round(stats.projectedTotalPacks).toLocaleString('es-AR')}</span>
-                        <span className="text-[10px] font-semibold text-emerald-500 uppercase tracking-wide">Paquetes</span>
+                        <span className="text-3xl font-display font-black text-emerald-400">{Math.round(stats.projectedTotalPacks).toLocaleString('es-AR')}</span>
+                        <span className="text-[10px] font-black text-emerald-350 text-emerald-300 uppercase tracking-wide">Paquetes</span>
                       </div>
                     </div>
                   </div>
