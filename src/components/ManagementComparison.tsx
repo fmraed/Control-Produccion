@@ -130,10 +130,10 @@ export function ManagementComparison() {
     let packs = 0;
     let botellas = 0;
     
-    // Efficiency
     let totalBruta = 0;
     let totalNeta = 0;
     let totalParadasMec = 0;
+    let totalParadasAjenas = 0;
     
     // Line/Calibre metrics
     const typeMetrics: Record<string, { count: number; effAcum: number }> = {};
@@ -164,20 +164,21 @@ export function ManagementComparison() {
       holidays: rawShiftConfig?.holidays || []
     };
 
-    if (shiftConfig.weeklyPlan) {
-      const normalizedWeeklyPlan: any = {};
+    const normalizePlan = (rawPlan: any) => {
+      if (!rawPlan) return null;
+      const normalizedMap: any = {};
       const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
       const daysEs = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
       
       days.forEach((day, idx) => {
         const dayEs = daysEs[idx];
-        const rawDayPlan = (shiftConfig.weeklyPlan as any)[day] || 
-                           (shiftConfig.weeklyPlan as any)[day.charAt(0).toUpperCase() + day.slice(1)] ||
-                           (shiftConfig.weeklyPlan as any)[dayEs] ||
-                           (shiftConfig.weeklyPlan as any)[dayEs.charAt(0).toUpperCase() + dayEs.slice(1)] ||
+        const rawDayPlan = rawPlan[day] || 
+                           rawPlan[day.charAt(0).toUpperCase() + day.slice(1)] ||
+                           rawPlan[dayEs] ||
+                           rawPlan[dayEs.charAt(0).toUpperCase() + dayEs.slice(1)] ||
                            {};
         
-        normalizedWeeklyPlan[day] = {};
+        normalizedMap[day] = {};
         ['Mañana', 'Tarde', 'Noche'].forEach(shift => {
           const shiftKeys = Object.keys(rawDayPlan);
           const targetKey = shiftKeys.find(k => 
@@ -188,19 +189,30 @@ export function ManagementComparison() {
           const val = targetKey ? rawDayPlan[targetKey] : null;
 
           if (Array.isArray(rawDayPlan) && rawDayPlan.some(s => s.toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === shift.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
-            normalizedWeeklyPlan[day][shift] = { count: 3, duration: 480 };
+            normalizedMap[day][shift] = { count: 3, duration: 480 };
           } else if (val && typeof val === 'object') {
-            normalizedWeeklyPlan[day][shift] = {
+            normalizedMap[day][shift] = {
               count: typeof val.count === 'number' ? val.count : 0,
               duration: typeof val.duration === 'number' ? val.duration : 480
             };
           } else {
-            normalizedWeeklyPlan[day][shift] = { count: 0, duration: 480 };
+            normalizedMap[day][shift] = { count: 0, duration: 480 };
           }
         });
       });
-      shiftConfig.weeklyPlan = normalizedWeeklyPlan;
-    }
+      return normalizedMap;
+    };
+
+    let normalizedWeeklyPlan = normalizePlan(shiftConfig.weeklyPlan) || shiftConfig.weeklyPlan;
+    const normalizedPreviousWeeklyPlan = rawShiftConfig?.previousWeeklyPlan ? normalizePlan(rawShiftConfig.previousWeeklyPlan) : null;
+    const shiftChangeDate = rawShiftConfig?.changeDate || '';
+
+    const getDayPlanForDate = (dateStr: string, dayKey: string) => {
+      if (normalizedPreviousWeeklyPlan && shiftChangeDate && dateStr < shiftChangeDate) {
+        return normalizedPreviousWeeklyPlan[dayKey] || {};
+      }
+      return normalizedWeeklyPlan[dayKey] || {};
+    };
 
     let holidayExtraHours = 0;
     let weekendExtraHours = 0;
@@ -232,8 +244,19 @@ export function ManagementComparison() {
       const neta = (r.botellas && r.velocidad) ? (r.botellas / r.velocidad) : 0;
       
       let paradaMec = 0;
+      let paradasAjenas = 0;
       if (r.downtimes) {
         r.downtimes.forEach(dt => {
+          const isExcluded = config?.efficiencyExcludedDowntimes?.some(excluded =>
+            (dt.category?.toLowerCase() || '') === excluded.toLowerCase() ||
+            (dt.reason?.toLowerCase() || '') === excluded.toLowerCase()
+          );
+          
+          if (isExcluded) {
+            paradasAjenas += (dt.totalMinutes || 0);
+            return;
+          }
+
           const mins = dt.totalMinutes || 0;
           if (dt.category === 'PARADAS DE LINEA' || dt.category === 'Paradas de Línea' || dt.category === 'Mecánica' || (dt.category === 'PARADAS LINEA')) {
             paradaMec += mins;
@@ -242,6 +265,9 @@ export function ManagementComparison() {
       }
 
       totalBruta += bruta;
+      const brutaCalculo = Math.max(0, bruta - paradasAjenas);
+      totalParadasAjenas += paradasAjenas;
+      
       totalNeta += neta;
       totalParadasMec += paradaMec;
       desperdicioTapas += Number(r.desperdicioTapas) || 0;
@@ -249,7 +275,7 @@ export function ManagementComparison() {
       // Group EFF by Line-Calibre
       if (r.linea && r.tamano) {
         const key = `Línea ${r.linea} - ${r.tamano}ml`;
-        const effOperativa = Math.min((bruta > 0 ? (neta / bruta) * 100 : 0), 100);
+        const effOperativa = Math.min((brutaCalculo > 0 ? (neta / brutaCalculo) * 100 : 0), 100);
         
         if (!typeMetrics[key]) typeMetrics[key] = { count: 0, effAcum: 0 };
         typeMetrics[key].count += 1;
@@ -278,8 +304,14 @@ export function ManagementComparison() {
 
     const shiftCount = datasetRaw.length;
     
-    const efOperativa = totalBruta > 0 ? (totalNeta / totalBruta) * 100 : 0;
-    const efMecanica = totalBruta > 0 ? ((totalBruta - totalParadasMec) / totalBruta) * 100 : 0;
+    // Total Bruta Excluyendo Ajenas
+    const totalBrutaCalculo = Math.max(0, totalBruta - totalParadasAjenas);
+
+    // Operativa = Marcha Neta / (Bruta - Ajenas) * 100
+    const efOperativa = totalBrutaCalculo > 0 ? (totalNeta / totalBrutaCalculo) * 100 : 0;
+    
+    // Mecánica = ((Marcha Bruta - Parada Mecánica - Ajenas) / (Marcha Bruta - Ajenas)) * 100
+    const efMecanica = totalBrutaCalculo > 0 ? ((totalBruta - totalParadasMec - totalParadasAjenas) / totalBrutaCalculo) * 100 : 0;
     
     const lineEfficiencies = Object.entries(typeMetrics)
       .map(([key, val]) => ({ key, eff: val.effAcum / val.count }))
@@ -294,7 +326,7 @@ export function ManagementComparison() {
       const date = parseISO(dayStr);
       const dayOfWeek = getDay(date);
       const dayKey = format(date, 'eeee').toLowerCase();
-      const dayPlan = shiftConfig.weeklyPlan[dayKey] || {};
+      const dayPlan = getDayPlanForDate(dayStr, dayKey);
       const isHoliday = shiftConfig.holidays?.includes(dayStr);
       const nextDayStr = format(addDays(date, 1), 'yyyy-MM-dd');
       const isNextDayHoliday = shiftConfig.holidays?.includes(nextDayStr);
