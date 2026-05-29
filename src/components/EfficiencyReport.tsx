@@ -132,6 +132,7 @@ export function EfficiencyReport() {
       paradaMecanica: 0,
       cambioFormato: 0,
       paradasOperativas: 0,
+      paradasExcluidasTotales: 0,
     };
 
     const filteredSizes = getFilteredSizes();
@@ -145,6 +146,7 @@ export function EfficiencyReport() {
           paradaMecanica: 0,
           cambioFormato: 0,
           paradasOperativas: 0,
+          paradasExcluidasTotales: 0,
         }
       };
       
@@ -164,6 +166,7 @@ export function EfficiencyReport() {
           paradaMecanica: 0,
           cambioFormato: 0,
           paradasOperativas: 0,
+          paradasExcluidasTotales: 0,
         };
       });
     });
@@ -174,12 +177,13 @@ export function EfficiencyReport() {
       
       if (linea && tamano && data[linea] && data[linea][tamano]) {
         const produccion = report.paquetes || 0;
-        const marchaBruta = report.tiempoTurno || 0;
+        let marchaBruta = report.tiempoTurno || 0;
         const marchaNeta = (report.botellas && report.velocidad) ? (report.botellas / report.velocidad) : 0;
         
         let paradaMecanica = 0;
         let cambioFormato = 0;
         let paradasOperativas = 0;
+        let paradasExcluidasTotales = 0;
 
         report.downtimes?.forEach(dt => {
           // Check if this downtime should be excluded
@@ -187,7 +191,11 @@ export function EfficiencyReport() {
             (dt.category?.toLowerCase() || '') === excluded.toLowerCase() ||
             (dt.reason?.toLowerCase() || '') === excluded.toLowerCase()
           );
-          if (isExcluded) return;
+          
+          if (isExcluded) {
+            paradasExcluidasTotales += (dt.totalMinutes || 0);
+            return;
+          }
 
           const mins = dt.totalMinutes || 0;
           if (dt.category === 'PARADAS DE LINEA' || dt.category === 'Paradas de Línea' || dt.category === 'Mecánica' || (dt.category === 'PARADAS LINEA')) {
@@ -208,6 +216,7 @@ export function EfficiencyReport() {
         data[linea][tamano].paradaMecanica += paradaMecanica;
         data[linea][tamano].cambioFormato += cambioFormato;
         data[linea][tamano].paradasOperativas += paradasOperativas;
+        data[linea][tamano].paradasExcluidasTotales += paradasExcluidasTotales;
 
         // Add to line total
         data[linea].total.produccion += produccion;
@@ -216,6 +225,7 @@ export function EfficiencyReport() {
         data[linea].total.paradaMecanica += paradaMecanica;
         data[linea].total.cambioFormato += cambioFormato;
         data[linea].total.paradasOperativas += paradasOperativas;
+        data[linea].total.paradasExcluidasTotales += paradasExcluidasTotales;
 
         // Add to planta total
         plantaTotal.produccion += produccion;
@@ -224,6 +234,7 @@ export function EfficiencyReport() {
         plantaTotal.paradaMecanica += paradaMecanica;
         plantaTotal.cambioFormato += cambioFormato;
         plantaTotal.paradasOperativas += paradasOperativas;
+        plantaTotal.paradasExcluidasTotales += paradasExcluidasTotales;
       }
     });
 
@@ -231,9 +242,18 @@ export function EfficiencyReport() {
   }, [filteredReports, filteredLines, getFilteredSizes]);
 
   const calculateMetrics = (d: any, isPlanta = false) => {
-    const efOperativa = d.marchaBruta > 0 ? (d.marchaNeta / d.marchaBruta) * 100 : 0;
-    const efMecanica = d.marchaBruta > 0 ? ((d.marchaBruta - d.paradaMecanica) / d.marchaBruta) * 100 : 0;
-    const efLinea = (d.marchaBruta + d.cambioFormato) > 0 ? (d.marchaNeta / (d.marchaBruta + d.cambioFormato)) * 100 : 0;
+    const paradasAjenas = d.paradasExcluidasTotales || 0;
+    const marchaBrutaCalculo = typeof d.marchaBruta === 'number' ? d.marchaBruta - paradasAjenas : 0;
+    
+    // Operativa = Marcha Neta / (Bruta - Ajenas) * 100
+    const efOperativa = marchaBrutaCalculo > 0 ? (d.marchaNeta / marchaBrutaCalculo) * 100 : 0;
+    
+    // Mecánica = ((Marcha Bruta - Parada Mecánica - Ajenas) / (Marcha Bruta - Ajenas)) * 100
+    const efMecanica = marchaBrutaCalculo > 0 ? ((d.marchaBruta - d.paradaMecanica - paradasAjenas) / marchaBrutaCalculo) * 100 : 0;
+    
+    // Linea = Marcha Neta / (Marcha Bruta - Ajenas + Cambio de Formato) * 100
+    const efLinea = (marchaBrutaCalculo + d.cambioFormato) > 0 ? (d.marchaNeta / (marchaBrutaCalculo + d.cambioFormato)) * 100 : 0;
+    
     const divisor = isPlanta ? (totalPossibleMinutes * filteredLines.length) : totalPossibleMinutes;
     const utilizacion = divisor > 0 ? (d.marchaBruta / divisor) * 100 : 0;
     const real = d.marchaBruta > 0 ? (d.produccion / d.marchaBruta) * 480 : 0;
@@ -284,8 +304,11 @@ export function EfficiencyReport() {
         <td className={`px-4 py-2 text-center text-sm border-r border-gray-200 ${hasData ? (isPlanta ? 'text-blue-600' : (isTotal ? lineColorClass : 'text-gray-900')) : 'text-gray-300'}`}>
           {hasData ? Math.round(d.cambioFormato).toLocaleString('es-AR') : '0'}
         </td>
-        <td className={`px-4 py-2 text-center text-sm border-r-4 border-gray-300 ${hasData ? (isPlanta ? 'text-blue-600' : (isTotal ? lineColorClass : 'text-gray-900')) : 'text-gray-300'}`}>
+        <td className={`px-4 py-2 text-center text-sm border-r border-gray-200 ${hasData ? (isPlanta ? 'text-blue-600' : (isTotal ? lineColorClass : 'text-gray-900')) : 'text-gray-300'}`}>
           {hasData ? Math.round(d.paradasOperativas).toLocaleString('es-AR') : '0'}
+        </td>
+        <td className={`px-4 py-2 text-center text-sm border-r-4 border-gray-300 ${hasData ? (isPlanta ? 'text-blue-600' : (isTotal ? lineColorClass : 'text-gray-900')) : 'text-gray-300'}`}>
+          {hasData ? Math.round(d.paradasExcluidasTotales || 0).toLocaleString('es-AR') : '0'}
         </td>
         
         {/* Eficiencias */}
@@ -394,8 +417,11 @@ export function EfficiencyReport() {
                 <th className="px-4 py-3 text-center text-xs font-bold text-gray-600 uppercase border-r border-gray-200 align-bottom">
                   Min.<br/>Cambio de<br/>Formato/Sabor
                 </th>
-                <th className="px-4 py-3 text-center text-xs font-bold text-gray-600 uppercase border-r-4 border-gray-300 align-bottom">
+                <th className="px-4 py-3 text-center text-xs font-bold text-gray-600 uppercase border-r border-gray-200 align-bottom">
                   Min.<br/>Paradas<br/>Operativas
+                </th>
+                <th className="px-4 py-3 text-center text-xs font-bold text-gray-600 uppercase border-r-4 border-gray-300 align-bottom">
+                  Min.<br/>Paradas<br/>Ajenas
                 </th>
                 <th className="px-4 py-3 text-center text-xs font-bold text-gray-600 uppercase border-r border-gray-200 align-bottom">
                   Eficiencia<br/>OPERATIVA
@@ -424,7 +450,7 @@ export function EfficiencyReport() {
                     .sort((a, b) => a - b)
                     .map(size => renderRow(`L${linea} - ${size.toLocaleString('es-AR')}`, efficiencyData.data[linea][size]))
                   }
-                  <tr className="h-2 bg-gray-200"><td colSpan={12}></td></tr>
+                  <tr className="h-2 bg-gray-200"><td colSpan={13}></td></tr>
                 </React.Fragment>
               ))}
 
