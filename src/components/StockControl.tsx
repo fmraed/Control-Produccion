@@ -39,6 +39,7 @@ export function StockControl() {
   const [editingStockKey, setEditingStockKey] = useState<string | null>(null);
   const [editingStockValue, setEditingStockValue] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  const [viewingLiveSql, setViewingLiveSql] = useState(false);
 
   // Auto-save ref
   const hasAttemptedAutoSave = useRef(false);
@@ -144,7 +145,7 @@ export function StockControl() {
     }
   };
 
-  const fetchSqlStock = async (month: string) => {
+  const fetchSqlStock = async (month: string, isManual = false) => {
     setRefreshing(true);
     setError(null);
     try {
@@ -157,6 +158,9 @@ export function StockControl() {
       if (result.success) {
         setSqlStock(result.data);
         setSqlPending(result.pendingData || []);
+        if (isManual) {
+          setViewingLiveSql(true);
+        }
       } else {
         setError(result.details ? `${result.error}: ${result.details}` : result.error || "Error al conectar con SQL Server");
       }
@@ -379,7 +383,7 @@ export function StockControl() {
       const income = 0; 
 
       // If daily snapshot was locked/saved, use it; otherwise fallback to the current live SQL stock value
-      const currentStockInstance = hasSavedStock
+      const currentStockInstance = hasSavedStock && !viewingLiveSql
         ? (savedDailyStocks[p.key] !== undefined ? savedDailyStocks[p.key] : 0)
         : sqlData.stock_actual;
 
@@ -419,7 +423,7 @@ export function StockControl() {
     });
 
     return productsMap;
-  }, [activeProducts, reports, goals, sqlStock, sqlPending, sqlMappings, selectedMonth, savedDailyStocks, initialStockOverrides, config]);
+  }, [activeProducts, reports, goals, sqlStock, sqlPending, sqlMappings, selectedMonth, savedDailyStocks, initialStockOverrides, config, viewingLiveSql]);
 
   // Auto-save the daily snapshot if it is today, has not been saved yet, SQL data is populated, and we haven't already attempted to save it
   useEffect(() => {
@@ -609,7 +613,7 @@ export function StockControl() {
           </div>
 
           <button
-            onClick={() => fetchSqlStock(selectedMonth)}
+            onClick={() => fetchSqlStock(selectedMonth, true)}
             disabled={refreshing}
             className="self-end p-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-md shadow-blue-105 disabled:opacity-50"
             title="Sincronizar SQL de nuevo"
@@ -621,17 +625,32 @@ export function StockControl() {
 
       {/* Daily Freeze status banner & save button */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50 border border-slate-200 p-4 rounded-xl">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {Object.keys(savedDailyStocks).length > 0 ? (
-            <div className="flex items-center gap-2 bg-green-100 border border-green-200 text-green-800 px-3 py-1.5 rounded-xl text-xs font-black">
-              <CheckCircle2 className="w-5 h-5 text-green-600 shrink-0" />
-              <div>
-                <p className="leading-tight">HISTORIAL GUARDADO (CONGELADO)</p>
-                <p className="text-[9px] text-green-600 font-bold normal-case">
-                  Editado por {dailyStocksInfo?.savedBy || 'Sistema'} ({format(parseISO(dailyStocksInfo?.savedAt || new Date().toISOString()), 'dd/MM/yyyy HH:mm')})
-                </p>
+            <>
+              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-black border ${viewingLiveSql ? 'bg-amber-100 border-amber-200 text-amber-800' : 'bg-green-100 border-green-200 text-green-800'}`}>
+                {viewingLiveSql ? (
+                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                ) : (
+                  <CheckCircle2 className="w-5 h-5 text-green-600 shrink-0" />
+                )}
+                <div>
+                  <p className="leading-tight">{viewingLiveSql ? 'VIENDO TIEMPO REAL (IGNORANDO CONGELADO)' : 'VIENDO HISTORIAL GUARDADO (CONGELADO)'}</p>
+                  <p className={`text-[9px] font-bold normal-case ${viewingLiveSql ? 'text-amber-600' : 'text-green-600'}`}>
+                    {viewingLiveSql 
+                      ? 'Datos sincronizados con SQL Server' 
+                      : `Editado por ${dailyStocksInfo?.savedBy || 'Sistema'} (${format(parseISO(dailyStocksInfo?.savedAt || new Date().toISOString()), 'dd/MM/yyyy HH:mm')})`
+                    }
+                  </p>
+                </div>
               </div>
-            </div>
+              <button
+                onClick={() => setViewingLiveSql(!viewingLiveSql)}
+                className="text-xs font-bold px-3 py-1.5 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 flex items-center gap-1.5 text-gray-700"
+              >
+                {viewingLiveSql ? 'Ver Congelado' : 'Ver Tiempo Real SQL'}
+              </button>
+            </>
           ) : (
             <div className="flex items-center gap-2 bg-amber-100 border border-amber-200 text-amber-800 px-3 py-1.5 rounded-xl text-xs font-black">
               <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />

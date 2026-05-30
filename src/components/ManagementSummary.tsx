@@ -330,6 +330,8 @@ export function ManagementSummary() {
     });
     standardDailyShifts = standardDaysSum / standardDays.length;
     
+    const plannedShiftsList: { date: string, shift: string, shiftOrder: number, count: number, totalDayShifts: number }[] = [];
+
     daysInMonth.forEach(day => {
       const dateStr = format(day, 'yyyy-MM-dd');
       const nextDayStr = format(addDays(day, 1), 'yyyy-MM-dd');
@@ -341,12 +343,18 @@ export function ManagementSummary() {
       const dayPlan = getDayPlanForDate(dateStr, dayKey);
       let plannedMinutes = 0;
       
+      let countM = 0;
+      let countT = 0;
+      let countN = 0;
+
       // Mañana and Tarde are affected by the current day being a holiday
       if (!isHoliday) {
         const m = dayPlan['Mañana'];
         const t = dayPlan['Tarde'];
-        plannedMinutes += (m?.count || 0) * (m?.duration || 480);
-        plannedMinutes += (t?.count || 0) * (t?.duration || 480);
+        countM = ((m?.count || 0) * (m?.duration || 480)) / 480;
+        countT = ((t?.count || 0) * (t?.duration || 480)) / 480;
+        plannedMinutes += countM * 480;
+        plannedMinutes += countT * 480;
       }
       
       // Noche is affected by the NEXT day being a holiday (starts at 00:00 of the next day)
@@ -361,12 +369,18 @@ export function ManagementSummary() {
           const boundary = (nextDayOfWeek === 6) ? 5 : 6;
           dur = boundary * 60; // 300 for Sat, 360 for others
         }
-        plannedMinutes += (n?.count || 0) * dur;
+        countN = ((n?.count || 0) * dur) / 480;
+        plannedMinutes += countN * 480;
       }
       
       const plannedShifts = plannedMinutes / 480;
       turnosOperativosPlanificados += plannedShifts;
       dailyPlan[dateStr] = plannedShifts;
+
+      const totalDayShifts = countM + countT + countN;
+      plannedShiftsList.push({ date: dateStr, shift: 'Mañana', shiftOrder: 1, count: countM, totalDayShifts });
+      plannedShiftsList.push({ date: dateStr, shift: 'Tarde', shiftOrder: 2, count: countT, totalDayShifts });
+      plannedShiftsList.push({ date: dateStr, shift: 'Noche', shiftOrder: 3, count: countN, totalDayShifts });
     });
 
     const averagePlannedShiftsPerDay = turnosOperativosPlanificados / daysInMonth.length;
@@ -572,14 +586,35 @@ export function ManagementSummary() {
     const turnosTrabajadosTotal = Object.values(turnosPorLinea).reduce((a, b) => a + b, 0);
     
     // Monthly Projection Calculation
-    const todayStr = format(new Date(), 'yyyy-MM-dd');
     const currentMonthStr = format(new Date(), 'yyyy-MM');
     let pendingPlannedShifts = 0;
+    let pendingPlannedDays = 0;
     
     if (selectedMonth === currentMonthStr) {
-      Object.entries(dailyPlan).forEach(([date, planned]) => {
-        if (date >= todayStr) {
-          pendingPlannedShifts += Number(planned);
+      let lastReportDate = '';
+      let lastReportShiftOrder = 0;
+      const shiftOrders: Record<string, number> = { 'Mañana': 1, 'Tarde': 2, 'Noche': 3 };
+
+      filteredReports.forEach(r => {
+        const logicalDate = getLogicalDate(r);
+        const shiftNum = shiftOrders[r.turno] || 0;
+        if (logicalDate > lastReportDate || (logicalDate === lastReportDate && shiftNum > lastReportShiftOrder)) {
+          lastReportDate = logicalDate;
+          lastReportShiftOrder = shiftNum;
+        }
+      });
+
+      if (!lastReportDate) {
+        lastReportDate = format(new Date(), 'yyyy-MM-dd');
+        lastReportShiftOrder = 0; // If nothing loaded, treat anything today as pending
+      }
+
+      plannedShiftsList.forEach(ps => {
+        if (ps.date > lastReportDate || (ps.date === lastReportDate && ps.shiftOrder > lastReportShiftOrder)) {
+          pendingPlannedShifts += ps.count;
+          if (ps.totalDayShifts > 0) {
+            pendingPlannedDays += (ps.count / ps.totalDayShifts);
+          }
         }
       });
     }
@@ -600,6 +635,7 @@ export function ManagementSummary() {
     const planFulfillments: number[] = [];
 
     const isTodayMonth = selectedMonth === currentMonthStr;
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
     
     // Para el cálculo de cumplimiento, solo evaluamos planes cuya fecha sea <= hoy
     const plansForFulfillment = monthlyPlans.filter(p => !isTodayMonth || p.date <= todayStr);
@@ -1013,6 +1049,7 @@ export function ManagementSummary() {
       totalPacks,
       avgPacksPerShift,
       pendingPlannedShifts,
+      pendingPlannedDays,
       projectedPendingPacks,
       projectedTotalPacks,
       cajasUnitarias,
@@ -1075,6 +1112,7 @@ export function ManagementSummary() {
         turnosPorLinea,
         activeProductsList,
         pendingPlannedShifts,
+        pendingPlannedDays,
         avgPacksPerShift,
         projectedPendingPacks,
         projectedTotalPacks
@@ -1521,11 +1559,11 @@ export function ManagementSummary() {
                 <div className="space-y-2.5 border-b border-slate-800 pb-4">
                   <div className="flex justify-between items-center text-xs">
                     <span className="font-bold text-slate-350 text-slate-300">Días Laborales Pendientes:</span>
-                    <span className="font-display font-black text-lg text-white">{(stats.pendingPlannedShifts / (stats.standardDailyShifts || 1)).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}</span>
+                    <span className="font-display font-black text-lg text-white">{(stats.pendingPlannedDays || 0).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}</span>
                   </div>
                   <div className="flex justify-between items-center text-xs">
                     <span className="font-bold text-slate-350 text-slate-300">Turnos-Líneas Laborales Pendientes:</span>
-                    <span className="font-display font-black text-lg text-white">{Math.round(stats.pendingPlannedShifts)}</span>
+                    <span className="font-display font-black text-lg text-white">{(stats.pendingPlannedShifts || 0).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 1 })}</span>
                   </div>
                 </div>
                 
