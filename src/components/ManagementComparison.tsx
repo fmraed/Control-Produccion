@@ -21,6 +21,7 @@ export function ManagementComparison() {
   const { config, shouldShowReport } = useAppConfig();
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [elaboraciones, setElaboraciones] = useState<ElaboracionReport[]>([]);
+  const [snapshots, setSnapshots] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [previousStartDate, setPreviousStartDate] = useState<string>('');
@@ -90,25 +91,38 @@ export function ManagementComparison() {
   useEffect(() => {
     const q1 = query(collection(db, 'production_reports'), orderBy('fecha', 'desc'));
     const q2 = query(collection(db, 'elaboracion_reports'), orderBy('fecha', 'desc'));
+    const q3 = query(collection(db, 'monthly_snapshots'));
     
     let loaded1 = false;
     let loaded2 = false;
+    let loaded3 = false;
+
+    const checkFinished = () => {
+      if (loaded1 && loaded2 && loaded3) setLoading(false);
+    };
 
     const unsub1 = onSnapshot(q1, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as ProductionReport[];
       setReports(data);
       loaded1 = true;
-      if (loaded1 && loaded2) setLoading(false);
+      checkFinished();
     });
 
     const unsub2 = onSnapshot(q2, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as ElaboracionReport[];
       setElaboraciones(data);
       loaded2 = true;
-      if (loaded1 && loaded2) setLoading(false);
+      checkFinished();
     });
 
-    return () => { unsub1(); unsub2(); };
+    const unsub3 = onSnapshot(q3, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setSnapshots(data);
+      loaded3 = true;
+      checkFinished();
+    });
+
+    return () => { unsub1(); unsub2(); unsub3(); };
   }, []);
 
   const { previousReports, currentReports, previousElab, currentElab } = useMemo(() => {
@@ -117,10 +131,22 @@ export function ManagementComparison() {
     const validReports = reports.filter(r => shouldShowReport(r, true));
     
     return {
-      previousReports: validReports.filter(r => r.fecha < managementStartDate && (!previousStartDate || r.fecha >= previousStartDate)),
-      currentReports: validReports.filter(r => r.fecha >= managementStartDate && (!currentEndDate || r.fecha <= currentEndDate)),
-      previousElab: elaboraciones.filter(r => r.fecha < managementStartDate && (!previousStartDate || r.fecha >= previousStartDate)),
-      currentElab: elaboraciones.filter(r => r.fecha >= managementStartDate && (!currentEndDate || r.fecha <= currentEndDate))
+      previousReports: validReports.filter(r => {
+        const logDate = getLogicalDate(r) || r.fecha;
+        return logDate < managementStartDate && (!previousStartDate || logDate >= previousStartDate);
+      }),
+      currentReports: validReports.filter(r => {
+        const logDate = getLogicalDate(r) || r.fecha;
+        return logDate >= managementStartDate && (!currentEndDate || logDate <= currentEndDate);
+      }),
+      previousElab: elaboraciones.filter(r => {
+        const logDate = getLogicalDate(r) || r.fecha;
+        return logDate < managementStartDate && (!previousStartDate || logDate >= previousStartDate);
+      }),
+      currentElab: elaboraciones.filter(r => {
+        const logDate = getLogicalDate(r) || r.fecha;
+        return logDate >= managementStartDate && (!currentEndDate || logDate <= currentEndDate);
+      })
     };
   }, [reports, elaboraciones, managementStartDate, previousStartDate, currentEndDate, shouldShowReport]);
 
@@ -148,22 +174,6 @@ export function ManagementComparison() {
     let jarabeTeorico = 0;
 
     // Normalización de la planificación de turnos (shiftConfig) para el cálculo de horas extras
-    const rawShiftConfig = config?.shiftConfig;
-    let shiftConfig = {
-      standardShiftDuration: rawShiftConfig?.standardShiftDuration || 480,
-      shiftDurations: rawShiftConfig?.shiftDurations || { Mañana: 480, Tarde: 480, Noche: 480 },
-      weeklyPlan: rawShiftConfig?.weeklyPlan || {
-        monday: { Mañana: { count: 3, duration: 480 }, Tarde: { count: 3, duration: 480 }, Noche: { count: 3, duration: 480 } },
-        tuesday: { Mañana: { count: 3, duration: 480 }, Tarde: { count: 3, duration: 480 }, Noche: { count: 3, duration: 480 } },
-        wednesday: { Mañana: { count: 3, duration: 480 }, Tarde: { count: 3, duration: 480 }, Noche: { count: 3, duration: 480 } },
-        thursday: { Mañana: { count: 3, duration: 480 }, Tarde: { count: 3, duration: 480 }, Noche: { count: 3, duration: 480 } },
-        friday: { Mañana: { count: 3, duration: 480 }, Tarde: { count: 3, duration: 480 }, Noche: { count: 3, duration: 420 } },
-        saturday: { Mañana: { count: 3, duration: 480 }, Tarde: { count: 0, duration: 480 }, Noche: { count: 0, duration: 480 } },
-        sunday: { Mañana: { count: 0, duration: 480 }, Tarde: { count: 0, duration: 480 }, Noche: { count: 3, duration: 360 } }
-      },
-      holidays: rawShiftConfig?.holidays || []
-    };
-
     const normalizePlan = (rawPlan: any) => {
       if (!rawPlan) return null;
       const normalizedMap: any = {};
@@ -203,15 +213,29 @@ export function ManagementComparison() {
       return normalizedMap;
     };
 
-    let normalizedWeeklyPlan = normalizePlan(shiftConfig.weeklyPlan) || shiftConfig.weeklyPlan;
-    const normalizedPreviousWeeklyPlan = rawShiftConfig?.previousWeeklyPlan ? normalizePlan(rawShiftConfig.previousWeeklyPlan) : null;
-    const shiftChangeDate = rawShiftConfig?.changeDate || '';
+    const getShiftConfigForDate = (dateStr: string) => {
+      const [yearStr, monthStr] = dateStr.split('-');
+      const year = parseInt(yearStr);
+      const month = monthStr;
+      const snapshot = snapshots.find(s => s.year === year && s.month === month);
+      return (snapshot && snapshot.configAtTime?.shiftConfig) ? snapshot.configAtTime.shiftConfig : config?.shiftConfig;
+    };
 
     const getDayPlanForDate = (dateStr: string, dayKey: string) => {
-      if (normalizedPreviousWeeklyPlan && shiftChangeDate && dateStr < shiftChangeDate) {
-        return normalizedPreviousWeeklyPlan[dayKey] || {};
+      const rawCfg = getShiftConfigForDate(dateStr);
+      const normWeeklyPlan = normalizePlan(rawCfg?.weeklyPlan) || rawCfg?.weeklyPlan || {};
+      const normPrevWeeklyPlan = rawCfg?.previousWeeklyPlan ? normalizePlan(rawCfg.previousWeeklyPlan) : null;
+      const changeDate = rawCfg?.changeDate || '';
+
+      if (normPrevWeeklyPlan && changeDate && dateStr < changeDate) {
+        return normPrevWeeklyPlan[dayKey] || {};
       }
-      return normalizedWeeklyPlan[dayKey] || {};
+      return normWeeklyPlan[dayKey] || {};
+    };
+
+    const isDateHoliday = (dateStr: string) => {
+      const rawCfg = getShiftConfigForDate(dateStr);
+      return rawCfg?.holidays?.includes(dateStr) || false;
     };
 
     let holidayExtraHours = 0;
@@ -282,14 +306,9 @@ export function ManagementComparison() {
         typeMetrics[key].effAcum += effOperativa;
       }
 
-      // CO2 Teorico: 7.2g per liter approx (very simplified)
-      const liters = (r.botellas || 0) * ((Number(r.tamano) || 0) / 1000);
-      co2Teorico += liters > 0 ? liters * 0.0075 : 0; // kg CO2 Teorico approx
-      
-      // Jarabe Teorico
-      if (config?.saboresSinJarabe && r.sabor && !config.saboresSinJarabe.includes(r.sabor)) {
-        jarabeTeorico += liters / 6; // approx 1 part syrup, 5 parts water = 1/6 yield
-      } // Not exactly perfect but gives a proportional theoretical baseline
+      // En la planilla de producción ya vienen el jarabe y co2 calculados
+      co2Teorico += r.co2 || 0;
+      jarabeTeorico += r.jarabeConsumido || 0;
 
       if (!reportsByDayAndShift[logicalDate]) reportsByDayAndShift[logicalDate] = {};
       if (!reportsByDayAndShift[logicalDate][r.turno]) reportsByDayAndShift[logicalDate][r.turno] = [];
@@ -327,9 +346,9 @@ export function ManagementComparison() {
       const dayOfWeek = getDay(date);
       const dayKey = format(date, 'eeee').toLowerCase();
       const dayPlan = getDayPlanForDate(dayStr, dayKey);
-      const isHoliday = shiftConfig.holidays?.includes(dayStr);
+      const isHoliday = isDateHoliday(dayStr);
       const nextDayStr = format(addDays(date, 1), 'yyyy-MM-dd');
-      const isNextDayHoliday = shiftConfig.holidays?.includes(nextDayStr);
+      const isNextDayHoliday = isDateHoliday(nextDayStr);
 
       Object.keys(reportsByDayAndShift[dayStr]).forEach(shift => {
         const reports = reportsByDayAndShift[dayStr][shift];
@@ -396,8 +415,8 @@ export function ManagementComparison() {
     };
   };
 
-  const currentStats = useMemo(() => calculateMetrics(currentReports, currentElab), [currentReports, currentElab]);
-  const previousStats = useMemo(() => calculateMetrics(previousReports, previousElab), [previousReports, previousElab]);
+  const currentStats = useMemo(() => calculateMetrics(currentReports, currentElab), [currentReports, currentElab, snapshots, config]);
+  const previousStats = useMemo(() => calculateMetrics(previousReports, previousElab), [previousReports, previousElab, snapshots, config]);
 
   if (!managementStartDate) {
     return (

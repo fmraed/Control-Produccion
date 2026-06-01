@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import { collection, query, where, onSnapshot, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { ProductionReport, MonthlyGoal } from '../types';
-import { format, parseISO, startOfMonth, endOfMonth, subDays, getDate, getDaysInMonth } from 'date-fns';
+import { format, parseISO, startOfMonth, endOfMonth, subDays, addDays, getDate, getDaysInMonth } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { BarChart3, Database, Search, RefreshCw, AlertCircle, TrendingUp, Package, Clock, AlertTriangle, CheckCircle2, Calendar, Save, Sparkles, Info } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
@@ -218,10 +218,15 @@ export function StockControl() {
   useEffect(() => {
     fetchMappings();
     
+    // Fetch a slightly wider date range to account for logical shifts that cross month boundaries
+    const [year, month] = selectedMonth.split('-');
+    const startDateObj = subDays(parseISO(`${selectedMonth}-01`), 2);
+    const endDateObj = addDays(new Date(parseInt(year), parseInt(month), 0), 2);
+    
     const qReports = query(
       collection(db, 'production_reports'),
-      where('fecha', '>=', `${selectedMonth}-01`),
-      where('fecha', '<=', `${selectedMonth}-31`)
+      where('fecha', '>=', format(startDateObj, 'yyyy-MM-dd')),
+      where('fecha', '<=', format(endDateObj, 'yyyy-MM-dd'))
     );
 
     const qGoals = query(
@@ -230,7 +235,9 @@ export function StockControl() {
     );
 
     const unsubReports = onSnapshot(qReports, (snap) => {
-      setReports(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProductionReport)));
+      const allReports = snap.docs.map(d => ({ id: d.id, ...d.data() } as ProductionReport));
+      const filteredByLogical = allReports.filter(r => getLogicalDate(r).startsWith(selectedMonth));
+      setReports(filteredByLogical);
     });
 
     const unsubGoals = onSnapshot(qGoals, (snap) => {
@@ -358,7 +365,7 @@ export function StockControl() {
       
       const totalProducedMonth = productReports.reduce((sum, r) => sum + (r.paquetes || 0), 0);
       const producedYesterday = productReports
-        .filter(r => r.fecha === yesterdayStr)
+        .filter(r => getLogicalDate(r) === yesterdayStr)
         .reduce((sum, r) => sum + (r.paquetes || 0), 0);
 
       const goal = goals.find(g => g.marca === p.marca && g.sabor === p.sabor && g.tamano === p.tamano)?.quantity || 0;
@@ -369,8 +376,6 @@ export function StockControl() {
       
       const sqlData = sqlStock.find(s => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim()) || { stock_actual: 0, salida_acumulada: 0, stock_inicial: 0 };
       
-      const initialStock = initialStockOverrides[p.key] !== undefined ? initialStockOverrides[p.key] : sqlData.stock_inicial;
-      
       const requiresQC = (config.qualityControlFlavors || ['Agua']).some(f => f.trim() === p.sabor.trim());
       const isExternal = (config.externalProducts?.[p.marca]?.[p.tamano.toString()] || []).includes(p.sabor);
       
@@ -379,6 +384,8 @@ export function StockControl() {
         : undefined;
       const pendingQuantity = pendingData?.nu_Cantidad || 0;
 
+      const initialStock = initialStockOverrides[p.key] !== undefined ? initialStockOverrides[p.key] : (sqlData.stock_inicial + pendingQuantity);
+      
       // For external products, we use income instead of production if available
       const income = 0; 
 
