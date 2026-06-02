@@ -382,7 +382,16 @@ export function StockControl() {
       const pendingData = requiresQC 
         ? sqlPending.find(s => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim()) 
         : undefined;
-      const pendingQuantity = pendingData?.nu_Cantidad || 0;
+
+      let pendingQuantity = 0;
+      if (pendingData) {
+        if (pendingData.nu_cantidadPendiente || pendingData.nu_CantidadPendiente) {
+          const val = pendingData.nu_cantidadPendiente || pendingData.nu_CantidadPendiente;
+          pendingQuantity = val !== 0 ? val : (pendingData.nu_cantidad || pendingData.nu_Cantidad || 0);
+        } else {
+          pendingQuantity = pendingData.nu_cantidad || pendingData.nu_Cantidad || 0;
+        }
+      }
 
       const initialStock = initialStockOverrides[p.key] !== undefined ? initialStockOverrides[p.key] : (sqlData.stock_inicial + pendingQuantity);
       
