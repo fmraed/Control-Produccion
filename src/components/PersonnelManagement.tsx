@@ -1536,7 +1536,7 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {employees
-              .filter(e => e.active)
+              .filter(e => e.active || attendance.some(at => at.employeeId === e.id && at.date === attendanceDate && at.shift === attendanceShift) || assignments.some(as => as.employeeId === e.id && as.date === attendanceDate && as.shift === attendanceShift))
               .sort((a, b) => {
                 const aPlanned = assignments.some(as => as.employeeId === a.id && as.date === attendanceDate && as.shift === attendanceShift);
                 const bPlanned = assignments.some(as => as.employeeId === b.id && as.date === attendanceDate && as.shift === attendanceShift);

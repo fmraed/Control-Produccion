@@ -187,7 +187,10 @@ export function ManagementSummary() {
           consecutive: 0,
           nonConsecutive: 0,
           total: 0,
-          flavorChanges: 0
+          flavorChanges: 0,
+          flavorChangesByLine: {},
+          consecutiveByLine: {},
+          nonConsecutiveByLine: {}
         },
         ...snapshot.stats,
         breakdown: {
@@ -919,11 +922,19 @@ export function ManagementSummary() {
     let transformacionesNoConsecutivas = 0;
     let cambiosSabor = 0;
 
+    const transformacionesConsecutivasByLine: Record<string, number> = {};
+    const transformacionesNoConsecutivasByLine: Record<string, number> = {};
+    const cambiosSaborByLine: Record<string, number> = {};
+
     const arranquesPorLinea: Record<string, number> = {};
     let totalArranquesLinea = 0;
     const allReportsWithTimes: Array<{ report: ProductionReport; times: { start: Date; end: Date }; line: string }> = [];
 
     Object.keys(lineReports).forEach(lKey => {
+      transformacionesConsecutivasByLine[lKey] = 0;
+      transformacionesNoConsecutivasByLine[lKey] = 0;
+      cambiosSaborByLine[lKey] = 0;
+
       // Keep only valid production reports with positive sizes and populated brands/flavors
       const validLineSorted = lineReports[lKey].filter(r => {
         const size = r.tamano || 0;
@@ -993,13 +1004,16 @@ export function ManagementSummary() {
         if (hasSizeChange) {
           if (isConsecutive) {
             transformacionesConsecutivas++;
+            transformacionesConsecutivasByLine[lKey]++;
           } else {
             transformacionesNoConsecutivas++;
+            transformacionesNoConsecutivasByLine[lKey]++;
           }
         } else {
           const hasFlavorChange = prevSabor !== currSabor;
           if (hasFlavorChange && isConsecutive) {
             cambiosSabor++;
+            cambiosSaborByLine[lKey]++;
           }
         }
       }
@@ -1059,6 +1073,9 @@ export function ManagementSummary() {
         nonConsecutive: transformacionesNoConsecutivas,
         total: totalTransformaciones,
         flavorChanges: cambiosSabor,
+        flavorChangesByLine: cambiosSaborByLine,
+        consecutiveByLine: transformacionesConsecutivasByLine,
+        nonConsecutiveByLine: transformacionesNoConsecutivasByLine,
         factoryStartups: arranquesFabrica,
         lineStartupsTotal: totalArranquesLinea,
         lineStartupsBreakdown: arranquesPorLinea
@@ -1660,7 +1677,7 @@ export function ManagementSummary() {
             
             <div className="p-5 space-y-5">
               {/* Transformaciones de Línea */}
-              <div className="pb-4 border-b border-gray-150">
+              <div className="pb-4 border-b border-gray-150 border-dashed">
                 <div className="flex justify-between items-baseline mb-1">
                   <div className="flex flex-col">
                     <span className="text-xs font-semibold text-slate-650 uppercase tracking-wider">Transformaciones de Línea</span>
@@ -1681,11 +1698,29 @@ export function ManagementSummary() {
                     <span className="text-lg font-display font-bold text-slate-800 mt-1 block">{stats.transformations?.nonConsecutive ?? 0}</span>
                   </div>
                 </div>
+                
+                <div className="bg-gray-50 rounded-xl p-3 border border-gray-150 mt-3">
+                  <span className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Por Línea (Total)</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    {availableLines.map(line => {
+                      const normLine = line.replace(/\D/g, '') || line.toLowerCase().trim();
+                      const c = stats.transformations?.consecutiveByLine?.[normLine] ?? 0;
+                      const nc = stats.transformations?.nonConsecutiveByLine?.[normLine] ?? 0;
+                      const total = c + nc;
+                      return (
+                        <div key={line} className="bg-white p-2 rounded-lg border border-gray-150 flex flex-col pl-3 justify-center shadow-sm">
+                          <span className="text-[10px] font-bold text-gray-600 mb-0.5">{line}</span>
+                          <span className="text-base font-display font-bold text-gray-900 leading-none">{total}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
 
               {/* Cambios de Sabor */}
               <div className="pb-4 border-b border-gray-150 border-dashed">
-                <div className="flex justify-between items-baseline">
+                <div className="flex justify-between items-baseline mb-2">
                   <div className="flex flex-col">
                     <span className="text-xs font-semibold text-slate-655 uppercase tracking-wider">Cambios de Sabor</span>
                     <span className="text-xs text-slate-500 font-medium">Misma línea y calibre, consecutivas</span>
@@ -1693,6 +1728,22 @@ export function ManagementSummary() {
                   <span className="text-3xl font-display font-bold text-blue-600">
                     {stats.transformations?.flavorChanges ?? 0}
                   </span>
+                </div>
+
+                <div className="bg-blue-50/50 rounded-xl p-3 border border-blue-100">
+                  <span className="block text-[10px] font-semibold text-blue-800 uppercase tracking-wider mb-2">Por Línea</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    {availableLines.map(line => {
+                      const normLine = line.replace(/\D/g, '') || line.toLowerCase().trim();
+                      const count = stats.transformations?.flavorChangesByLine?.[normLine] ?? 0;
+                      return (
+                        <div key={line} className="bg-white p-2 rounded-lg border border-blue-150 flex flex-col pl-3 justify-center shadow-sm">
+                          <span className="text-[10px] font-bold text-blue-700 mb-0.5">{line}</span>
+                          <span className="text-base font-display font-bold text-blue-900 leading-none">{count}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 
