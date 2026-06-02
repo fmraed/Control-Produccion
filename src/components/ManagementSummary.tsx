@@ -174,6 +174,7 @@ export function ManagementSummary() {
         weekendExtraHours: 0,
         weekdayExtraHours: 0,
         cajasUnitarias: 0,
+        cajasUnitariasFromPacks: 0,
         relacionLitrosBotellas: 0,
         producedProductsCount: 0,
         producedProducts: [],
@@ -412,6 +413,7 @@ export function ManagementSummary() {
     }> = {};
 
     let totalLiters = 0;
+    let totalLitersFromPacks = 0;
     let totalBottles = 0;
     let totalPacks = 0;
     const producedProducts = new Set<string>();
@@ -508,6 +510,10 @@ export function ManagementSummary() {
       
       const liters = (r.botellas || 0) * (r.tamano || 0) / 1000;
       totalLiters += liters;
+      
+      const botellasDePacks = (r.paquetes || 0) * (config?.botellasPorPack?.[r.tamano || 0] || 6);
+      const litersDePacks = botellasDePacks * (r.tamano || 0) / 1000;
+      totalLitersFromPacks += litersDePacks;
 
       if (r.marca && r.sabor && r.tamano) {
         producedProducts.add(`${r.marca}|${r.sabor}|${r.tamano}`);
@@ -829,6 +835,7 @@ export function ManagementSummary() {
     });
     
     const cajasUnitarias = totalLiters / 5.67;
+    const cajasUnitariasFromPacks = totalLitersFromPacks / 5.67;
     const relacionLitrosBotellas = totalBottles > 0 ? totalLiters / totalBottles : 0;
     
     let totalActiveProducts = 0;
@@ -1067,6 +1074,7 @@ export function ManagementSummary() {
       projectedPendingPacks,
       projectedTotalPacks,
       cajasUnitarias,
+      cajasUnitariasFromPacks,
       relacionLitrosBotellas,
       transformations: {
         consecutive: transformacionesConsecutivas,
@@ -1642,7 +1650,14 @@ export function ManagementSummary() {
               <div className="p-5 space-y-4">
                 <div className="border-b border-gray-150 pb-3">
                   <span className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Cajas Unitarias</span>
-                  <span className="text-2xl font-display font-bold text-cyan-705">{Math.round(stats.cajasUnitarias).toLocaleString('es-AR')}</span>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-display font-bold text-cyan-705">{Math.round(stats.cajasUnitarias).toLocaleString('es-AR')}</span>
+                    {(stats as any).cajasUnitariasFromPacks !== undefined && (
+                      <span className="text-sm font-semibold text-gray-400">
+                        ({Math.round((stats as any).cajasUnitariasFromPacks).toLocaleString('es-AR')})
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 gap-3.5">
                   <div className="flex justify-between items-center border-b border-gray-100 pb-2">
