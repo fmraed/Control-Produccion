@@ -56,6 +56,8 @@ interface AppConfig {
   wasteWeights?: Record<string, { etiq: number; tapa: number; termo: number }>;
   syrupFormulas?: Record<string, Record<string, { liters: number; emulsion: number }>>;
   insumos?: string[];
+  insumosCategories?: Record<string, string>;
+  insumosCategoriesOrder?: string[];
   insumosMatrix?: Record<string, Record<string, Record<string, number>>>;
   compatibleInsumoGroups?: Record<string, string[]>;
   compatiblePackagingGroups?: Record<string, string[]>;
@@ -112,6 +114,8 @@ export function useAppConfig() {
           wasteWeights: data.wasteWeights || WASTE_WEIGHTS,
           syrupFormulas: data.syrupFormulas || {},
           insumos: data.insumos || DEFAULT_INSUMOS,
+          insumosCategories: data.insumosCategories || {},
+          insumosCategoriesOrder: data.insumosCategoriesOrder || [],
           insumosMatrix: data.insumosMatrix || {},
           compatibleInsumoGroups: data.compatibleInsumoGroups || {},
           compatiblePackagingGroups: data.compatiblePackagingGroups || {},
@@ -190,6 +194,8 @@ export function useAppConfig() {
           wasteWeights: WASTE_WEIGHTS,
           syrupFormulas: {},
           insumos: DEFAULT_INSUMOS,
+          insumosCategories: {},
+          insumosCategoriesOrder: [],
           insumosMatrix: {},
           preformasConfig: [],
           termoConfig: [],

@@ -36,8 +36,8 @@ interface InsumoStock {
 }
 
 export function InsumosControlReport() {
-  const { config } = useAppConfig();
-  const [activeTab, setActiveTab] = useState<'capacity' | 'insumos' | 'empaque' | 'azucar' | 'program'>('capacity');
+  const { config, availableBrands, availableFlavors, availableSizes } = useAppConfig();
+  const [activeTab, setActiveTab] = useState<'capacity' | 'insumos' | 'empaque' | 'azucar' | 'etiquetas' | 'program'>('capacity');
   
   // SQL and Firebase data state
   const [stockData, setStockData] = useState<InsumoStock[]>([]);
@@ -45,6 +45,7 @@ export function InsumosControlReport() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [insumoMappings, setInsumoMappings] = useState<Record<string, string>>({});
+  const [etiquetasMappings, setEtiquetasMappings] = useState<Record<string, string>>({});
   const [lastUpdatedCached, setLastUpdatedCached] = useState<string | null>(null);
   
   // Weekly selection for calculations
@@ -145,8 +146,14 @@ export function InsumosControlReport() {
       if (docSnap.exists()) {
         setInsumoMappings(docSnap.data() as Record<string, string>);
       }
+
+      const etiquetasMappingRef = doc(db, 'config', 'sql_etiquetas_mappings');
+      const etiquetasSnap = await getDoc(etiquetasMappingRef);
+      if (etiquetasSnap.exists()) {
+        setEtiquetasMappings(etiquetasSnap.data() as Record<string, string>);
+      }
     } catch (err) {
-      console.error("Error fetching insumo mappings:", err);
+      console.error("Error fetching mappings:", err);
     }
   };
 
@@ -1101,6 +1108,17 @@ export function InsumosControlReport() {
           Azúcar
         </button>
         <button
+          onClick={() => setActiveTab('etiquetas')}
+          className={`flex-1 py-3 px-4 text-xs font-black uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 ${
+            activeTab === 'etiquetas' 
+              ? 'bg-white text-indigo-700 shadow-sm' 
+              : 'text-gray-500 hover:text-gray-900'
+          }`}
+        >
+          <Database className="w-4 h-4" />
+          Etiquetas
+        </button>
+        <button
           onClick={() => setActiveTab('program')}
           className={`flex-1 py-3 px-4 text-xs font-black uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 ${
             activeTab === 'program' 
@@ -1746,33 +1764,198 @@ export function InsumosControlReport() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 bg-white text-sm">
-                      {[...programCrossover.requiredInsumosAgg].filter(item => !isEmpaqueItem(item.insumoName)).sort((a, b) => a.monthsOfStock - b.monthsOfStock).map(item => {
-                        const lowerName = item.insumoName.toLowerCase();
-                        const isUnit = lowerName.includes('preforma') || lowerName.includes('tapa') || lowerName.includes('etiqueta');
-                        const unitStr = isUnit ? ' u.' : ' kg';
-                        return (
-                          <tr key={item.insumoName} className="hover:bg-gray-50 transition-colors">
-                            <td className="px-5 py-4 font-bold text-gray-900 border-l-[3px] border-l-transparent hover:border-l-indigo-600">
-                              {item.insumoName}
+                      {(() => {
+                        const items = [...programCrossover.requiredInsumosAgg].filter(item => !isEmpaqueItem(item.insumoName)).sort((a, b) => a.monthsOfStock - b.monthsOfStock);
+                        
+                        const grouped: Record<string, typeof items> = {};
+                        items.forEach(item => {
+                          let category = 'Otras Materias Primas';
+                          const parts = item.insumoName.split(' / ');
+                          for (const p of parts) {
+                            if (config?.insumosCategories?.[p]) {
+                              category = config.insumosCategories[p];
+                              break;
+                            }
+                          }
+                          if (!grouped[category]) grouped[category] = [];
+                          grouped[category].push(item);
+                        });
+
+                        // Sort categories based on custom insumosCategoriesOrder
+                        const sortedCategories = Object.keys(grouped).sort((a, b) => {
+                          const idxA = (config?.insumosCategoriesOrder || []).indexOf(a);
+                          const idxB = (config?.insumosCategoriesOrder || []).indexOf(b);
+                          if (idxA === -1 && idxB === -1) return a.localeCompare(b);
+                          if (idxA === -1) return 1;
+                          if (idxB === -1) return -1;
+                          return idxA - idxB;
+                        });
+
+                        return sortedCategories.flatMap(category => [
+                          <tr key={`group-${category}`} className="bg-indigo-50/50">
+                            <td colSpan={4} className="px-5 py-3 font-black text-indigo-900 text-xs uppercase tracking-wider">
+                              {category}
                             </td>
-                            <td className="px-4 py-4 text-right font-medium text-gray-800">
-                              {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}{unitStr}
-                            </td>
-                            <td className="px-4 py-4 text-right font-bold text-indigo-700 bg-indigo-50/30">
-                              {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.monthlyRequiredKg)}{unitStr}
-                            </td>
-                            <td className="px-4 py-4 text-right">
-                              {item.monthsOfStock === Infinity ? (
-                                <span className="text-xs font-bold text-gray-400">0 Consumo</span>
-                              ) : (
-                                <span className={`font-sans font-bold px-2.5 py-1.5 rounded text-[13px] tracking-wide ${item.monthsOfStock < 0.5 ? 'bg-red-100 text-red-800' : item.monthsOfStock < 1 ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800'}`}>
-                                  {Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(item.monthsOfStock)} m
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
+                          </tr>,
+                          ...grouped[category].map(item => {
+                            const lowerName = item.insumoName.toLowerCase();
+                            const isUnit = lowerName.includes('preforma') || lowerName.includes('tapa') || lowerName.includes('etiqueta');
+                            const unitStr = isUnit ? ' u.' : ' kg';
+                            return (
+                              <tr key={item.insumoName} className="hover:bg-gray-50 transition-colors">
+                                <td className="px-5 py-4 font-bold text-gray-900 border-l-[3px] border-l-transparent hover:border-l-indigo-600">
+                                  {item.insumoName}
+                                </td>
+                                <td className="px-4 py-4 text-right font-medium text-gray-800">
+                                  {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}{unitStr}
+                                </td>
+                                <td className="px-4 py-4 text-right font-bold text-indigo-700 bg-indigo-50/30">
+                                  {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.monthlyRequiredKg)}{unitStr}
+                                </td>
+                                <td className="px-4 py-4 text-right">
+                                  {item.monthsOfStock === Infinity ? (
+                                    <span className="text-xs font-bold text-gray-400">0 Consumo</span>
+                                  ) : (
+                                    <span className={`font-sans font-bold px-2.5 py-1.5 rounded text-[13px] tracking-wide ${item.monthsOfStock < 0.5 ? 'bg-red-100 text-red-800' : item.monthsOfStock < 1 ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800'}`}>
+                                      {Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(item.monthsOfStock)} m
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        ]);
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB ETIQUETAS */}
+          {activeTab === 'etiquetas' && (
+            <div className="space-y-6">
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4 mb-6">
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-800">Control de Etiquetas</h3>
+                    <p className="text-xs text-gray-500">
+                      Verifique el stock disponible de etiquetas según la base de datos de SQL y sus mapeos definidos.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 text-sm">
+                    <thead>
+                      <tr className="bg-indigo-50/50 text-indigo-900 border-t border-indigo-100 text-xs font-black uppercase tracking-wider">
+                        <th className="px-4 py-4 text-left font-sans rounded-tl-lg">Marca</th>
+                        <th className="px-4 py-4 text-left font-sans">Sabor</th>
+                        <th className="px-4 py-4 text-center font-sans">Calibre</th>
+                        <th className="px-4 py-4 text-right font-sans">Req. Mensual</th>
+                        <th className="px-4 py-4 text-right font-sans text-indigo-700">Stock (u.)</th>
+                        <th className="px-4 py-4 text-right font-sans text-indigo-700 rounded-tr-lg">Cobertura (meses)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 bg-white text-sm">
+                      {(() => {
+                        const items: any[] = [];
+                        availableBrands.forEach(brand => {
+                          availableSizes.forEach(size => {
+                            const sizeStr = size.toString();
+                            const brandActive = config?.activeProducts?.[brand];
+                            const hasBrandConfig = brandActive && Object.keys(brandActive).length > 0;
+                            const hasSizeConfig = brandActive && sizeStr in brandActive;
+                            
+                            const allowedFlavors = hasSizeConfig
+                              ? brandActive[sizeStr]
+                              : (hasBrandConfig ? [] : (config?.brandFlavorCombinations[brand] || []));
+
+                            allowedFlavors.forEach(flavor => {
+                              const isExternal = (config?.externalProducts?.[brand]?.[sizeStr] || []).includes(flavor);
+                              if (!isExternal && config?.enabledFlavors?.[flavor] !== false) {
+                                const key = `${brand}-${flavor}-${size}`;
+                                const mappedCode = etiquetasMappings[key] || '';
+                                let stock = 0;
+                                if (mappedCode) {
+                                  const match = stockData.find(s => (s.codigo_articulo || '').toString().trim().toLowerCase() === mappedCode.toString().toLowerCase().trim());
+                                  if (match) stock = match.stock_almacen;
+                                }
+
+                                const botellasPorPack = config?.botellasPorPack?.[size] || BOTELLAS_POR_PACK[size] || 6;
+                                const goal = goals.find(g => g.marca === brand && g.sabor === flavor && g.tamano === size && g.quantity > 0);
+                                const monthlyRequirement = goal ? goal.quantity * botellasPorPack : 0;
+                                const cobertura = monthlyRequirement > 0 ? stock / monthlyRequirement : (stock > 0 ? Infinity : 0);
+
+                                items.push({
+                                  brand,
+                                  flavor,
+                                  size,
+                                  key,
+                                  mappedCode,
+                                  stock,
+                                  monthlyRequirement,
+                                  cobertura
+                                });
+                              }
+                            });
+                          });
+                        });
+                        // Sort sizes descending, then brand, then flavor
+                        items.sort((a,b) => {
+                          if(b.size !== a.size) return b.size - a.size;
+                          if(a.brand !== b.brand) return a.brand.localeCompare(b.brand);
+                          return a.flavor.localeCompare(b.flavor);
+                        });
+
+                        const groupedBySize: Record<string, typeof items> = {};
+                        items.forEach(item => {
+                          const s = item.size.toString();
+                          if (!groupedBySize[s]) groupedBySize[s] = [];
+                          groupedBySize[s].push(item);
+                        });
+
+                        return Object.keys(groupedBySize)
+                          .sort((a, b) => Number(b) - Number(a))
+                          .flatMap((sizeStr) => [
+                            <tr key={`group-${sizeStr}`} className="bg-indigo-100/50">
+                              <td colSpan={6} className="px-4 py-2 font-black text-indigo-900 text-xs uppercase tracking-wider">
+                                Calibre {sizeStr} cc
+                              </td>
+                            </tr>,
+                            ...groupedBySize[sizeStr].map(item => (
+                              <tr key={item.key} className="hover:bg-indigo-50/30 transition-colors">
+                                <td className="px-4 py-4 font-bold text-gray-900 border-l-[3px] border-l-transparent hover:border-l-indigo-500 whitespace-nowrap">
+                                  {item.brand}
+                                </td>
+                                <td className="px-4 py-4 font-semibold text-gray-700 whitespace-nowrap">
+                                  {item.flavor}
+                                </td>
+                                <td className="px-4 py-4 text-center font-bold text-indigo-600 bg-indigo-50/30 whitespace-nowrap">
+                                  {item.size}
+                                </td>
+                                <td className="px-4 py-4 text-right font-bold text-gray-700 whitespace-nowrap">
+                                  {item.monthlyRequirement > 0 ? Intl.NumberFormat('es-AR').format(item.monthlyRequirement) : '-'}
+                                </td>
+                                <td className="px-4 py-4 text-right font-bold text-gray-900 whitespace-nowrap">
+                                  {item.mappedCode ? Intl.NumberFormat('es-AR').format(item.stock) : (
+                                    <span className="text-gray-300 italic text-xs font-normal">Sin cód. SQl</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-4 text-right font-bold whitespace-nowrap">
+                                  {item.cobertura === Infinity ? (
+                                    <span className="text-gray-500 font-medium text-xs">Sin obj. mensual</span>
+                                  ) : item.monthlyRequirement > 0 ? (
+                                    <span className={item.cobertura >= 1.5 ? 'text-green-600' : item.cobertura >= 0.5 ? 'text-orange-600' : 'text-red-600'}>
+                                      {item.cobertura.toFixed(1)}
+                                    </span>
+                                  ) : '-'}
+                                </td>
+                              </tr>
+                            ))
+                          ]);
+                      })()}
                     </tbody>
                   </table>
                 </div>

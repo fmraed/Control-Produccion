@@ -10,7 +10,8 @@ export function SQLMappingEditor() {
   const [productMappings, setProductMappings] = useState<Record<string, string>>({});
   const [syrupMappings, setSyrupMappings] = useState<Record<string, string>>({});
   const [insumoMappings, setInsumoMappings] = useState<Record<string, string>>({});
-  const [activeTab, setActiveTab] = useState<'products' | 'syrups' | 'insumos'>('products');
+  const [etiquetaMappings, setEtiquetaMappings] = useState<Record<string, string>>({});
+  const [activeTab, setActiveTab] = useState<'products' | 'syrups' | 'insumos' | 'etiquetas'>('products');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
@@ -20,13 +21,15 @@ export function SQLMappingEditor() {
     const productMappingRef = doc(db, 'config', 'sql_mappings');
     const syrupMappingRef = doc(db, 'config', 'sql_syrup_mappings');
     const insumoMappingRef = doc(db, 'config', 'sql_insumo_mappings');
+    const etiquetaMappingRef = doc(db, 'config', 'sql_etiquetas_mappings');
     
     let isProductReady = false;
     let isSyrupReady = false;
     let isInsumoReady = false;
+    let isEtiquetaReady = false;
 
     const checkReady = () => {
-      if (isProductReady && isSyrupReady && isInsumoReady) setLoading(false);
+      if (isProductReady && isSyrupReady && isInsumoReady && isEtiquetaReady) setLoading(false);
     };
 
     const unsubscribeProducts = onSnapshot(productMappingRef, (docSnap) => {
@@ -59,10 +62,21 @@ export function SQLMappingEditor() {
       checkReady();
     });
 
+    const unsubscribeEtiquetas = onSnapshot(etiquetaMappingRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setEtiquetaMappings(docSnap.data() as Record<string, string>);
+      } else {
+        setEtiquetaMappings({});
+      }
+      isEtiquetaReady = true;
+      checkReady();
+    });
+
     return () => {
       unsubscribeProducts();
       unsubscribeSyrups();
       unsubscribeInsumos();
+      unsubscribeEtiquetas();
     }
   }, []);
 
@@ -87,6 +101,13 @@ export function SQLMappingEditor() {
     }));
   };
 
+  const handleUpdateEtiquetaMapping = (key: string, value: string) => {
+    setEtiquetaMappings(prev => ({
+      ...prev,
+      [key]: value
+    }));
+  };
+
   const saveMappings = async () => {
     setSaving(true);
     setMessage(null);
@@ -98,7 +119,6 @@ export function SQLMappingEditor() {
             cleanedProductMappings[key] = productMappings[key];
           }
         });
-        // Preservar mapeos ya cargados en base de datos para no perderlos si no están en el lote actual
         Object.entries(productMappings).forEach(([key, val]) => {
           if (val && !cleanedProductMappings[key]) {
             cleanedProductMappings[key] = val as string;
@@ -113,7 +133,6 @@ export function SQLMappingEditor() {
             cleanedSyrupMappings[key] = syrupMappings[key];
           }
         });
-        // Preservar mapeos ya cargados en base de datos para no perderlos si no están en el lote actual
         Object.entries(syrupMappings).forEach(([key, val]) => {
           if (val && !cleanedSyrupMappings[key]) {
             cleanedSyrupMappings[key] = val as string;
@@ -121,6 +140,20 @@ export function SQLMappingEditor() {
         });
         await setDoc(doc(db, 'config', 'sql_syrup_mappings'), cleanedSyrupMappings);
         setSyrupMappings(cleanedSyrupMappings);
+      } else if (activeTab === 'etiquetas') {
+        const cleanedEtiquetaMappings: Record<string, string> = {};
+        generatedProductKeys.forEach(key => {
+          if (etiquetaMappings[key] !== undefined) {
+            cleanedEtiquetaMappings[key] = etiquetaMappings[key];
+          }
+        });
+        Object.entries(etiquetaMappings).forEach(([key, val]) => {
+          if (val && !cleanedEtiquetaMappings[key]) {
+            cleanedEtiquetaMappings[key] = val as string;
+          }
+        });
+        await setDoc(doc(db, 'config', 'sql_etiquetas_mappings'), cleanedEtiquetaMappings);
+        setEtiquetaMappings(cleanedEtiquetaMappings);
       } else {
         const cleanedInsumoMappings: Record<string, string> = {};
         generatedInsumoKeys.forEach(key => {
@@ -128,7 +161,6 @@ export function SQLMappingEditor() {
             cleanedInsumoMappings[key] = insumoMappings[key];
           }
         });
-        // Preservar mapeos ya cargados en base de datos para no perderlos si no están en el lote actual
         Object.entries(insumoMappings).forEach(([key, val]) => {
           if (val && !cleanedInsumoMappings[key]) {
             cleanedInsumoMappings[key] = val as string;
@@ -137,7 +169,7 @@ export function SQLMappingEditor() {
         await setDoc(doc(db, 'config', 'sql_insumo_mappings'), cleanedInsumoMappings);
         setInsumoMappings(cleanedInsumoMappings);
       }
-      setMessage({ type: 'success', text: `Mapeos de ${activeTab === 'products' ? 'productos' : activeTab === 'syrups' ? 'jarabes' : 'insumos'} guardados.` });
+      setMessage({ type: 'success', text: `Mapeos de ${activeTab === 'products' ? 'productos' : activeTab === 'syrups' ? 'jarabes' : activeTab === 'etiquetas' ? 'etiquetas' : 'insumos'} guardados.` });
       setTimeout(() => setMessage(null), 3000);
     } catch (error) {
       console.error("Error saving mappings:", error);
@@ -196,10 +228,10 @@ export function SQLMappingEditor() {
     );
   }
 
-  const activeMappings = activeTab === 'products' ? productMappings : activeTab === 'syrups' ? syrupMappings : insumoMappings;
+  const activeMappings = activeTab === 'products' ? productMappings : activeTab === 'syrups' ? syrupMappings : activeTab === 'etiquetas' ? etiquetaMappings : insumoMappings;
   
   // Only show keys that are currently active in the configuration
-  const sourceKeysSet = new Set<string>(activeTab === 'products' ? generatedProductKeys : activeTab === 'syrups' ? generatedSyrupKeys : generatedInsumoKeys);
+  const sourceKeysSet = new Set<string>(activeTab === 'products' || activeTab === 'etiquetas' ? generatedProductKeys : activeTab === 'syrups' ? generatedSyrupKeys : generatedInsumoKeys);
   const sourceKeys = Array.from(sourceKeysSet);
 
   const filteredKeys = sourceKeys.filter(key => 
@@ -235,6 +267,17 @@ export function SQLMappingEditor() {
         >
           <Package className="w-4 h-4" />
           Productos Terminados
+        </button>
+        <button
+          onClick={() => { setActiveTab('etiquetas'); setSearchTerm(''); }}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors border-b-2 ${
+            activeTab === 'etiquetas' 
+              ? 'border-blue-600 text-blue-600 bg-blue-50/50' 
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+          }`}
+        >
+          <Package className="w-4 h-4" />
+          Etiquetas
         </button>
         <button
           onClick={() => { setActiveTab('syrups'); setSearchTerm(''); }}
@@ -285,7 +328,7 @@ export function SQLMappingEditor() {
             <input
               type="text"
               value={activeMappings[key] || ''}
-              onChange={(e) => activeTab === 'products' ? handleUpdateProductMapping(key, e.target.value) : activeTab === 'syrups' ? handleUpdateSyrupMapping(key, e.target.value) : handleUpdateInsumoMapping(key, e.target.value)}
+              onChange={(e) => activeTab === 'products' ? handleUpdateProductMapping(key, e.target.value) : activeTab === 'syrups' ? handleUpdateSyrupMapping(key, e.target.value) : activeTab === 'etiquetas' ? handleUpdateEtiquetaMapping(key, e.target.value) : handleUpdateInsumoMapping(key, e.target.value)}
               className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono"
               placeholder="Código SQL..."
             />
