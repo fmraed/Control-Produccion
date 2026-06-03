@@ -52,6 +52,8 @@ interface AppConfig {
   saboresSinJarabe?: string[];
   co2Volumes?: Record<string, Record<string, number>>;
   salariosPorRango?: Record<string, number>;
+  cargasSocialesPercent?: number;
+  sacPercent?: number;
   qualityControlFlavors?: string[];
   warehousePositions?: number;
   stackableFlavors?: string[];
@@ -279,6 +281,8 @@ export function AdminPanel() {
           saboresSinJarabe: Array.isArray(data.saboresSinJarabe) ? data.saboresSinJarabe : SABORES_SIN_JARABE,
           co2Volumes: data.co2Volumes || CO2_VOLUMES,
           salariosPorRango: data.salariosPorRango || {},
+          cargasSocialesPercent: typeof data.cargasSocialesPercent === 'number' ? data.cargasSocialesPercent : 31.5,
+          sacPercent: typeof data.sacPercent === 'number' ? data.sacPercent : 8.33,
           qualityControlFlavors: Array.isArray(data.qualityControlFlavors) ? data.qualityControlFlavors : ['Agua'],
           warehousePositions: data.warehousePositions || 2300,
           stackableFlavors: Array.isArray(data.stackableFlavors) ? data.stackableFlavors : (data.flavors || SABORES).filter((s: string) => s !== 'Soda Sifon' && s !== 'Soda'),
@@ -348,6 +352,8 @@ export function AdminPanel() {
           botellasPorPack: BOTELLAS_POR_PACK,
           lineOperators: {},
           salariosPorRango: {},
+          cargasSocialesPercent: 31.5,
+          sacPercent: 8.33,
           qualityControlFlavors: ['Agua'],
           warehousePositions: 2300,
           stackableFlavors: SABORES.filter(s => s !== 'Soda Sifon' && s !== 'Soda'),
@@ -4185,6 +4191,61 @@ export function AdminPanel() {
               Guardar Cambios
             </button>
           </div>
+          
+          {/* Adicionales de Carga Salarial */}
+          <div className="bg-blue-50/50 rounded-2xl p-5 border border-blue-100 mb-8">
+            <h3 className="text-xs font-black text-blue-800 uppercase tracking-widest mb-4">Adicionales Configurables sobre Salarios</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-white rounded-xl p-4 border border-blue-100 shadow-sm">
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Cargas Sociales Ciertas (%)</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    value={typeof config?.cargasSocialesPercent === 'number' ? config.cargasSocialesPercent : 31.5}
+                    onChange={(e) => {
+                      if (!config) return;
+                      setConfig({
+                        ...config,
+                        cargasSocialesPercent: Number(e.target.value)
+                      });
+                    }}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-lg pr-8 pl-4 py-2 text-sm font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none focus:bg-white transition-all"
+                    placeholder="31.5"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold">%</span>
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1 font-medium">Se calcula sobre el salario base de cada categoría.</p>
+              </div>
+
+              <div className="bg-white rounded-xl p-4 border border-blue-100 shadow-sm">
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">SAC (%)</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    value={typeof config?.sacPercent === 'number' ? config.sacPercent : 8.33}
+                    onChange={(e) => {
+                      if (!config) return;
+                      setConfig({
+                        ...config,
+                        sacPercent: Number(e.target.value)
+                      });
+                    }}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-lg pr-8 pl-4 py-2 text-sm font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none focus:bg-white transition-all"
+                    placeholder="8.33"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold">%</span>
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1 font-medium">Sueldo Anual Complementario (Aguinaldo).</p>
+              </div>
+            </div>
+          </div>
+
           <p className="text-xs text-gray-500 font-bold uppercase tracking-widest mb-6">Valores de salario base en $ para cada rango/categoría. Guarde los cambios al finalizar (Icono arriba a la derecha).</p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

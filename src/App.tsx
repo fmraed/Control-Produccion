@@ -1,20 +1,20 @@
-import { useState, useEffect } from 'react';
-import { auth, logout, db } from './firebase';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
-import { 
-  LogIn, 
-  LogOut, 
-  FileText, 
-  PlusCircle, 
-  Activity, 
-  Trash2, 
-  Clock, 
-  CalendarDays, 
-  User as UserIcon, 
-  ChevronDown, 
-  ClipboardList, 
-  BarChart3, 
+import { useState, useEffect } from "react";
+import { auth, logout, db } from "./firebase";
+import { onAuthStateChanged, User } from "firebase/auth";
+import { doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
+import {
+  LogIn,
+  LogOut,
+  FileText,
+  PlusCircle,
+  Activity,
+  Trash2,
+  Clock,
+  CalendarDays,
+  User as UserIcon,
+  ChevronDown,
+  ClipboardList,
+  BarChart3,
   Users,
   DraftingCompass,
   Database,
@@ -22,108 +22,166 @@ import {
   Upload,
   Download,
   Sparkles,
-  FlaskConical
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Dashboard } from './components/Dashboard';
-import { NewReportForm } from './components/NewReportForm';
-import { ConsolidatedReport } from './components/ConsolidatedReport';
-import { WasteReport } from './components/WasteReport';
-import { DowntimeReport } from './components/DowntimeReport';
-import { ParetoChart } from './components/ParetoChart';
-import { EfficiencyReport } from './components/EfficiencyReport';
-import { GanttChart } from './components/GanttChart';
-import { AdminPanel } from './components/AdminPanel';
-import { ElaboracionForm } from './components/ElaboracionForm';
-import { ElaboracionHistory } from './components/ElaboracionHistory';
-import { LiveMonitor } from './components/LiveMonitor';
-import { ManagementSummary } from './components/ManagementSummary';
-import { ManagementComparison } from './components/ManagementComparison';
-import { PersonnelManagement } from './components/PersonnelManagement';
-import { ProductionScheduler } from './components/ProductionScheduler';
-import { SyrupReport } from './components/SyrupReport';
-import { GoalFulfillment } from './components/GoalFulfillment';
-import { StockControl } from './components/StockControl';
-import { InsumosControlReport } from './components/InsumosControlReport';
-import { HistoricalReport } from './components/HistoricalReport';
-import { HistoricalImporter } from './components/HistoricalImporter';
-import { HistoricalExporter } from './components/HistoricalExporter';
-import { HistoricalElaboracionImporter } from './components/HistoricalElaboracionImporter';
-import { HistoricalElaboracionExporter } from './components/HistoricalElaboracionExporter';
-import { Auth } from './components/Auth';
-import { ProductionReport, ElaboracionReport, UserProfile, UserRole } from './types';
-import { useRolePermissions } from './hooks/useRolePermissions';
-import { Settings, Beaker, PieChart, ShieldCheck, TrendingUp, ShieldAlert, AlertCircle } from 'lucide-react';
+  FlaskConical,
+} from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { Dashboard } from "./components/Dashboard";
+import { NewReportForm } from "./components/NewReportForm";
+import { ConsolidatedReport } from "./components/ConsolidatedReport";
+import { WasteReport } from "./components/WasteReport";
+import { DowntimeReport } from "./components/DowntimeReport";
+import { ParetoChart } from "./components/ParetoChart";
+import { EfficiencyReport } from "./components/EfficiencyReport";
+import { GanttChart } from "./components/GanttChart";
+import { AdminPanel } from "./components/AdminPanel";
+import { ElaboracionForm } from "./components/ElaboracionForm";
+import { ElaboracionHistory } from "./components/ElaboracionHistory";
+import { LiveMonitor } from "./components/LiveMonitor";
+import { ManagementSummary } from "./components/ManagementSummary";
+import { ManagementComparison } from "./components/ManagementComparison";
+import { PersonnelManagement } from "./components/PersonnelManagement";
+import { ProductionScheduler } from "./components/ProductionScheduler";
+import { SyrupReport } from "./components/SyrupReport";
+import { GoalFulfillment } from "./components/GoalFulfillment";
+import { StockControl } from "./components/StockControl";
+import { InsumosControlReport } from "./components/InsumosControlReport";
+import { HistoricalReport } from "./components/HistoricalReport";
+import { HistoricalImporter } from "./components/HistoricalImporter";
+import { HistoricalExporter } from "./components/HistoricalExporter";
+import { HistoricalElaboracionImporter } from "./components/HistoricalElaboracionImporter";
+import { HistoricalElaboracionExporter } from "./components/HistoricalElaboracionExporter";
+import { Auth } from "./components/Auth";
+import { EnergyReport } from "./components/EnergyReport";
+import {
+  ProductionReport,
+  ElaboracionReport,
+  UserProfile,
+  UserRole,
+} from "./types";
+import { useRolePermissions } from "./hooks/useRolePermissions";
+import {
+  Settings,
+  Beaker,
+  PieChart,
+  ShieldCheck,
+  TrendingUp,
+  ShieldAlert,
+  AlertCircle,
+  Zap,
+} from "lucide-react";
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [userProfile, setUserProfile] = useState<UserProfile | null | undefined>(null);
+  const [userProfile, setUserProfile] = useState<
+    UserProfile | null | undefined
+  >(null);
   const [loading, setLoading] = useState(true);
-  const [currentView, setCurrentView] = useState<'dashboard' | 'new' | 'consolidated' | 'waste' | 'downtime' | 'pareto' | 'efficiency' | 'gantt' | 'admin' | 'elaboracion' | 'elaboracion_history' | 'profile' | 'live' | 'management_summary' | 'management_comparison' | 'personnel' | 'scheduler' | 'syrup' | 'goal_fulfillment' | 'stock_control' | 'historical_report' | 'historical_importer' | 'historical_exporter' | 'historical_elab_importer' | 'historical_elab_exporter'>('dashboard');
-  const [editingReport, setEditingReport] = useState<ProductionReport | undefined>(undefined);
-  const [editingElabReport, setEditingElabReport] = useState<ElaboracionReport | undefined>(undefined);
-  const [paretoLine, setParetoLine] = useState<string>('');
-  const [paretoMonth, setParetoMonth] = useState<string>('');
-  const [activeMenu, setActiveMenu] = useState<'data' | 'reports' | null>(null);
+  const [currentView, setCurrentView] = useState<
+    | "dashboard"
+    | "new"
+    | "consolidated"
+    | "waste"
+    | "downtime"
+    | "pareto"
+    | "efficiency"
+    | "gantt"
+    | "admin"
+    | "elaboracion"
+    | "elaboracion_history"
+    | "profile"
+    | "live"
+    | "management_summary"
+    | "management_comparison"
+    | "personnel"
+    | "scheduler"
+    | "syrup"
+    | "goal_fulfillment"
+    | "stock_control"
+    | "insumos_control"
+    | "historical_report"
+    | "historical_importer"
+    | "historical_exporter"
+    | "historical_elab_importer"
+    | "historical_elab_exporter"
+    | "energy"
+  >("dashboard");
+  const [editingReport, setEditingReport] = useState<
+    ProductionReport | undefined
+  >(undefined);
+  const [editingElabReport, setEditingElabReport] = useState<
+    ElaboracionReport | undefined
+  >(undefined);
+  const [paretoLine, setParetoLine] = useState<string>("");
+  const [paretoMonth, setParetoMonth] = useState<string>("");
+  const [activeMenu, setActiveMenu] = useState<"data" | "reports" | null>(null);
 
   // Persistent Dashboard Filters
   const [dbFilters, setDbFilters] = useState({
-    selectedMonth: '',
-    selectedGestion: 'all',
-    selectedLinea: '',
-    selectedSupervisor: '',
-    selectedTamano: '',
-    selectedSabor: '',
-    selectedMarca: '',
-    sortField: 'fechaTurno' as 'fechaTurno' | 'planilla' | 'marca' | 'sabor',
-    sortDirection: 'desc' as 'asc' | 'desc'
+    selectedMonth: "",
+    selectedGestion: "all",
+    selectedLinea: "",
+    selectedSupervisor: "",
+    selectedTamano: "",
+    selectedSabor: "",
+    selectedMarca: "",
+    sortField: "fechaTurno" as "fechaTurno" | "planilla" | "marca" | "sabor",
+    sortDirection: "desc" as "asc" | "desc",
   });
 
   // Persistent Elaboration History Filters
   const [elabFilters, setElabFilters] = useState({
-    selectedMonth: '',
-    selectedGestion: 'all',
-    selectedLinea: '',
-    selectedMarca: '',
-    selectedSabor: '',
-    sortField: 'fechaTurno' as 'fechaTurno' | 'planilla' | 'marca' | 'sabor',
-    sortDirection: 'desc' as 'asc' | 'desc'
+    selectedMonth: "",
+    selectedGestion: "all",
+    selectedLinea: "",
+    selectedMarca: "",
+    selectedSabor: "",
+    sortField: "fechaTurno" as "fechaTurno" | "planilla" | "marca" | "sabor",
+    sortDirection: "desc" as "asc" | "desc",
   });
 
   // Reset filters when leaving data section
   useEffect(() => {
-    const dataViews = ['dashboard', 'elaboracion_history', 'personnel', 'new', 'elaboracion'];
+    const dataViews = [
+      "dashboard",
+      "elaboracion_history",
+      "personnel",
+      "new",
+      "elaboracion",
+    ];
     if (!dataViews.includes(currentView)) {
       setDbFilters({
-        selectedMonth: '',
-        selectedGestion: 'all',
-        selectedLinea: '',
-        selectedSupervisor: '',
-        selectedTamano: '',
-        selectedSabor: '',
-        selectedMarca: '',
-        sortField: 'fechaTurno',
-        sortDirection: 'desc'
+        selectedMonth: "",
+        selectedGestion: "all",
+        selectedLinea: "",
+        selectedSupervisor: "",
+        selectedTamano: "",
+        selectedSabor: "",
+        selectedMarca: "",
+        sortField: "fechaTurno",
+        sortDirection: "desc",
       });
       setElabFilters({
-        selectedMonth: '',
-        selectedGestion: 'all',
-        selectedLinea: '',
-        selectedMarca: '',
-        selectedSabor: '',
-        sortField: 'fechaTurno',
-        sortDirection: 'desc'
+        selectedMonth: "",
+        selectedGestion: "all",
+        selectedLinea: "",
+        selectedMarca: "",
+        selectedSabor: "",
+        sortField: "fechaTurno",
+        sortDirection: "desc",
       });
     }
   }, [currentView]);
 
-  const { permissions, loading: permissionsLoading } = useRolePermissions(userProfile?.role);
+  const { permissions, loading: permissionsLoading } = useRolePermissions(
+    userProfile?.role,
+  );
 
   useEffect(() => {
     if (userProfile && permissions) {
       const allowedViews = {
         dashboard: permissions.viewReports,
-        elaboracion_history: permissions.viewElaboracion || permissions.editElaboracion,
+        elaboracion_history:
+          permissions.viewElaboracion || permissions.editElaboracion,
         personnel: permissions.viewPersonnel || permissions.editPersonnel,
         scheduler: permissions.viewScheduler || permissions.editScheduler,
         admin: permissions.viewAdmin,
@@ -147,15 +205,21 @@ export default function App() {
         historical_exporter: permissions.viewAnalytics,
         historical_elab_importer: permissions.viewAnalytics,
         historical_elab_exporter: permissions.viewAnalytics,
-        profile: true
+        energy: permissions.viewAnalytics,
+        profile: true,
       };
 
       // If current view is restricted, redirect to first available
-      if (currentView !== 'profile' && !allowedViews[currentView as keyof typeof allowedViews]) {
-        if (permissions.viewReports) setCurrentView('dashboard');
-        else if (permissions.viewElaboracion || permissions.editElaboracion) setCurrentView('elaboracion_history');
-        else if (permissions.viewPersonnel || permissions.editPersonnel) setCurrentView('personnel');
-        else setCurrentView('profile');
+      if (
+        currentView !== "profile" &&
+        !allowedViews[currentView as keyof typeof allowedViews]
+      ) {
+        if (permissions.viewReports) setCurrentView("dashboard");
+        else if (permissions.viewElaboracion || permissions.editElaboracion)
+          setCurrentView("elaboracion_history");
+        else if (permissions.viewPersonnel || permissions.editPersonnel)
+          setCurrentView("personnel");
+        else setCurrentView("profile");
       }
     }
   }, [userProfile, permissions, currentView]); // Added currentView to dependencies
@@ -166,25 +230,27 @@ export default function App() {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
 
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
 
     // Handle tab visibility changes to prevent "suspension" issues
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === "visible") {
         // When user comes back to the tab, check if auth is still active
         // Firestore and Auth usually handle this, but we force a check
         if (auth.currentUser) {
-          auth.currentUser.getIdToken(true).catch(e => console.warn("Session refresh error:", e));
+          auth.currentUser
+            .getIdToken(true)
+            .catch((e) => console.warn("Session refresh error:", e));
         }
       }
     };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
 
@@ -194,7 +260,7 @@ export default function App() {
       if (currentUser) {
         // Fetch user profile
         try {
-          const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+          const userDoc = await getDoc(doc(db, "users", currentUser.uid));
           let profileToSet: UserProfile | null = null;
           const email = currentUser.email?.toLowerCase().trim();
 
@@ -204,18 +270,18 @@ export default function App() {
 
           // Even if profile exists, check if there's a new "allowed_user" invitation to sync
           if (email) {
-            const allowedDoc = await getDoc(doc(db, 'allowed_users', email));
+            const allowedDoc = await getDoc(doc(db, "allowed_users", email));
             if (allowedDoc.exists()) {
               const allowedData = allowedDoc.data();
-              const isAdminEmail = email === 'fraed.fordrinks@gmail.com';
-              
+              const isAdminEmail = email === "fraed.fordrinks@gmail.com";
+
               const baseProfile: Partial<UserProfile> = profileToSet || {
                 uid: currentUser.uid,
-                email: currentUser.email || '',
-                displayName: currentUser.displayName || 'Usuario',
-                createdAt: new Date().toISOString()
+                email: currentUser.email || "",
+                displayName: currentUser.displayName || "Usuario",
+                createdAt: new Date().toISOString(),
               };
-              
+
               if (currentUser.photoURL) {
                 baseProfile.photoURL = currentUser.photoURL;
               }
@@ -224,22 +290,28 @@ export default function App() {
               const updatedProfile: any = {
                 ...baseProfile,
                 uid: currentUser.uid,
-                sector: allowedData?.sector || baseProfile.sector || '',
-                updatedAt: new Date().toISOString()
+                sector: allowedData?.sector || baseProfile.sector || "",
+                updatedAt: new Date().toISOString(),
               };
 
               // Only assign role if it's new (to prevent permission denied on update)
               if (!profileToSet) {
-                updatedProfile.role = isAdminEmail ? 'admin' : (allowedData?.role || 'produccion');
+                updatedProfile.role = isAdminEmail
+                  ? "admin"
+                  : allowedData?.role || "produccion";
               } else if (isAdminEmail) {
-                 updatedProfile.role = 'admin';
+                updatedProfile.role = "admin";
               } else {
-                 updatedProfile.role = profileToSet.role;
+                updatedProfile.role = profileToSet.role;
               }
 
               try {
-                await setDoc(doc(db, 'users', currentUser.uid), updatedProfile as UserProfile, { merge: true });
-                await deleteDoc(doc(db, 'allowed_users', email));
+                await setDoc(
+                  doc(db, "users", currentUser.uid),
+                  updatedProfile as UserProfile,
+                  { merge: true },
+                );
+                await deleteDoc(doc(db, "allowed_users", email));
                 profileToSet = updatedProfile as UserProfile;
               } catch (e) {
                 console.error("Error synchronizing allowed_users", e);
@@ -250,29 +322,36 @@ export default function App() {
           }
 
           if (profileToSet) {
-            const isAdminEmail = currentUser.email === 'fraed.fordrinks@gmail.com';
+            const isAdminEmail =
+              currentUser.email === "fraed.fordrinks@gmail.com";
             // Force admin role for the main admin email if not already set
-            if (isAdminEmail && profileToSet.role !== 'admin') {
-              const updatedProfile = { ...profileToSet, role: 'admin' as UserRole };
-              await setDoc(doc(db, 'users', currentUser.uid), updatedProfile, { merge: true });
+            if (isAdminEmail && profileToSet.role !== "admin") {
+              const updatedProfile = {
+                ...profileToSet,
+                role: "admin" as UserRole,
+              };
+              await setDoc(doc(db, "users", currentUser.uid), updatedProfile, {
+                merge: true,
+              });
               setUserProfile(updatedProfile);
             } else {
               setUserProfile(profileToSet);
             }
           } else {
             // No profile and no whitelist entry
-            const isAdminEmail = currentUser.email === 'fraed.fordrinks@gmail.com';
+            const isAdminEmail =
+              currentUser.email === "fraed.fordrinks@gmail.com";
             if (isAdminEmail) {
               // Special case: Root admin always allowed
               const newProfile: UserProfile = {
                 uid: currentUser.uid,
-                email: currentUser.email || '',
-                displayName: currentUser.displayName || 'Usuario',
-                role: 'admin',
+                email: currentUser.email || "",
+                displayName: currentUser.displayName || "Usuario",
+                role: "admin",
                 createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString()
+                updatedAt: new Date().toISOString(),
               };
-              await setDoc(doc(db, 'users', currentUser.uid), newProfile);
+              await setDoc(doc(db, "users", currentUser.uid), newProfile);
               setUserProfile(newProfile);
             } else {
               setUserProfile(undefined); // Restricted
@@ -291,34 +370,34 @@ export default function App() {
 
   const handleEditReport = (report: ProductionReport) => {
     setEditingReport(report);
-    setCurrentView('new');
+    setCurrentView("new");
   };
 
   const handleEditElabReport = (report: ElaboracionReport) => {
     setEditingElabReport(report);
-    setCurrentView('elaboracion');
+    setCurrentView("elaboracion");
   };
 
   const handleNewReport = () => {
     setEditingReport(undefined);
-    setCurrentView('new');
+    setCurrentView("new");
   };
 
   const handleCancel = () => {
     setEditingReport(undefined);
     setEditingElabReport(undefined);
-    setCurrentView('dashboard');
+    setCurrentView("dashboard");
   };
 
   const handleElabSuccess = () => {
     setEditingElabReport(undefined);
-    setCurrentView('elaboracion_history');
+    setCurrentView("elaboracion_history");
   };
 
   const handleViewPareto = (linea: string, month: string) => {
     setParetoLine(linea);
     setParetoMonth(month);
-    setCurrentView('pareto');
+    setCurrentView("pareto");
   };
 
   if (loading || permissionsLoading || !permissions) {
@@ -330,7 +409,7 @@ export default function App() {
   }
 
   if (!user) {
-    return <Auth onSuccess={() => setCurrentView('dashboard')} />;
+    return <Auth onSuccess={() => setCurrentView("dashboard")} />;
   }
 
   if (userProfile === undefined) {
@@ -340,14 +419,27 @@ export default function App() {
           <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
             <ShieldAlert className="w-10 h-10 text-red-500" />
           </div>
-          <h2 className="text-2xl font-black text-gray-900 mb-2 uppercase tracking-tighter">Acceso Restringido</h2>
-          <p className="text-gray-500 mb-2">Tu cuenta no ha sido habilitada en el sistema.</p>
+          <h2 className="text-2xl font-black text-gray-900 mb-2 uppercase tracking-tighter">
+            Acceso Restringido
+          </h2>
+          <p className="text-gray-500 mb-2">
+            Tu cuenta no ha sido habilitada en el sistema.
+          </p>
           <div className="bg-gray-100 p-4 rounded-xl mb-8 text-left">
-            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Información para el Administrador:</p>
-            <p className="text-xs font-mono text-gray-600 break-all"><b>Email:</b> {user?.email}</p>
-            <p className="text-xs font-mono text-gray-600 break-all"><b>UID:</b> {user?.uid}</p>
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">
+              Información para el Administrador:
+            </p>
+            <p className="text-xs font-mono text-gray-600 break-all">
+              <b>Email:</b> {user?.email}
+            </p>
+            <p className="text-xs font-mono text-gray-600 break-all">
+              <b>UID:</b> {user?.uid}
+            </p>
           </div>
-          <p className="text-sm text-gray-500 mb-6 italic">Envíale estos datos al administrador para que habilite tu acceso dándote de alta.</p>
+          <p className="text-sm text-gray-500 mb-6 italic">
+            Envíale estos datos al administrador para que habilite tu acceso
+            dándote de alta.
+          </p>
           <button
             onClick={() => logout()}
             className="flex items-center justify-center gap-2 w-full bg-gray-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest hover:bg-gray-800 transition-all shadow-lg"
@@ -360,13 +452,16 @@ export default function App() {
     );
   }
 
-  const isAdmin = userProfile?.role === 'admin' || user?.email === 'fraed.fordrinks@gmail.com';
-  const roleName = {
-    admin: 'Admin General',
-    produccion: 'Producción',
-    calidad: 'Calidad',
-    jefe_produccion: 'Jefe de Producción'
-  }[userProfile?.role || 'produccion'] || 'Usuario';
+  const isAdmin =
+    userProfile?.role === "admin" ||
+    user?.email === "fraed.fordrinks@gmail.com";
+  const roleName =
+    {
+      admin: "Admin General",
+      produccion: "Producción",
+      calidad: "Calidad",
+      jefe_produccion: "Jefe de Producción",
+    }[userProfile?.role || "produccion"] || "Usuario";
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -384,21 +479,30 @@ export default function App() {
                   MODO OFFLINE
                 </div>
               )}
-              <button 
-                onClick={() => setCurrentView('profile')}
+              <button
+                onClick={() => setCurrentView("profile")}
                 className="hidden sm:flex items-center gap-2 text-sm text-gray-600 hover:bg-gray-100 p-1 px-2 rounded-lg transition-colors"
                 title="Ver Perfil"
               >
                 {user.photoURL || userProfile?.photoURL ? (
-                  <img src={user.photoURL || userProfile?.photoURL || ''} alt="" className="w-8 h-8 rounded-full object-cover" />
+                  <img
+                    src={user.photoURL || userProfile?.photoURL || ""}
+                    alt=""
+                    className="w-8 h-8 rounded-full object-cover"
+                  />
                 ) : (
                   <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
                     <UserIcon className="w-5 h-5 text-blue-600" />
                   </div>
                 )}
                 <div className="flex flex-col items-start">
-                  <span className="font-medium leading-none">{userProfile?.displayName || user.displayName}</span>
-                  <span className="text-[10px] text-gray-400 capitalize">{roleName} {userProfile?.sector ? `(${userProfile.sector})` : ''}</span>
+                  <span className="font-medium leading-none">
+                    {userProfile?.displayName || user.displayName}
+                  </span>
+                  <span className="text-[10px] text-gray-400 capitalize">
+                    {roleName}{" "}
+                    {userProfile?.sector ? `(${userProfile.sector})` : ""}
+                  </span>
                 </div>
               </button>
               <button
@@ -413,41 +517,58 @@ export default function App() {
         </div>
       </header>
 
-      <main className="flex-1 max-w-[1600px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-8" onClick={() => setActiveMenu(null)}>
+      <main
+        className="flex-1 max-w-[1600px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-8"
+        onClick={() => setActiveMenu(null)}
+      >
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-8 gap-4">
           <h1 className="text-2xl font-bold text-gray-900 shrink-0">
-            {currentView === 'dashboard' && 'Datos de Producción'}
-            {currentView === 'consolidated' && 'Consolidado de Producción'}
-            {currentView === 'waste' && 'Acumulado de Desperdicio'}
-            {currentView === 'downtime' && 'Resumen de Paradas'}
-            {currentView === 'pareto' && 'Diagrama de Pareto'}
-            {currentView === 'efficiency' && 'Eficiencias'}
-            {currentView === 'gantt' && 'Gantt de Producción'}
-            {currentView === 'management_summary' && 'Resumen Gerencial'}
-            {currentView === 'elaboracion' && 'Parte de Elaboración'}
-            {currentView === 'elaboracion_history' && 'Historial de Elaboración'}
-            {currentView === 'live' && 'Monitor en Vivo'}
-            {currentView === 'personnel' && 'Control de Personal'}
-            {currentView === 'syrup' && 'Balance de Jarabes'}
-            {currentView === 'goal_fulfillment' && 'Cumplimiento de Objetivos'}
-            {currentView === 'stock_control' && 'Control de Stock y Salidas'}
-            {currentView === 'historical_report' && 'Histórico'}
-            {currentView === 'historical_importer' && 'Importación Histórica (Envasado)'}
-            {currentView === 'historical_exporter' && 'Exportación Histórica (Envasado)'}
-            {currentView === 'historical_elab_importer' && 'Importación Histórica (Elaboración)'}
-            {currentView === 'historical_elab_exporter' && 'Exportación Histórica (Elaboración)'}
-            {currentView === 'admin' && 'Administración'}
-            {currentView === 'profile' && 'Mi Perfil'}
-            {currentView === 'new' && (editingReport ? 'Editar Parte de Producción' : 'Nuevo Parte de Producción')}
+            {currentView === "dashboard" && "Datos de Producción"}
+            {currentView === "consolidated" && "Consolidado de Producción"}
+            {currentView === "waste" && "Acumulado de Desperdicio"}
+            {currentView === "downtime" && "Resumen de Paradas"}
+            {currentView === "pareto" && "Diagrama de Pareto"}
+            {currentView === "efficiency" && "Eficiencias"}
+            {currentView === "gantt" && "Gantt de Producción"}
+            {currentView === "management_summary" && "Resumen Gerencial"}
+            {currentView === "elaboracion" && "Parte de Elaboración"}
+            {currentView === "elaboracion_history" &&
+              "Historial de Elaboración"}
+            {currentView === "live" && "Monitor en Vivo"}
+            {currentView === "personnel" && "Control de Personal"}
+            {currentView === "syrup" && "Balance de Jarabes"}
+            {currentView === "goal_fulfillment" && "Cumplimiento de Objetivos"}
+            {currentView === "stock_control" && "Control de Stock y Salidas"}
+            {currentView === "historical_report" && "Histórico"}
+            {currentView === "historical_importer" &&
+              "Importación Histórica (Envasado)"}
+            {currentView === "historical_exporter" &&
+              "Exportación Histórica (Envasado)"}
+            {currentView === "historical_elab_importer" &&
+              "Importación Histórica (Elaboración)"}
+            {currentView === "historical_elab_exporter" &&
+              "Exportación Histórica (Elaboración)"}
+            {currentView === "admin" && "Administración"}
+            {currentView === "energy" && "Consumo de Energía"}
+            {currentView === "profile" && "Mi Perfil"}
+            {currentView === "new" &&
+              (editingReport
+                ? "Editar Parte de Producción"
+                : "Nuevo Parte de Producción")}
           </h1>
-          
+
           <div className="flex flex-wrap items-center gap-2 bg-white rounded-xl shadow-sm border border-gray-200 p-1.5 w-full lg:w-auto">
             {/* SECCIÓN 1: DATOS Y CONSULTAS */}
             {(permissions.viewReports || permissions.editReports) && (
               <button
-                onClick={() => { setCurrentView('dashboard'); setActiveMenu(null); }}
+                onClick={() => {
+                  setCurrentView("dashboard");
+                  setActiveMenu(null);
+                }}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
-                  currentView === 'dashboard' ? 'bg-blue-600 text-white shadow-md shadow-blue-200' : 'text-gray-600 hover:bg-gray-100'
+                  currentView === "dashboard"
+                    ? "bg-blue-600 text-white shadow-md shadow-blue-200"
+                    : "text-gray-600 hover:bg-gray-100"
                 }`}
               >
                 <ClipboardList className="w-4 h-4" />
@@ -458,9 +579,14 @@ export default function App() {
 
             {(permissions.viewElaboracion || permissions.editElaboracion) && (
               <button
-                onClick={() => { setCurrentView('elaboracion_history'); setActiveMenu(null); }}
+                onClick={() => {
+                  setCurrentView("elaboracion_history");
+                  setActiveMenu(null);
+                }}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
-                  currentView === 'elaboracion_history' ? 'bg-blue-600 text-white shadow-md shadow-blue-200' : 'text-gray-600 hover:bg-gray-100'
+                  currentView === "elaboracion_history"
+                    ? "bg-blue-600 text-white shadow-md shadow-blue-200"
+                    : "text-gray-600 hover:bg-gray-100"
                 }`}
               >
                 <Beaker className="w-4 h-4" />
@@ -474,21 +600,36 @@ export default function App() {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setActiveMenu(activeMenu === 'reports' ? null : 'reports');
+                    setActiveMenu(activeMenu === "reports" ? null : "reports");
                   }}
                   className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
-                    ['consolidated', 'waste', 'downtime', 'pareto', 'efficiency', 'gantt', 'syrup', 'goal_fulfillment', 'management_summary', 'stock_control', 'historical_report', 'insumos_control'].includes(currentView)
-                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200'
-                      : 'text-gray-600 hover:bg-gray-100'
+                    [
+                      "consolidated",
+                      "waste",
+                      "downtime",
+                      "pareto",
+                      "efficiency",
+                      "gantt",
+                      "syrup",
+                      "goal_fulfillment",
+                      "management_summary",
+                      "stock_control",
+                      "historical_report",
+                      "insumos_control",
+                    ].includes(currentView)
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-200"
+                      : "text-gray-600 hover:bg-gray-100"
                   }`}
                 >
                   <BarChart3 className="w-4 h-4" />
                   <span className="hidden sm:inline">Informes</span>
-                  <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${activeMenu === 'reports' ? 'rotate-180' : ''}`} />
+                  <ChevronDown
+                    className={`w-3 h-3 transition-transform duration-200 ${activeMenu === "reports" ? "rotate-180" : ""}`}
+                  />
                 </button>
-                
+
                 <AnimatePresence>
-                  {activeMenu === 'reports' && (
+                  {activeMenu === "reports" && (
                     <motion.div
                       initial={{ opacity: 0, y: 10, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -498,9 +639,14 @@ export default function App() {
                     >
                       {permissions.viewManagementSummary !== false && (
                         <button
-                          onClick={() => { setCurrentView('management_summary'); setActiveMenu(null); }}
+                          onClick={() => {
+                            setCurrentView("management_summary");
+                            setActiveMenu(null);
+                          }}
                           className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                            currentView === 'management_summary' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                            currentView === "management_summary"
+                              ? "bg-indigo-50 text-indigo-700 font-bold"
+                              : "text-gray-600 hover:bg-gray-50"
                           }`}
                         >
                           <Activity className="w-4 h-4" />
@@ -510,9 +656,14 @@ export default function App() {
 
                       {permissions.viewManagementSummary !== false && (
                         <button
-                          onClick={() => { setCurrentView('insumos_control'); setActiveMenu(null); }}
+                          onClick={() => {
+                            setCurrentView("insumos_control");
+                            setActiveMenu(null);
+                          }}
                           className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                            currentView === 'insumos_control' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                            currentView === "insumos_control"
+                              ? "bg-indigo-50 text-indigo-700 font-bold"
+                              : "text-gray-600 hover:bg-gray-50"
                           }`}
                         >
                           <FlaskConical className="w-4 h-4" />
@@ -522,21 +673,31 @@ export default function App() {
 
                       {permissions.viewManagementSummary !== false && (
                         <button
-                          onClick={() => { setCurrentView('management_comparison'); setActiveMenu(null); }}
+                          onClick={() => {
+                            setCurrentView("management_comparison");
+                            setActiveMenu(null);
+                          }}
                           className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                            currentView === 'management_comparison' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                            currentView === "management_comparison"
+                              ? "bg-indigo-50 text-indigo-700 font-bold"
+                              : "text-gray-600 hover:bg-gray-50"
                           }`}
                         >
                           <Activity className="w-4 h-4" />
                           Comparación Gestiones
                         </button>
                       )}
-                      
+
                       {permissions.viewConsolidated !== false && (
                         <button
-                          onClick={() => { setCurrentView('consolidated'); setActiveMenu(null); }}
+                          onClick={() => {
+                            setCurrentView("consolidated");
+                            setActiveMenu(null);
+                          }}
                           className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                            currentView === 'consolidated' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                            currentView === "consolidated"
+                              ? "bg-indigo-50 text-indigo-700 font-bold"
+                              : "text-gray-600 hover:bg-gray-50"
                           }`}
                         >
                           <Activity className="w-4 h-4" />
@@ -546,9 +707,14 @@ export default function App() {
 
                       {permissions.viewWaste !== false && (
                         <button
-                          onClick={() => { setCurrentView('waste'); setActiveMenu(null); }}
+                          onClick={() => {
+                            setCurrentView("waste");
+                            setActiveMenu(null);
+                          }}
                           className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                            currentView === 'waste' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                            currentView === "waste"
+                              ? "bg-indigo-50 text-indigo-700 font-bold"
+                              : "text-gray-600 hover:bg-gray-50"
                           }`}
                         >
                           <Trash2 className="w-4 h-4" />
@@ -558,9 +724,14 @@ export default function App() {
 
                       {permissions.viewSyrup !== false && (
                         <button
-                          onClick={() => { setCurrentView('syrup'); setActiveMenu(null); }}
+                          onClick={() => {
+                            setCurrentView("syrup");
+                            setActiveMenu(null);
+                          }}
                           className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                            currentView === 'syrup' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                            currentView === "syrup"
+                              ? "bg-indigo-50 text-indigo-700 font-bold"
+                              : "text-gray-600 hover:bg-gray-50"
                           }`}
                         >
                           <Beaker className="w-4 h-4" />
@@ -570,9 +741,14 @@ export default function App() {
 
                       {permissions.viewGoalFulfillment !== false && (
                         <button
-                          onClick={() => { setCurrentView('goal_fulfillment'); setActiveMenu(null); }}
+                          onClick={() => {
+                            setCurrentView("goal_fulfillment");
+                            setActiveMenu(null);
+                          }}
                           className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                            currentView === 'goal_fulfillment' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                            currentView === "goal_fulfillment"
+                              ? "bg-indigo-50 text-indigo-700 font-bold"
+                              : "text-gray-600 hover:bg-gray-50"
                           }`}
                         >
                           <TrendingUp className="w-4 h-4" />
@@ -582,9 +758,14 @@ export default function App() {
 
                       {permissions.viewStockControl !== false && (
                         <button
-                          onClick={() => { setCurrentView('stock_control'); setActiveMenu(null); }}
+                          onClick={() => {
+                            setCurrentView("stock_control");
+                            setActiveMenu(null);
+                          }}
                           className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                            currentView === 'stock_control' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                            currentView === "stock_control"
+                              ? "bg-indigo-50 text-indigo-700 font-bold"
+                              : "text-gray-600 hover:bg-gray-50"
                           }`}
                         >
                           <Database className="w-4 h-4" />
@@ -592,11 +773,34 @@ export default function App() {
                         </button>
                       )}
 
+                      {permissions.viewAnalytics && (
+                        <button
+                          onClick={() => {
+                            setCurrentView("energy");
+                            setActiveMenu(null);
+                          }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                            currentView === "energy"
+                              ? "bg-indigo-50 text-indigo-700 font-bold"
+                              : "text-gray-600 hover:bg-gray-50"
+                          }`}
+                        >
+                          <Zap className="w-4 h-4" />
+                          Consumo de Energía
+                        </button>
+                      )}
+
                       {permissions.viewDowntime !== false && (
                         <button
-                          onClick={() => { setCurrentView('downtime'); setActiveMenu(null); }}
+                          onClick={() => {
+                            setCurrentView("downtime");
+                            setActiveMenu(null);
+                          }}
                           className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                            currentView === 'downtime' || currentView === 'pareto' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                            currentView === "downtime" ||
+                            currentView === "pareto"
+                              ? "bg-indigo-50 text-indigo-700 font-bold"
+                              : "text-gray-600 hover:bg-gray-50"
                           }`}
                         >
                           <Clock className="w-4 h-4" />
@@ -606,9 +810,14 @@ export default function App() {
 
                       {permissions.viewEfficiency !== false && (
                         <button
-                          onClick={() => { setCurrentView('efficiency'); setActiveMenu(null); }}
+                          onClick={() => {
+                            setCurrentView("efficiency");
+                            setActiveMenu(null);
+                          }}
                           className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                            currentView === 'efficiency' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                            currentView === "efficiency"
+                              ? "bg-indigo-50 text-indigo-700 font-bold"
+                              : "text-gray-600 hover:bg-gray-50"
                           }`}
                         >
                           <Activity className="w-4 h-4" />
@@ -618,9 +827,14 @@ export default function App() {
 
                       {permissions.viewGantt !== false && (
                         <button
-                          onClick={() => { setCurrentView('gantt'); setActiveMenu(null); }}
+                          onClick={() => {
+                            setCurrentView("gantt");
+                            setActiveMenu(null);
+                          }}
                           className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                            currentView === 'gantt' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                            currentView === "gantt"
+                              ? "bg-indigo-50 text-indigo-700 font-bold"
+                              : "text-gray-600 hover:bg-gray-50"
                           }`}
                         >
                           <CalendarDays className="w-4 h-4" />
@@ -629,9 +843,14 @@ export default function App() {
                       )}
 
                       <button
-                        onClick={() => { setCurrentView('historical_report'); setActiveMenu(null); }}
+                        onClick={() => {
+                          setCurrentView("historical_report");
+                          setActiveMenu(null);
+                        }}
                         className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === 'historical_report' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                          currentView === "historical_report"
+                            ? "bg-indigo-50 text-indigo-700 font-bold"
+                            : "text-gray-600 hover:bg-gray-50"
                         }`}
                       >
                         <History className="w-4 h-4" />
@@ -639,9 +858,14 @@ export default function App() {
                       </button>
 
                       <button
-                        onClick={() => { setCurrentView('historical_importer'); setActiveMenu(null); }}
+                        onClick={() => {
+                          setCurrentView("historical_importer");
+                          setActiveMenu(null);
+                        }}
                         className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === 'historical_importer' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                          currentView === "historical_importer"
+                            ? "bg-indigo-50 text-indigo-700 font-bold"
+                            : "text-gray-600 hover:bg-gray-50"
                         }`}
                       >
                         <Upload className="w-4 h-4" />
@@ -649,9 +873,14 @@ export default function App() {
                       </button>
 
                       <button
-                        onClick={() => { setCurrentView('historical_exporter'); setActiveMenu(null); }}
+                        onClick={() => {
+                          setCurrentView("historical_exporter");
+                          setActiveMenu(null);
+                        }}
                         className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === 'historical_exporter' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                          currentView === "historical_exporter"
+                            ? "bg-indigo-50 text-indigo-700 font-bold"
+                            : "text-gray-600 hover:bg-gray-50"
                         }`}
                       >
                         <Download className="w-4 h-4" />
@@ -659,9 +888,14 @@ export default function App() {
                       </button>
 
                       <button
-                        onClick={() => { setCurrentView('historical_elab_importer'); setActiveMenu(null); }}
+                        onClick={() => {
+                          setCurrentView("historical_elab_importer");
+                          setActiveMenu(null);
+                        }}
                         className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === 'historical_elab_importer' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                          currentView === "historical_elab_importer"
+                            ? "bg-indigo-50 text-indigo-700 font-bold"
+                            : "text-gray-600 hover:bg-gray-50"
                         }`}
                       >
                         <Upload className="w-4 h-4" />
@@ -669,9 +903,14 @@ export default function App() {
                       </button>
 
                       <button
-                        onClick={() => { setCurrentView('historical_elab_exporter'); setActiveMenu(null); }}
+                        onClick={() => {
+                          setCurrentView("historical_elab_exporter");
+                          setActiveMenu(null);
+                        }}
                         className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === 'historical_elab_exporter' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-600 hover:bg-gray-50'
+                          currentView === "historical_elab_exporter"
+                            ? "bg-indigo-50 text-indigo-700 font-bold"
+                            : "text-gray-600 hover:bg-gray-50"
                         }`}
                       >
                         <Download className="w-4 h-4" />
@@ -684,15 +923,29 @@ export default function App() {
             )}
 
             {/* SECCIÓN 2: GESTIÓN Y PERSONAS */}
-            {((permissions.viewReports || permissions.editReports || permissions.viewElaboracion || permissions.editElaboracion || permissions.viewAnalytics) && (permissions.viewPersonnel || permissions.editPersonnel || permissions.viewScheduler || permissions.editScheduler || permissions.viewLiveMonitor)) && (
-              <div className="hidden lg:block w-px h-6 bg-gray-200 mx-1" />
-            )}
+            {(permissions.viewReports ||
+              permissions.editReports ||
+              permissions.viewElaboracion ||
+              permissions.editElaboracion ||
+              permissions.viewAnalytics) &&
+              (permissions.viewPersonnel ||
+                permissions.editPersonnel ||
+                permissions.viewScheduler ||
+                permissions.editScheduler ||
+                permissions.viewLiveMonitor) && (
+                <div className="hidden lg:block w-px h-6 bg-gray-200 mx-1" />
+              )}
 
             {(permissions.viewPersonnel || permissions.editPersonnel) && (
               <button
-                onClick={() => { setCurrentView('personnel'); setActiveMenu(null); }}
+                onClick={() => {
+                  setCurrentView("personnel");
+                  setActiveMenu(null);
+                }}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
-                  currentView === 'personnel' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' : 'text-gray-600 hover:bg-gray-100'
+                  currentView === "personnel"
+                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-200"
+                    : "text-gray-600 hover:bg-gray-100"
                 }`}
               >
                 <Users className="w-4 h-4" />
@@ -703,9 +956,14 @@ export default function App() {
 
             {(permissions.viewScheduler || permissions.editScheduler) && (
               <button
-                onClick={() => { setCurrentView('scheduler'); setActiveMenu(null); }}
+                onClick={() => {
+                  setCurrentView("scheduler");
+                  setActiveMenu(null);
+                }}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
-                  currentView === 'scheduler' ? 'bg-blue-600 text-white shadow-md shadow-blue-200' : 'text-gray-600 hover:bg-gray-100'
+                  currentView === "scheduler"
+                    ? "bg-blue-600 text-white shadow-md shadow-blue-200"
+                    : "text-gray-600 hover:bg-gray-100"
                 }`}
               >
                 <DraftingCompass className="w-4 h-4" />
@@ -716,9 +974,14 @@ export default function App() {
 
             {permissions.viewLiveMonitor && (
               <button
-                onClick={() => { setCurrentView('live'); setActiveMenu(null); }}
+                onClick={() => {
+                  setCurrentView("live");
+                  setActiveMenu(null);
+                }}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
-                  currentView === 'live' ? 'bg-cyan-600 text-white shadow-md shadow-cyan-200' : 'text-gray-600 hover:bg-gray-100'
+                  currentView === "live"
+                    ? "bg-cyan-600 text-white shadow-md shadow-cyan-200"
+                    : "text-gray-600 hover:bg-gray-100"
                 }`}
               >
                 <Activity className="w-4 h-4" />
@@ -727,15 +990,32 @@ export default function App() {
             )}
 
             {/* SECCIÓN 3: ACCIONES Y ADMIN */}
-            {((permissions.viewReports || permissions.editReports || permissions.viewElaboracion || permissions.editElaboracion || permissions.viewAnalytics || permissions.viewPersonnel || permissions.editPersonnel || permissions.viewScheduler || permissions.editScheduler || permissions.viewLiveMonitor) && (permissions.editElaboracion || permissions.editReports || permissions.viewAdmin)) && (
-              <div className="hidden lg:block w-px h-6 bg-gray-200 mx-1" />
-            )}
+            {(permissions.viewReports ||
+              permissions.editReports ||
+              permissions.viewElaboracion ||
+              permissions.editElaboracion ||
+              permissions.viewAnalytics ||
+              permissions.viewPersonnel ||
+              permissions.editPersonnel ||
+              permissions.viewScheduler ||
+              permissions.editScheduler ||
+              permissions.viewLiveMonitor) &&
+              (permissions.editElaboracion ||
+                permissions.editReports ||
+                permissions.viewAdmin) && (
+                <div className="hidden lg:block w-px h-6 bg-gray-200 mx-1" />
+              )}
 
             {permissions.editElaboracion && (
               <button
-                onClick={() => { setCurrentView('elaboracion'); setActiveMenu(null); }}
+                onClick={() => {
+                  setCurrentView("elaboracion");
+                  setActiveMenu(null);
+                }}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
-                  currentView === 'elaboracion' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-200' : 'text-gray-600 hover:bg-gray-100'
+                  currentView === "elaboracion"
+                    ? "bg-emerald-600 text-white shadow-md shadow-emerald-200"
+                    : "text-gray-600 hover:bg-gray-100"
                 }`}
               >
                 <Beaker className="w-4 h-4" />
@@ -743,12 +1023,17 @@ export default function App() {
                 <span className="sm:hidden">Elab+</span>
               </button>
             )}
-            
+
             {permissions.editReports && (
               <button
-                onClick={() => { handleNewReport(); setActiveMenu(null); }}
+                onClick={() => {
+                  handleNewReport();
+                  setActiveMenu(null);
+                }}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
-                  currentView === 'new' && !editingReport ? 'bg-blue-600 text-white shadow-md shadow-blue-200' : 'text-gray-600 hover:bg-gray-100'
+                  currentView === "new" && !editingReport
+                    ? "bg-blue-600 text-white shadow-md shadow-blue-200"
+                    : "text-gray-600 hover:bg-gray-100"
                 }`}
               >
                 <PlusCircle className="w-4 h-4" />
@@ -759,9 +1044,14 @@ export default function App() {
 
             {permissions.viewAdmin && (
               <button
-                onClick={() => { setCurrentView('admin'); setActiveMenu(null); }}
+                onClick={() => {
+                  setCurrentView("admin");
+                  setActiveMenu(null);
+                }}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
-                  currentView === 'admin' ? 'bg-gray-800 text-white shadow-md' : 'text-gray-600 hover:bg-gray-100'
+                  currentView === "admin"
+                    ? "bg-gray-800 text-white shadow-md"
+                    : "text-gray-600 hover:bg-gray-100"
                 }`}
               >
                 <Settings className="w-4 h-4" />
@@ -772,111 +1062,100 @@ export default function App() {
           </div>
         </div>
 
-        {currentView === 'dashboard' && (
-          <Dashboard 
-            onNewReport={handleNewReport} 
-            onEditReport={handleEditReport} 
+        {currentView === "dashboard" && (
+          <Dashboard
+            onNewReport={handleNewReport}
+            onEditReport={handleEditReport}
             isAdmin={isAdmin}
             filters={dbFilters}
             onFiltersChange={setDbFilters}
           />
         )}
-        {currentView === 'consolidated' && (
-          <ConsolidatedReport />
-        )}
-        {currentView === 'waste' && (
-          <WasteReport />
-        )}
-        {currentView === 'downtime' && (
+        {currentView === "consolidated" && <ConsolidatedReport />}
+        {currentView === "waste" && <WasteReport />}
+        {currentView === "downtime" && (
           <DowntimeReport onViewPareto={handleViewPareto} />
         )}
-        {currentView === 'pareto' && (
-          <ParetoChart 
-            linea={paretoLine} 
-            month={paretoMonth} 
-            onBack={() => setCurrentView('downtime')} 
+        {currentView === "pareto" && (
+          <ParetoChart
+            linea={paretoLine}
+            month={paretoMonth}
+            onBack={() => setCurrentView("downtime")}
           />
         )}
-        {currentView === 'efficiency' && (
-          <EfficiencyReport />
-        )}
-        {currentView === 'syrup' && (
-          <SyrupReport />
-        )}
-        {currentView === 'goal_fulfillment' && (
-          <GoalFulfillment />
-        )}
-        {currentView === 'stock_control' && (
-          <StockControl />
-        )}
-        {currentView === 'insumos_control' && (
-          <InsumosControlReport />
-        )}
-        {currentView === 'historical_report' && (
-          <HistoricalReport />
-        )}
-        {currentView === 'historical_importer' && (
-          <HistoricalImporter />
-        )}
-        {currentView === 'historical_exporter' && (
-          <HistoricalExporter />
-        )}
-        {currentView === 'historical_elab_importer' && (
+        {currentView === "efficiency" && <EfficiencyReport />}
+        {currentView === "syrup" && <SyrupReport />}
+        {currentView === "goal_fulfillment" && <GoalFulfillment />}
+        {currentView === "stock_control" && <StockControl />}
+        {currentView === "insumos_control" && <InsumosControlReport />}
+        {currentView === "historical_report" && <HistoricalReport />}
+        {currentView === "historical_importer" && <HistoricalImporter />}
+        {currentView === "historical_exporter" && <HistoricalExporter />}
+        {currentView === "historical_elab_importer" && (
           <HistoricalElaboracionImporter />
         )}
-        {currentView === 'historical_elab_exporter' && (
+        {currentView === "historical_elab_exporter" && (
           <HistoricalElaboracionExporter />
         )}
-        {currentView === 'management_summary' && (
-          <ManagementSummary />
+        {currentView === "management_summary" && <ManagementSummary />}
+        {currentView === "management_comparison" && <ManagementComparison />}
+        {currentView === "gantt" && (
+          <GanttChart onBack={() => setCurrentView("dashboard")} />
         )}
-        {currentView === 'management_comparison' && (
-          <ManagementComparison />
-        )}
-        {currentView === 'gantt' && (
-          <GanttChart onBack={() => setCurrentView('dashboard')} />
-        )}
-        {currentView === 'live' && (
-          <LiveMonitor />
-        )}
-        {currentView === 'personnel' && (
+        {currentView === "live" && <LiveMonitor />}
+        {currentView === "personnel" && (
           <PersonnelManagement userProfile={userProfile} />
         )}
-        {currentView === 'scheduler' && (
+        {currentView === "scheduler" && (
           <ProductionScheduler isAdmin={permissions.editScheduler} />
         )}
-        {currentView === 'admin' && (
-          <AdminPanel userProfile={userProfile} />
-        )}
-        {currentView === 'profile' && (
+        {currentView === "admin" && <AdminPanel userProfile={userProfile} />}
+        {currentView === "energy" && <EnergyReport />}
+        {currentView === "profile" && (
           <div className="max-w-2xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
             <div className="flex flex-col items-center mb-8">
               <div className="relative">
                 {user.photoURL || userProfile?.photoURL ? (
-                  <img src={user.photoURL || userProfile?.photoURL || ''} alt="" className="w-32 h-32 rounded-full object-cover border-4 border-white shadow-lg" />
+                  <img
+                    src={user.photoURL || userProfile?.photoURL || ""}
+                    alt=""
+                    className="w-32 h-32 rounded-full object-cover border-4 border-white shadow-lg"
+                  />
                 ) : (
                   <div className="w-32 h-32 rounded-full bg-blue-100 flex items-center justify-center border-4 border-white shadow-lg">
                     <UserIcon className="w-16 h-16 text-blue-600" />
                   </div>
                 )}
               </div>
-              <h2 className="mt-4 text-2xl font-bold text-gray-900">{userProfile?.displayName || user.displayName}</h2>
-              <p className="text-gray-500">{userProfile?.email || user.email}</p>
+              <h2 className="mt-4 text-2xl font-bold text-gray-900">
+                {userProfile?.displayName || user.displayName}
+              </h2>
+              <p className="text-gray-500">
+                {userProfile?.email || user.email}
+              </p>
               <span className="mt-2 px-3 py-1 bg-blue-100 text-blue-700 text-xs font-bold rounded-full uppercase tracking-wider">
-                {userProfile?.role || 'Usuario'}
+                {userProfile?.role || "Usuario"}
               </span>
             </div>
 
             <div className="space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div className="p-4 bg-gray-50 rounded-xl border border-gray-100">
-                  <span className="block text-xs font-bold text-gray-400 uppercase mb-1">ID de Usuario</span>
-                  <span className="text-sm font-mono text-gray-700">{user.uid}</span>
+                  <span className="block text-xs font-bold text-gray-400 uppercase mb-1">
+                    ID de Usuario
+                  </span>
+                  <span className="text-sm font-mono text-gray-700">
+                    {user.uid}
+                  </span>
                 </div>
                 <div className="p-4 bg-gray-50 rounded-xl border border-gray-100">
-                  <span className="block text-xs font-bold text-gray-400 uppercase mb-1">Fecha de Registro</span>
+                  <span className="block text-xs font-bold text-gray-400 uppercase mb-1">
+                    Fecha de Registro
+                  </span>
                   <span className="text-sm text-gray-700">
-                    {userProfile?.createdAt ? new Date(userProfile.createdAt).toLocaleDateString() : 'N/A'}
+                    {userProfile?.createdAt
+                      ? new Date(userProfile.createdAt).toLocaleDateString()
+                      : "N/A"}
                   </span>
                 </div>
               </div>
@@ -893,29 +1172,29 @@ export default function App() {
             </div>
           </div>
         )}
-        {currentView === 'elaboracion' && (
-          <ElaboracionForm 
-            key={editingElabReport?.id || 'elaboracion'}
-            onCancel={handleCancel} 
-            onSuccess={handleElabSuccess} 
-            initialData={editingElabReport} 
+        {currentView === "elaboracion" && (
+          <ElaboracionForm
+            key={editingElabReport?.id || "elaboracion"}
+            onCancel={handleCancel}
+            onSuccess={handleElabSuccess}
+            initialData={editingElabReport}
           />
         )}
-        {currentView === 'elaboracion_history' && (
-          <ElaboracionHistory 
-            onEditReport={handleEditElabReport} 
-            onNewReport={() => setCurrentView('elaboracion')} 
+        {currentView === "elaboracion_history" && (
+          <ElaboracionHistory
+            onEditReport={handleEditElabReport}
+            onNewReport={() => setCurrentView("elaboracion")}
             isAdmin={isAdmin}
             filters={elabFilters}
             onFiltersChange={setElabFilters}
           />
         )}
-        {currentView === 'new' && (
-          <NewReportForm 
-            key={editingReport?.id || 'new'}
-            onCancel={handleCancel} 
-            onSuccess={handleCancel} 
-            initialData={editingReport} 
+        {currentView === "new" && (
+          <NewReportForm
+            key={editingReport?.id || "new"}
+            onCancel={handleCancel}
+            onSuccess={handleCancel}
+            initialData={editingReport}
           />
         )}
       </main>

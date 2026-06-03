@@ -93,8 +93,9 @@ export function InsumosControlReport() {
 
   // Filter
   const [selectedBrand, setSelectedBrand] = useState<string>('all');
-  const [excludeAzucar, setExcludeAzucar] = useState<boolean>(false);
-  const [excludeJugoLimon, setExcludeJugoLimon] = useState<boolean>(false);
+  const [selectedCalibre, setSelectedCalibre] = useState<string>('todos');
+  const [excludeAzucar, setExcludeAzucar] = useState<boolean>(true);
+  const [excludeJugoLimon, setExcludeJugoLimon] = useState<boolean>(true);
 
   // Simulation / Local Stock overrides State
   const [simulationMode, setSimulationMode] = useState(false);
@@ -326,20 +327,31 @@ export function InsumosControlReport() {
     }
     let sqlCode = insumoMappings[insumoName];
     if (!sqlCode && config) {
-      // Seek in preformasConfig
-      const pref = (config?.preformasConfig || []).find(p => p.name === insumoName);
-      if (pref) sqlCode = pref.sqlCode;
-      else {
-        // Seek in termoConfig
-        const tm = (config?.termoConfig || []).find(t => t.name === insumoName);
-        if (tm) sqlCode = tm.sqlCode;
+      if (insumoName.startsWith("Etiqueta ")) {
+        const parts = insumoName.substring(9).split(" / ");
+        if (parts.length >= 3) {
+          const brand = parts[0];
+          const flavor = parts[1];
+          const size = parseInt(parts[2]);
+          const key = `${brand}-${flavor}-${size}`;
+          sqlCode = etiquetasMappings[key];
+        }
+      } else {
+        // Seek in preformasConfig
+        const pref = (config?.preformasConfig || []).find(p => p.name === insumoName);
+        if (pref) sqlCode = pref.sqlCode;
         else {
-          // Seek in stretchConfig
-          const str = (config?.stretchConfig || []).find(s => s.name === insumoName);
-          if (str) sqlCode = str.sqlCode;
+          // Seek in termoConfig
+          const tm = (config?.termoConfig || []).find(t => t.name === insumoName);
+          if (tm) sqlCode = tm.sqlCode;
           else {
-            const tapa = (config?.tapaConfig || []).find(t => t.name === insumoName);
-            if (tapa) sqlCode = tapa.sqlCode;
+            // Seek in stretchConfig
+            const str = (config?.stretchConfig || []).find(s => s.name === insumoName);
+            if (str) sqlCode = str.sqlCode;
+            else {
+              const tapa = (config?.tapaConfig || []).find(t => t.name === insumoName);
+              if (tapa) sqlCode = tapa.sqlCode;
+            }
           }
         }
       }
@@ -353,7 +365,7 @@ export function InsumosControlReport() {
       if (match) return match.stock_almacen;
     }
     return 0; // fallback if no code / no match
-  }, [config, simulationMode, simulatedStocks, insumoMappings, stockData]);
+  }, [config, simulationMode, simulatedStocks, insumoMappings, etiquetasMappings, stockData]);
 
   // Helper to read effective stock considering equivalent groups
   const getEffectiveInsumoStock = useCallback((insumoName: string): number => {
@@ -713,6 +725,9 @@ export function InsumosControlReport() {
         localTapaKey = tapaConf.name;
       }
 
+      const labelKey = `Etiqueta ${marca} / ${sabor} / ${tamano}cc`;
+      insumosRequiredSum[labelKey] = (insumosRequiredSum[labelKey] || 0) + etiquetasNeeded;
+
       // Aggregates
       preformasAgg[tamano] = (preformasAgg[tamano] || 0) + preformasNeeded;
       termoAgg[tamano] = (termoAgg[tamano] || 0) + termoNeededKg;
@@ -785,6 +800,9 @@ export function InsumosControlReport() {
         if (tapaConf) {
           monthlyInsumosRequiredSum[tapaConf.name] = (monthlyInsumosRequiredSum[tapaConf.name] || 0) + tapasNeeded;
         }
+
+        const labelKey = `Etiqueta ${marca} / ${sabor} / ${tamano}cc`;
+        monthlyInsumosRequiredSum[labelKey] = (monthlyInsumosRequiredSum[labelKey] || 0) + preformasNeeded;
       }
     });
 
@@ -1844,6 +1862,19 @@ export function InsumosControlReport() {
                       Verifique el stock disponible de etiquetas según la base de datos de SQL y sus mapeos definidos.
                     </p>
                   </div>
+                  <div>
+                    <select
+                      title="Filtrar por calibre"
+                      value={selectedCalibre}
+                      onChange={(e) => setSelectedCalibre(e.target.value)}
+                      className="pl-3 pr-8 py-2.5 rounded-xl border border-gray-300 bg-white text-xs font-bold focus:ring-2 focus:ring-indigo-500 outline-none text-gray-700 shadow-sm"
+                    >
+                      <option value="todos">Todos los Calibres</option>
+                      {availableSizes.map((size) => (
+                        <option key={size} value={size.toString()}>{size} cc</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 <div className="overflow-x-auto">
@@ -1909,8 +1940,13 @@ export function InsumosControlReport() {
                           return a.flavor.localeCompare(b.flavor);
                         });
 
+                        // Filter items by selectedCalibre
+                        const filteredItems = selectedCalibre === 'todos'
+                          ? items
+                          : items.filter(item => item.size.toString() === selectedCalibre);
+
                         const groupedBySize: Record<string, typeof items> = {};
-                        items.forEach(item => {
+                        filteredItems.forEach(item => {
                           const s = item.size.toString();
                           if (!groupedBySize[s]) groupedBySize[s] = [];
                           groupedBySize[s].push(item);

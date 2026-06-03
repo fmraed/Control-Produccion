@@ -72,7 +72,7 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
   const bottomScrollRef = useRef<HTMLDivElement>(null);
   const comparisonScrollRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to end on week change if navigated back
+  // Scroll on week change (end if navigated back, start if navigated forward)
   const prevWeekRef = useRef(selectedWeek);
   useEffect(() => {
     if (selectedWeek < prevWeekRef.current) {
@@ -83,6 +83,16 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
         }
         if (comparisonScrollRef.current) {
           comparisonScrollRef.current.scrollLeft = comparisonScrollRef.current.scrollWidth;
+        }
+      }, 50);
+    } else if (selectedWeek > prevWeekRef.current) {
+      // Small timeout to ensure DOM is updated
+      setTimeout(() => {
+        if (bottomScrollRef.current) {
+          bottomScrollRef.current.scrollLeft = 0;
+        }
+        if (comparisonScrollRef.current) {
+          comparisonScrollRef.current.scrollLeft = 0;
         }
       }, 50);
     }
@@ -857,27 +867,37 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
                                     }`}
                                   >
                                     {realBlocks.length > 0 ? (
-                                      realBlocks.map((data, idx) => (
-                                        <div 
-                                          key={idx}
-                                          className="h-full absolute top-0 flex items-center justify-center overflow-hidden border-r border-white/10 last:border-r-0 shadow-[0_1px_3px_rgba(0,0,0,0.1)]"
-                                          style={{ 
-                                            backgroundColor: FLAVOR_COLORS[data.sabor] || '#6366f1',
-                                            left: `${data.left}%`,
-                                            width: `${data.width}%` 
-                                          }}
-                                        >
-                                          <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent" />
-                                          <div className="flex flex-col items-center pointer-events-none px-1 overflow-hidden">
-                                            <span className="text-[7px] font-black text-white drop-shadow-sm uppercase truncate w-full text-center">
-                                              {data.sabor}
-                                            </span>
-                                            <span className="text-[9px] font-black text-white mix-blend-difference">
-                                              {data.packs.toLocaleString()}
-                                            </span>
+                                      realBlocks.map((data, idx) => {
+                                        const isZero = data.packs === 0;
+                                        return (
+                                          <div 
+                                            key={idx}
+                                            className="h-full absolute top-0 flex items-center justify-center overflow-hidden border-r border-gray-200 last:border-r-0 shadow-[0_1px_3px_rgba(0,0,0,0.1)]"
+                                            style={{ 
+                                              background: isZero
+                                                ? 'repeating-linear-gradient(45deg, #f9fafb, #f9fafb 4px, #f3f4f6 4px, #f3f4f6 8px)'
+                                                : (FLAVOR_COLORS[data.sabor] || '#6366f1'),
+                                              left: `${data.left}%`,
+                                              width: `${data.width}%` 
+                                            }}
+                                            title={isZero ? `Sin producción real registrada de ${data.sabor}` : undefined}
+                                          >
+                                            {!isZero && <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent" />}
+                                            <div className="flex flex-col items-center pointer-events-none px-1 overflow-hidden">
+                                              <span className={`text-[7px] font-black uppercase truncate w-full text-center ${
+                                                isZero ? 'text-gray-400 font-extrabold' : 'text-white drop-shadow-sm'
+                                              }`}>
+                                                {isZero ? 'Sin Prod.' : data.sabor}
+                                              </span>
+                                              <span className={`text-[8px] font-black ${
+                                                isZero ? 'text-gray-400' : 'text-white mix-blend-difference'
+                                              }`}>
+                                                {isZero ? `(${data.sabor})` : data.packs.toLocaleString()}
+                                              </span>
+                                            </div>
                                           </div>
-                                        </div>
-                                      ))
+                                        );
+                                      })
                                     ) : (
                                       <div className="absolute inset-0 bg-gray-50/30 flex items-center justify-center w-full">
                                         <div className="w-1 h-1 rounded-full bg-gray-200" />

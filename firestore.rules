@@ -336,6 +336,11 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    match /energyRecords/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
     match /daily_stocks/{docId} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated();

@@ -342,6 +342,11 @@ export function ManagementComparison() {
 
     // Calcular Horas Extras de todas las planificaciones/reportes procesados del dataset
     Object.keys(reportsByDayAndShift).forEach(dayStr => {
+      const [yearStr, monthStr] = dayStr.split('-');
+      const year = parseInt(yearStr);
+      const month = monthStr;
+      const snapshot = snapshots.find(s => s.year === year && s.month === month);
+
       const date = parseISO(dayStr);
       const dayOfWeek = getDay(date);
       const dayKey = format(date, 'eeee').toLowerCase();
@@ -351,48 +356,63 @@ export function ManagementComparison() {
       const isNextDayHoliday = isDateHoliday(nextDayStr);
 
       Object.keys(reportsByDayAndShift[dayStr]).forEach(shift => {
-        const reports = reportsByDayAndShift[dayStr][shift];
-        const p = (dayPlan as any)[shift];
-        
-        // Determinar cantidad y duración planificadas
-        let plannedCount = p?.count || 0;
-        let plannedDuration = p?.duration || 480;
-        
-        // Ajustes por feriado
-        if (isHoliday && (shift === 'Mañana' || shift === 'Tarde')) {
-          plannedCount = 0;
-        }
-        if (isHoliday && shift === 'Noche') {
-          const nextDay = addDays(date, 1);
-          const boundary = (getDay(nextDay) === 6) ? 5 : 6;
-          plannedDuration = boundary * 60;
-        }
-        if (shift === 'Noche' && isNextDayHoliday) {
-          plannedCount = 0;
-        }
-
-        const totalActualMinutes = reports.reduce((sum, r) => sum + r.duration, 0);
-        const totalPlannedMinutes = plannedCount * plannedDuration;
-        const extraMinutes = Math.max(0, totalActualMinutes - totalPlannedMinutes);
-
-        if (extraMinutes > 0) {
-          const firstReport = reports[0];
-          const timeParts = firstReport.entraTurno?.split(':') || ['0', '0'];
-          const hour = parseInt(timeParts[0]);
+        if (snapshot) {
+          const extraShiftsDebug = snapshot.stats?.breakdown?.extraShiftsDebug || [];
+          const snapEntry = extraShiftsDebug.find((ex: any) => ex.date === dayStr && ex.shift === shift);
+          if (snapEntry) {
+            const extraVal = snapEntry.extra;
+            if (snapEntry.type === 'Feriado') {
+              holidayExtraHours += extraVal;
+            } else if (snapEntry.type === 'Finde') {
+              weekendExtraHours += extraVal;
+            } else {
+              weekdayExtraHours += extraVal;
+            }
+          }
+        } else {
+          const reports = reportsByDayAndShift[dayStr][shift];
+          const p = (dayPlan as any)[shift];
           
-          // Regla fin de semana: Dom o Sáb después de las 13:00 hs
-          const isWeekendExtra = (dayOfWeek === 0) || (dayOfWeek === 6 && (hour >= 13 || hour < 5));
+          // Determinar cantidad y duración planificadas
+          let plannedCount = p?.count || 0;
+          let plannedDuration = p?.duration || 480;
           
-          // Regla feriado
-          const isHolidayExtra = (isHoliday && (shift === 'Mañana' || shift === 'Tarde')) ||
-                                 (isNextDayHoliday && shift === 'Noche') ||
-                                 (isHoliday && shift === 'Noche');
+          // Ajustes por feriado
+          if (isHoliday && (shift === 'Mañana' || shift === 'Tarde')) {
+            plannedCount = 0;
+          }
+          if (isHoliday && shift === 'Noche') {
+            const nextDay = addDays(date, 1);
+            const boundary = (getDay(nextDay) === 6) ? 5 : 6;
+            plannedDuration = boundary * 60;
+          }
+          if (shift === 'Noche' && isNextDayHoliday) {
+            plannedCount = 0;
+          }
 
-          const extraVal = extraMinutes / 60; // HORAS
-          
-          if (isHolidayExtra) holidayExtraHours += extraVal;
-          else if (isWeekendExtra) weekendExtraHours += extraVal;
-          else weekdayExtraHours += extraVal;
+          const totalActualMinutes = reports.reduce((sum, r) => sum + r.duration, 0);
+          const totalPlannedMinutes = plannedCount * plannedDuration;
+          const extraMinutes = Math.max(0, totalActualMinutes - totalPlannedMinutes);
+
+          if (extraMinutes > 0) {
+            const firstReport = reports[0];
+            const timeParts = firstReport.entraTurno?.split(':') || ['0', '0'];
+            const hour = parseInt(timeParts[0]);
+            
+            // Regla fin de semana: Dom o Sáb después de las 13:00 hs
+            const isWeekendExtra = (dayOfWeek === 0) || (dayOfWeek === 6 && (hour >= 13 || hour < 5));
+            
+            // Regla feriado
+            const isHolidayExtra = (isHoliday && (shift === 'Mañana' || shift === 'Tarde')) ||
+                                   (isNextDayHoliday && shift === 'Noche') ||
+                                   (isHoliday && shift === 'Noche');
+
+            const extraVal = extraMinutes / 60; // HORAS
+            
+            if (isHolidayExtra) holidayExtraHours += extraVal;
+            else if (isWeekendExtra) weekendExtraHours += extraVal;
+            else weekdayExtraHours += extraVal;
+          }
         }
       });
     });

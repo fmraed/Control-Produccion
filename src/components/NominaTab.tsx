@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Employee } from '../types';
-import { format, startOfMonth, endOfMonth, parseISO, differenceInYears } from 'date-fns';
+import { format, startOfMonth, endOfMonth, parseISO, differenceInYears, differenceInCalendarDays } from 'date-fns';
 import { Users, DollarSign, Clock, Briefcase, FileText, AlertCircle } from 'lucide-react';
 
 interface NominaTabProps {
@@ -104,7 +104,71 @@ export function NominaTab({ employees, config }: NominaTabProps) {
     fetchProductionHours();
   }, [selectedMonth]);
 
-  const activeEmployees = employees.filter(e => e.active);
+  const getEmployeePeriods = (emp: Employee): { hireDate: string; terminationDate?: string }[] => {
+    const periods: { hireDate: string; terminationDate?: string }[] = [];
+    if (emp.history && emp.history.length > 0) {
+      emp.history.forEach(p => {
+        periods.push({
+          hireDate: p.hireDate,
+          terminationDate: p.terminationDate || undefined
+        });
+      });
+    }
+    if (emp.hireDate) {
+      const exists = periods.some(p => p.hireDate === emp.hireDate);
+      if (!exists) {
+        periods.push({
+          hireDate: emp.hireDate,
+          terminationDate: emp.active ? undefined : (emp.terminationDate || undefined)
+        });
+      }
+    }
+    return periods;
+  };
+
+  const isEmployeeActiveInMonth = (emp: Employee, monthStr: string): boolean => {
+    const dateForMonth = parseISO(`${monthStr}-01`);
+    const monthStart = startOfMonth(dateForMonth);
+    const monthEnd = endOfMonth(dateForMonth);
+    const periods = getEmployeePeriods(emp);
+    return periods.some(p => {
+      const hire = parseISO(p.hireDate);
+      if (hire > monthEnd) return false;
+      if (p.terminationDate && p.terminationDate !== '') {
+        const term = parseISO(p.terminationDate);
+        if (term < monthStart) return false;
+      }
+      return true;
+    });
+  };
+
+  const getEmployeeProrationFactor = (emp: Employee, monthStr: string): number => {
+    const dateForMonth = parseISO(`${monthStr}-01`);
+    const monthStart = startOfMonth(dateForMonth);
+    const monthEnd = endOfMonth(dateForMonth);
+    const daysInMonth = differenceInCalendarDays(monthEnd, monthStart) + 1;
+    const periods = getEmployeePeriods(emp);
+    
+    let totalDaysWorked = 0;
+    periods.forEach(p => {
+      const hire = parseISO(p.hireDate);
+      if (hire > monthEnd) return;
+      const term = (p.terminationDate && p.terminationDate !== '') ? parseISO(p.terminationDate) : monthEnd;
+      if (term < monthStart) return;
+      
+      const activeStart = hire > monthStart ? hire : monthStart;
+      const activeEnd = term < monthEnd ? term : monthEnd;
+      
+      if (activeStart <= activeEnd) {
+        totalDaysWorked += differenceInCalendarDays(activeEnd, activeStart) + 1;
+      }
+    });
+    
+    const factor = totalDaysWorked / daysInMonth;
+    return Math.min(1.0, Math.max(0, factor));
+  };
+
+  const activeEmployees = employees.filter(emp => isEmployeeActiveInMonth(emp, selectedMonth));
   const totalPersonal = activeEmployees.length;
   
   const efectivos = activeEmployees.filter(e => e.type === 'Efectivo').length;
@@ -134,6 +198,9 @@ export function NominaTab({ employees, config }: NominaTabProps) {
 
   const salarioOpInt = Number(salarios['Operario de Producción Interno'] || 0);
 
+  const cargasSocialesPercent = typeof config?.cargasSocialesPercent === 'number' ? config.cargasSocialesPercent : 31.5;
+  const sacPercent = typeof config?.sacPercent === 'number' ? config.sacPercent : 8.33;
+
   const breakdownCategorias = activeEmployees.reduce((acc, emp) => {
     const cat = emp.rango || 'Sin Categoría';
     if (!acc[cat]) {
@@ -144,18 +211,24 @@ export function NominaTab({ employees, config }: NominaTabProps) {
         totalSueldoBase: 0,
         totalPresentismo: 0,
         totalAntiguedad: 0,
+        totalCargasSociales: 0,
+        totalSAC: 0,
+        totalArt49Bis: 0,
         totalCosto: 0
       };
     }
     
+    const factor = getEmployeeProrationFactor(emp, selectedMonth);
+
     let empCost = 0;
     const sueldoBase = getSalarioParaRango(emp.rango || '');
-    if (sueldoBase > 0) {
-      acc[cat].totalSueldoBase += sueldoBase;
-      empCost += sueldoBase;
+    const sueldoBaseProrated = sueldoBase * factor;
+    if (sueldoBaseProrated > 0) {
+      acc[cat].totalSueldoBase += sueldoBaseProrated;
+      empCost += sueldoBaseProrated;
     }
 
-    const presentismo = (salarioOpInt * 0.01) * 25;
+    const presentismo = ((salarioOpInt * 0.01) * 25) * factor;
     acc[cat].totalPresentismo += presentismo;
     empCost += presentismo;
 
@@ -163,11 +236,26 @@ export function NominaTab({ employees, config }: NominaTabProps) {
     if (emp.hireDate) {
       const years = differenceInYears(new Date(), new Date(emp.hireDate));
       if (years > 0) {
-        antiguedad = (salarioOpInt * 0.01) * years;
+        antiguedad = ((salarioOpInt * 0.01) * years) * factor;
       }
     }
     acc[cat].totalAntiguedad += antiguedad;
     empCost += antiguedad;
+
+    // Cargas Sociales Ciertas
+    const cargasSociales = sueldoBaseProrated * (cargasSocialesPercent / 100);
+    acc[cat].totalCargasSociales += cargasSociales;
+    empCost += cargasSociales;
+
+    // SAC
+    const sac = sueldoBaseProrated * (sacPercent / 100);
+    acc[cat].totalSAC += sac;
+    empCost += sac;
+
+    // Asignación Anual Art. 49 Bis (1 sueldo básico del Operario de Producción Interno anual prorrateado mensualmente)
+    const art49Bis = (salarioOpInt / 12) * factor;
+    acc[cat].totalArt49Bis += art49Bis;
+    empCost += art49Bis;
 
     acc[cat].totalCosto += empCost;
     acc[cat].count += 1;
@@ -175,11 +263,14 @@ export function NominaTab({ employees, config }: NominaTabProps) {
     else acc[cat].tempCount += 1;
     
     return acc;
-  }, {} as Record<string, { count: number, efectivoCount: number, tempCount: number, totalSueldoBase: number, totalPresentismo: number, totalAntiguedad: number, totalCosto: number }>);
+  }, {} as Record<string, { count: number, efectivoCount: number, tempCount: number, totalSueldoBase: number, totalPresentismo: number, totalAntiguedad: number, totalCargasSociales: number, totalSAC: number, totalArt49Bis: number, totalCosto: number }>);
 
   const totalSueldoBase = Object.values(breakdownCategorias).reduce((sum, cat) => sum + cat.totalSueldoBase, 0);
   const totalPresentismo = Object.values(breakdownCategorias).reduce((sum, cat) => sum + cat.totalPresentismo, 0);
   const totalAntiguedad = Object.values(breakdownCategorias).reduce((sum, cat) => sum + cat.totalAntiguedad, 0);
+  const totalCargasSociales = Object.values(breakdownCategorias).reduce((sum, cat) => sum + (cat.totalCargasSociales || 0), 0);
+  const totalSAC = Object.values(breakdownCategorias).reduce((sum, cat) => sum + (cat.totalSAC || 0), 0);
+  const totalArt49BisSum = Object.values(breakdownCategorias).reduce((sum, cat) => sum + (cat.totalArt49Bis || 0), 0);
   const costoTotalEstimado = Object.values(breakdownCategorias).reduce((sum, cat) => sum + cat.totalCosto, 0);
 
   const promedioPorEmpleado = totalPersonal > 0 ? costoTotalEstimado / totalPersonal : 0;
@@ -264,6 +355,9 @@ export function NominaTab({ employees, config }: NominaTabProps) {
                 <div className="flex justify-between"><span>Sueldos Base:</span> <span>${totalSueldoBase.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
                 <div className="flex justify-between"><span>Presentismo:</span> <span>${totalPresentismo.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
                 <div className="flex justify-between"><span>Antigüedad:</span> <span>${totalAntiguedad.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                <div className="flex justify-between"><span>Cargas Sociales ({cargasSocialesPercent}%):</span> <span>${totalCargasSociales.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                <div className="flex justify-between"><span>SAC ({sacPercent}%):</span> <span>${totalSAC.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                <div className="flex justify-between"><span>Asig. Art 49 Bis:</span> <span>${totalArt49BisSum.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
               </div>
             </div>
             
@@ -317,11 +411,16 @@ export function NominaTab({ employees, config }: NominaTabProps) {
                 totalSueldoBase: 0,
                 totalPresentismo: 0,
                 totalAntiguedad: 0,
+                totalCargasSociales: 0,
+                totalSAC: 0,
                 totalCosto: 0
               };
               const porcentaje = totalPersonal > 0 ? Math.round((data.count / totalPersonal) * 100) : 0;
-              const sueldoBaseIndividual = data.count > 0 ? data.totalSueldoBase / data.count : getSalarioParaRango(rango);
-              const costoTotalIndividual = data.count > 0 ? data.totalCosto / data.count : (sueldoBaseIndividual + (salarioOpInt * 0.01 * 25));
+              const sueldoBaseIndividual = getSalarioParaRango(rango);
+              const simulatedCS = sueldoBaseIndividual * (cargasSocialesPercent / 100);
+              const simulatedSAC = sueldoBaseIndividual * (sacPercent / 100);
+              const simulatedArt49Bis = salarioOpInt / 12;
+              const costoTotalIndividual = sueldoBaseIndividual + (salarioOpInt * 0.01 * 25) + simulatedCS + simulatedSAC + simulatedArt49Bis;
               const costoHoraIndividual = costoTotalIndividual / 176;
 
               return (

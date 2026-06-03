@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, orderBy, onSnapshot, doc, setDoc, addDoc, deleteDoc, where, getDocs, writeBatch } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { ProductionReport, ElaboracionReport, UserProfile, Employee, AttendanceRecord, ShiftAssignment } from '../types';
-import { Users, UserPlus, Calendar, CheckCircle2, XCircle, Clock, Search, Filter, Save, Trash2, ChevronLeft, ChevronRight, LayoutGrid, List as ListIcon, AlertCircle, Edit2, X, BarChart3, FileText, DollarSign } from 'lucide-react';
+import { Users, UserPlus, Calendar, CheckCircle2, XCircle, Clock, Search, Filter, Save, Trash2, ChevronLeft, ChevronRight, LayoutGrid, List as ListIcon, AlertCircle, Edit2, X, BarChart3, FileText, DollarSign, History } from 'lucide-react';
 import { format, startOfWeek, addDays, parseISO, isSameDay, startOfDay, endOfDay, getDay, eachDayOfInterval } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useAppConfig } from '../hooks/useAppConfig';
@@ -82,16 +82,41 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
     compensationAdjustment: 0
   });
 
-  const calculateTenure = (hireDate?: string, terminationDate?: string, active?: boolean) => {
-    if (!hireDate) return '-';
-    const start = parseISO(hireDate);
-    const end = active ? new Date() : (terminationDate ? parseISO(terminationDate) : new Date());
+  const calculateTenure = (emp: Employee) => {
+    if (!emp.hireDate) return '-';
     
-    const diffMs = end.getTime() - start.getTime();
-    const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    
-    if (days < 30) return `${days} días`;
-    const months = Math.floor(days / 30);
+    const periods: { hireDate: string; terminationDate?: string }[] = [];
+    if (emp.history && emp.history.length > 0) {
+      emp.history.forEach(p => {
+        periods.push({
+          hireDate: p.hireDate,
+          terminationDate: p.terminationDate || undefined
+        });
+      });
+    }
+    if (emp.hireDate) {
+      const exists = periods.some(p => p.hireDate === emp.hireDate);
+      if (!exists) {
+        periods.push({
+          hireDate: emp.hireDate,
+          terminationDate: emp.active ? undefined : (emp.terminationDate || undefined)
+        });
+      }
+    }
+
+    let totalDays = 0;
+    periods.forEach(p => {
+      const start = parseISO(p.hireDate);
+      const end = p.terminationDate && p.terminationDate !== "" ? parseISO(p.terminationDate) : new Date();
+      if (start <= end) {
+        const diffMs = end.getTime() - start.getTime();
+        const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        totalDays += days;
+      }
+    });
+
+    if (totalDays < 30) return `${totalDays} días`;
+    const months = Math.floor(totalDays / 30);
     if (months < 12) return `${months} meses`;
     const years = Math.floor(months / 12);
     const remainingMonths = months % 12;
@@ -1027,7 +1052,7 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex flex-col">
-                        <span className="text-xs font-bold text-gray-700">{calculateTenure(emp.hireDate, emp.terminationDate, emp.active)}</span>
+                        <span className="text-xs font-bold text-gray-700">{calculateTenure(emp)}</span>
                         {emp.hireDate && <span className="text-[9px] text-gray-400">Ingreso: {format(parseISO(emp.hireDate), 'dd/MM/yy')}</span>}
                       </div>
                     </td>
@@ -1061,14 +1086,44 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                             hireDate: emp.hireDate,
                             terminationDate: emp.terminationDate,
                             vacationAdjustment: emp.vacationAdjustment || 0,
-                            compensationAdjustment: emp.compensationAdjustment || 0
+                            compensationAdjustment: emp.compensationAdjustment || 0,
+                            history: emp.history || []
                           });
                           setShowEmployeeForm(true);
                         }}
                         className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                        title="Editar Empleado"
                       >
                         <Edit2 className="w-4 h-4" />
                       </button>
+                      
+                      {emp.active && (
+                        <button 
+                          onClick={() => {
+                            setEditingEmployee(emp);
+                            setNewEmployee({ 
+                              name: emp.name, 
+                              legajo: emp.legajo, 
+                              position: emp.position, 
+                              active: false,
+                              type: emp.type || 'Efectivo',
+                              sector: emp.sector || 'Producción',
+                              rango: emp.rango || '',
+                              convenio: emp.convenio || '',
+                              hireDate: emp.hireDate,
+                              terminationDate: emp.terminationDate || format(new Date(), 'yyyy-MM-dd'),
+                              vacationAdjustment: emp.vacationAdjustment || 0,
+                              compensationAdjustment: emp.compensationAdjustment || 0,
+                              history: emp.history || []
+                            });
+                            setShowEmployeeForm(true);
+                          }}
+                          className="p-2 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-all"
+                          title="Dar de Baja"
+                        >
+                          <XCircle className="w-4 h-4" />
+                        </button>
+                      )}
                       
                       {isAdmin && (
                         <>
@@ -1753,7 +1808,7 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                       </div>
                       <div className="text-right">
                         <span className="block text-[9px] font-black text-gray-400 uppercase tracking-widest">Antigüedad</span>
-                        <span className="text-xs font-bold text-gray-700">{calculateTenure(emp.hireDate, emp.terminationDate, emp.active)}</span>
+                        <span className="text-xs font-bold text-gray-700">{calculateTenure(emp)}</span>
                       </div>
                     </div>
                   </div>
@@ -2288,6 +2343,63 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                       </div>
                     </div>
 
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-black text-gray-900 uppercase tracking-widest flex items-center gap-2 mt-4 ml-1">
+                        <History className="w-4 h-4 text-blue-600" />
+                        Historial de Contratación (Altas / Bajas)
+                      </h4>
+                      <div className="bg-white border border-gray-100 p-4 rounded-2xl">
+                        <div className="grid grid-cols-1 gap-2 max-h-[150px] overflow-y-auto pr-1">
+                          {(() => {
+                            const fullHistory: { hireDate: string; terminationDate?: string }[] = [];
+                            if (showEmployeeStats.history && showEmployeeStats.history.length > 0) {
+                              showEmployeeStats.history.forEach(h => {
+                                fullHistory.push(h);
+                              });
+                            }
+                            if (showEmployeeStats.hireDate) {
+                              const exists = fullHistory.some(p => p.hireDate === showEmployeeStats.hireDate);
+                              if (!exists) {
+                                fullHistory.push({
+                                  hireDate: showEmployeeStats.hireDate,
+                                  terminationDate: showEmployeeStats.active ? undefined : (showEmployeeStats.terminationDate || undefined)
+                                });
+                              }
+                            }
+                            
+                            if (fullHistory.length === 0) {
+                              return <div className="text-xs text-gray-400 italic py-2 text-center">No hay registros de contratos en el sistema.</div>;
+                            }
+                            
+                            // Sort chronologically (newest first)
+                            fullHistory.sort((a,b) => b.hireDate.localeCompare(a.hireDate));
+
+                            return fullHistory.map((h, i) => (
+                              <div key={i} className="flex justify-between items-center p-2.5 bg-gray-50 rounded-xl border border-gray-100 text-xs font-bold text-gray-700">
+                                <div className="flex gap-4">
+                                  <div>
+                                    <span className="text-[9px] text-gray-400 block uppercase font-black leading-none mb-1">Fecha Alta</span>
+                                    <span>{h.hireDate ? format(parseISO(h.hireDate), 'dd/MM/yyyy') : '-'}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-[9px] text-gray-400 block uppercase font-black leading-none mb-1">Fecha Baja</span>
+                                    <span className={h.terminationDate ? "text-gray-700" : "text-green-600 uppercase tracking-wider text-[10px]"}>
+                                      {h.terminationDate ? format(parseISO(h.terminationDate), 'dd/MM/yyyy') : 'Activo actualmente'}
+                                    </span>
+                                  </div>
+                                </div>
+                                <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-lg ${
+                                  !h.terminationDate ? "bg-green-100 text-green-700" : "bg-gray-200 text-gray-600"
+                                }`}>
+                                  {!h.terminationDate ? "Activo" : "Baja"}
+                                </span>
+                              </div>
+                            ));
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="flex justify-end pt-4">
                       <button
                         onClick={() => setShowEmployeeStats(null)}
@@ -2463,16 +2575,109 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                   checked={newEmployee.active}
                   onChange={(e) => {
                     const active = e.target.checked;
+                    let history = [...(newEmployee.history || [])];
+                    let hireDate = newEmployee.hireDate;
+                    let terminationDate = newEmployee.terminationDate;
+                    
+                    if (active) {
+                      // Transitioning to Active
+                      if (editingEmployee && !editingEmployee.active) {
+                        const oldHire = editingEmployee.hireDate;
+                        const oldTerm = editingEmployee.terminationDate;
+                        if (oldHire) {
+                          const exists = history.some(p => p.hireDate === oldHire);
+                          if (!exists) {
+                            history.push({
+                              hireDate: oldHire,
+                              terminationDate: oldTerm || ""
+                            });
+                          }
+                        }
+                        // Set new active hireDate to today, clear terminationDate
+                        hireDate = format(new Date(), 'yyyy-MM-dd');
+                        terminationDate = "";
+                      } else {
+                        terminationDate = "";
+                      }
+                    } else {
+                      // Transitioning to Inactive
+                      if (editingEmployee && !editingEmployee.active) {
+                        // If they were originally inactive, and they toggle from active back to inactive,
+                        // we can restore the originally saved period from history if we archived it.
+                        const oldHire = editingEmployee.hireDate;
+                        if (oldHire) {
+                          const pIndex = history.findIndex(p => p.hireDate === oldHire);
+                          if (pIndex > -1) {
+                            history.splice(pIndex, 1);
+                          }
+                          hireDate = oldHire;
+                          terminationDate = editingEmployee.terminationDate || format(new Date(), 'yyyy-MM-dd');
+                        }
+                      } else {
+                        terminationDate = terminationDate && terminationDate !== "" ? terminationDate : format(new Date(), 'yyyy-MM-dd');
+                      }
+                    }
+
                     setNewEmployee({ 
                       ...newEmployee, 
                       active,
-                      terminationDate: active ? undefined : (newEmployee.terminationDate || format(new Date(), 'yyyy-MM-dd'))
+                      history,
+                      hireDate,
+                      terminationDate
                     });
                   }}
                   className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
                 />
                 <label htmlFor="active" className="text-sm font-bold text-gray-700">Empleado Activo</label>
               </div>
+
+              {/* Contrato Historial section */}
+              {((newEmployee.history && newEmployee.history.length > 0) || (editingEmployee && !editingEmployee.active)) && (
+                <div className="bg-gray-50 p-4 rounded-2xl space-y-2 mt-4 border border-gray-100">
+                  <div className="flex items-center gap-2 text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                    <History className="w-4 h-4 text-gray-400" />
+                    <span>Historial de Contratación (Altas y Bajas)</span>
+                  </div>
+                  <div className="space-y-1.5 max-h-[120px] overflow-y-auto pr-1">
+                    {(() => {
+                      const list = [...(newEmployee.history || [])];
+                      if (list.length === 0) {
+                        return (
+                          <div className="text-xs text-gray-400 italic py-1">No hay registros de contratos anteriores.</div>
+                        );
+                      }
+                      return list.map((hist, index) => (
+                        <div key={index} className="flex justify-between items-center bg-white p-2 rounded-xl border border-gray-100 text-xs font-bold text-gray-700">
+                          <div className="flex gap-4">
+                            <div>
+                              <span className="text-[9px] text-gray-400 block uppercase font-black leading-none mb-1">Alta</span>
+                              <span>{hist.hireDate ? format(parseISO(hist.hireDate), 'dd/MM/yyyy') : '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-[9px] text-gray-400 block uppercase font-black leading-none mb-1">Baja</span>
+                              <span>{hist.terminationDate ? format(parseISO(hist.terminationDate), 'dd/MM/yyyy') : '-'}</span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updatedHistList = (newEmployee.history || []).filter((_, i) => i !== index);
+                              setNewEmployee({
+                                ...newEmployee,
+                                history: updatedHistList
+                              });
+                            }}
+                            className="text-red-400 hover:text-red-600 p-1 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Eliminar período del historial"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              )}
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"

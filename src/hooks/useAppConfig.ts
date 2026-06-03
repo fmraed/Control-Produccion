@@ -49,6 +49,8 @@ interface AppConfig {
     currentEndDate?: string;
   };
   salariosPorRango?: Record<string, number>;
+  cargasSocialesPercent?: number;
+  sacPercent?: number;
   qualityControlFlavors?: string[];
   warehousePositions?: number;
   stackableFlavors?: string[];
@@ -107,6 +109,8 @@ export function useAppConfig() {
           managementSettings: data.managementSettings || { showPreviousManagementGlobal: true },
           saboresSinJarabe: data.saboresSinJarabe || SABORES_SIN_JARABE,
           salariosPorRango: data.salariosPorRango || {},
+          cargasSocialesPercent: typeof data.cargasSocialesPercent === 'number' ? data.cargasSocialesPercent : 31.5,
+          sacPercent: typeof data.sacPercent === 'number' ? data.sacPercent : 8.33,
           qualityControlFlavors: Array.isArray(data.qualityControlFlavors) ? data.qualityControlFlavors : ['Agua'],
           warehousePositions: data.warehousePositions || 2300,
           stackableFlavors: Array.isArray(data.stackableFlavors) ? data.stackableFlavors : (data.flavors || SABORES).filter((s: string) => s !== 'Soda Sifon' && s !== 'Soda'),
@@ -184,6 +188,9 @@ export function useAppConfig() {
           packsPorPaleta: PACKS_POR_PALETA,
           botellasPorPack: BOTELLAS_POR_PACK,
           lineOperators: {},
+          salariosPorRango: {},
+          cargasSocialesPercent: 31.5,
+          sacPercent: 8.33,
           historicalSettings: { showHistoricalGlobal: false },
           managementSettings: { showPreviousManagementGlobal: true },
           saboresSinJarabe: SABORES_SIN_JARABE,

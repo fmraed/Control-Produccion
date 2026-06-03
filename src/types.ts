@@ -167,6 +167,7 @@ export interface Employee {
   compensationAdjustment?: number;
   createdAt: string;
   updatedAt?: string;
+  history?: { hireDate: string; terminationDate?: string }[];
 }
 
 export interface AttendanceRecord {

@@ -244,20 +244,38 @@ export function GanttChart({ onBack }: GanttChartProps) {
                    {/* Production Blocks */}
                    {blocksByLine[linea].map((block, i) => {
                      const isLight = ['Soda', 'Agua', 'Pomelo Blanco', 'Lima Limon'].includes(block.sabor);
+                     const isZeroPacks = block.paquetes === 0;
                      return (
                       <div
                         key={block.id || i}
-                        className={`absolute top-1 bottom-1 rounded-md shadow-sm flex items-center justify-center overflow-hidden px-2 text-[10px] leading-tight font-bold border border-black/10 transition-all hover:z-20 hover:scale-[1.02] ${isLight ? 'text-gray-900' : 'text-white'}`}
+                        className={`absolute top-1 bottom-1 rounded-md shadow-sm flex items-center justify-center overflow-hidden px-2 text-[10px] leading-tight font-bold transition-all hover:z-20 hover:scale-[1.02] ${
+                          isZeroPacks 
+                            ? 'text-gray-500 border border-dashed border-gray-400' 
+                            : isLight 
+                              ? 'text-gray-900 border border-black/10' 
+                              : 'text-white border border-black/10'
+                        }`}
                         style={{ 
                           left: `${block.left}%`, 
                           width: `${block.width}%`,
                           minWidth: '20px',
-                          backgroundColor: block.bgColor
+                          background: isZeroPacks 
+                            ? 'repeating-linear-gradient(45deg, #f3f4f6, #f3f4f6 8px, #e5e7eb 8px, #e5e7eb 16px)' 
+                            : block.bgColor
                         }}
-                        title={`${block.sabor} - ${block.tamano}cc\nInicio: ${format(block.start, 'dd/MM HH:mm')}\nFin: ${format(block.end, 'dd/MM HH:mm')}\nPacks: ${block.paquetes}`}
+                        title={`${block.sabor} - ${block.tamano}cc\nInicio: ${format(block.start, 'dd/MM HH:mm')}\nFin: ${format(block.end, 'dd/MM HH:mm')}\nPacks: ${block.paquetes}${isZeroPacks ? ' (Sin Producción)' : ''}`}
                       >
                         <span className="text-center truncate">
-                          {block.sabor}<br/>{block.tamano}cc ({block.paquetes}p)
+                          {isZeroPacks ? (
+                            <>
+                              <span className="text-red-500 font-extrabold block text-[9px]">🚫 Sin Prod.</span>
+                              <span className="text-gray-500 text-[8px] font-normal truncate block max-w-full">({block.sabor})</span>
+                            </>
+                          ) : (
+                            <>
+                              {block.sabor}<br/>{block.tamano}cc ({block.paquetes}p)
+                            </>
+                          )}
                         </span>
                       </div>
                      );
