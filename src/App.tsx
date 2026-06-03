@@ -23,6 +23,7 @@ import {
   Download,
   Sparkles,
   FlaskConical,
+  FileSpreadsheet,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Dashboard } from "./components/Dashboard";
@@ -45,6 +46,7 @@ import { SyrupReport } from "./components/SyrupReport";
 import { GoalFulfillment } from "./components/GoalFulfillment";
 import { StockControl } from "./components/StockControl";
 import { InsumosControlReport } from "./components/InsumosControlReport";
+import { PhysicalInventoryReport } from "./components/PhysicalInventoryReport";
 import { HistoricalReport } from "./components/HistoricalReport";
 import { HistoricalImporter } from "./components/HistoricalImporter";
 import { HistoricalExporter } from "./components/HistoricalExporter";
@@ -98,6 +100,7 @@ export default function App() {
     | "goal_fulfillment"
     | "stock_control"
     | "insumos_control"
+    | "inventario_excel"
     | "historical_report"
     | "historical_importer"
     | "historical_exporter"
@@ -189,6 +192,7 @@ export default function App() {
         management_summary: permissions.viewManagementSummary,
         management_comparison: permissions.viewManagementSummary,
         insumos_control: permissions.viewManagementSummary,
+        inventario_excel: permissions.viewManagementSummary,
         consolidated: permissions.viewConsolidated,
         waste: permissions.viewWaste,
         syrup: permissions.viewSyrup,
@@ -616,6 +620,7 @@ export default function App() {
                       "stock_control",
                       "historical_report",
                       "insumos_control",
+                      "inventario_excel",
                     ].includes(currentView)
                       ? "bg-indigo-600 text-white shadow-md shadow-indigo-200"
                       : "text-gray-600 hover:bg-gray-100"
@@ -668,6 +673,23 @@ export default function App() {
                         >
                           <FlaskConical className="w-4 h-4" />
                           Control de Insumos
+                        </button>
+                      )}
+
+                      {permissions.viewManagementSummary !== false && (
+                        <button
+                          onClick={() => {
+                            setCurrentView("inventario_excel");
+                            setActiveMenu(null);
+                          }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                            currentView === "inventario_excel"
+                              ? "bg-indigo-50 text-indigo-700 font-bold"
+                              : "text-gray-600 hover:bg-gray-50"
+                          }`}
+                        >
+                          <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                          Inventario Físico (Excel)
                         </button>
                       )}
 
@@ -1088,6 +1110,7 @@ export default function App() {
         {currentView === "goal_fulfillment" && <GoalFulfillment />}
         {currentView === "stock_control" && <StockControl />}
         {currentView === "insumos_control" && <InsumosControlReport />}
+        {currentView === "inventario_excel" && <PhysicalInventoryReport />}
         {currentView === "historical_report" && <HistoricalReport />}
         {currentView === "historical_importer" && <HistoricalImporter />}
         {currentView === "historical_exporter" && <HistoricalExporter />}

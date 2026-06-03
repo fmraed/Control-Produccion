@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, Fragment } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, Fragment } from 'react';
 import { useAppConfig } from '../hooks/useAppConfig';
 import { collection, query, where, onSnapshot, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -20,12 +20,22 @@ import {
   Database,
   Layers,
   Scale,
-  ShoppingBag
+  ShoppingBag,
+  Upload,
+  FileSpreadsheet,
+  Download,
+  Check,
+  Search,
+  Filter,
+  Layers3,
+  CalendarDays,
+  FileText
 } from 'lucide-react';
 import { startOfWeek, addDays, format, subDays, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { BOTELLAS_POR_PACK, SABORES_SIN_JARABE, WASTE_WEIGHTS, PACKS_POR_PALETA } from '../constants';
 import { ProductionPlan, MonthlyGoal } from '../types';
+import * as XLSX from 'xlsx';
 
 interface InsumoStock {
   codigo_articulo: string;
@@ -35,9 +45,27 @@ interface InsumoStock {
   stock_final: number;
 }
 
+interface PhysicalInventoryRow {
+  codigo: string;
+  producto: string;
+  tipo: string;
+  saldoInicial: number;
+  entradasAlmacen: number;
+  entradasOtros: number;
+  devolucionAlmacen: number;
+  salidaOtros: number;
+  salidaConsumo: number;
+  ajustePositivo: number;
+  ajusteNegativo: number;
+  saldoTeoricoSinJust?: number;
+  saldoFinalDeposito: number;
+  desvio: number;
+  porcentaje: number;
+}
+
 export function InsumosControlReport() {
   const { config, availableBrands, availableFlavors, availableSizes } = useAppConfig();
-  const [activeTab, setActiveTab] = useState<'capacity' | 'insumos' | 'empaque' | 'azucar' | 'etiquetas' | 'program'>('capacity');
+  const [activeTab, setActiveTab] = useState<string>('capacity');
   
   // SQL and Firebase data state
   const [stockData, setStockData] = useState<InsumoStock[]>([]);
@@ -47,6 +75,14 @@ export function InsumosControlReport() {
   const [insumoMappings, setInsumoMappings] = useState<Record<string, string>>({});
   const [etiquetasMappings, setEtiquetasMappings] = useState<Record<string, string>>({});
   const [lastUpdatedCached, setLastUpdatedCached] = useState<string | null>(null);
+
+  // Excel Physical Inventory Upload States
+  const [uploadedInventory, setUploadedInventory] = useState<PhysicalInventoryRow[]>([]);
+  const [inventoryFileName, setInventoryFileName] = useState<string | null>(null);
+  const [isSavingInventory, setIsSavingInventory] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [searchTermInventory, setSearchTermInventory] = useState('');
+  const [selectedTypeFilter, setSelectedTypeFilter] = useState('todos');
   
   // Weekly selection for calculations
   const [selectedWeek, setSelectedWeek] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
@@ -318,6 +354,223 @@ export function InsumosControlReport() {
       ...prev,
       [insumoName]: Math.max(0, value)
     }));
+  };
+
+  // Process manual/Excel physical inventory loading
+  const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setInventoryFileName(file.name);
+    
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const rawData = XLSX.utils.sheet_to_json(ws, { header: 1 });
+        
+        if (rawData.length === 0) {
+          throw new Error('El archivo de Excel está vacío.');
+        }
+        
+        // Find header row dynamically
+        let headerRowIndex = 0;
+        let headers: string[] = [];
+        
+        for (let i = 0; i < Math.min(25, rawData.length); i++) {
+          const row = rawData[i] as any[];
+          if (row && row.some(cell => typeof cell === 'string' && (
+            cell.includes('SALDO_INICI') || 
+            cell.includes('CO_COD') || 
+            cell.includes('DESVIO') || 
+            cell.includes('SALIDA_PORCONSUM')
+          ))) {
+            headerRowIndex = i;
+            headers = row.map(h => (h || '').toString().trim());
+            break;
+          }
+        }
+        
+        if (headers.length === 0 && rawData.length > 0) {
+          headers = (rawData[0] as any[]).map(h => (h || '').toString().trim());
+          headerRowIndex = 0;
+        }
+        
+        // Map excel columns to our logical keys
+        const colMap: Record<string, number> = {};
+        headers.forEach((h, idx) => {
+          const hUpper = h.toUpperCase();
+          if (hUpper.startsWith('CO_COD') || hUpper === 'CODIGO' || hUpper === 'CÓDIGO') colMap['codigo'] = idx;
+          else if (hUpper === 'PRODUCTO' || hUpper === 'DETALLE' || hUpper === 'NOMBRE' || hUpper === 'ARTICULO') colMap['producto'] = idx;
+          else if (hUpper === 'TIPO' || hUpper === 'CATEGORIA' || hUpper === 'RUBRO') colMap['tipo'] = idx;
+          else if (hUpper === 'SALDO_INICI' || hUpper === 'SALDO_INICIAL' || hUpper === 'INICIAL' || hUpper === 'SAN_INICI') colMap['saldoInicial'] = idx;
+          else if (hUpper === 'ENTRADAS_DESDE_ALMACE' || hUpper.includes('DESDE_ALMACEN') || hUpper.includes('ENTRADA_ALMACEN')) colMap['entradasAlmacen'] = idx;
+          else if (hUpper === 'ENTRADAS_OTROS_CONCEPTO' || hUpper.includes('ENTRADAS_OTROS') || hUpper.includes('OTROS_INGRESOS')) colMap['entradasOtros'] = idx;
+          else if (hUpper === 'DEVOLUCION_A_ALMACENE' || hUpper.includes('DEVOLUCION_A_ALMACENES') || hUpper.includes('DEVOLUCION_ALMACEN')) colMap['devolucionAlmacen'] = idx;
+          else if (hUpper === 'SALIDA_OTROS_CONCEPTO' || hUpper.includes('SALIDA_OTROS') || hUpper.includes('OTRAS_SALIDAS')) colMap['salidaOtros'] = idx;
+          else if (hUpper === 'SALIDA_PORCONSUM' || hUpper.includes('SALIDA_POR_CONSUMO') || hUpper.includes('CONSUMO') || hUpper.includes('SALIDA_CONSUMO')) colMap['salidaConsumo'] = idx;
+          else if (hUpper === 'AJUSTE_POSITIV' || hUpper.includes('AJUSTE_POSITIVO')) colMap['ajustePositivo'] = idx;
+          else if (hUpper === 'AJUSTE_NEGATIV' || hUpper.includes('AJUSTE_NEGATIVO')) colMap['ajusteNegativo'] = idx;
+          else if (hUpper === 'SALDOTEORICOSINJUST' || hUpper.includes('SALDO_TEORICO') || hUpper.includes('TEORICO')) colMap['saldoTeoricoSinJust'] = idx;
+          else if (hUpper === 'SALDOFINALDEPOSIT' || hUpper.includes('SALDO_FINAL_DEPOSITO') || hUpper.includes('SALDO_FINAL') || hUpper === 'FINAL') colMap['saldoFinalDeposito'] = idx;
+          else if (hUpper === 'DESVIO' || hUpper === 'CORRECCION') colMap['desvio'] = idx;
+          else if (hUpper === 'PORCENTAJE' || hUpper === 'PORCENTAJEDESVI' || hUpper === 'PORCENTAJEDESVIO') colMap['porcentaje'] = idx;
+        });
+        
+        const getIndex = (key: string, defaultIdx: number) => colMap[key] !== undefined ? colMap[key] : defaultIdx;
+        
+        const idxCodigo = getIndex('codigo', 0);
+        const idxProducto = getIndex('producto', 1);
+        const idxTipo = getIndex('tipo', 2);
+        const idxSaldoInicial = getIndex('saldoInicial', 3);
+        const idxEntradasAlm = getIndex('entradasAlmacen', 4);
+        const idxEntradasOtros = getIndex('entradasOtros', 5);
+        const idxDevoluciones = getIndex('devolucionAlmacen', 6);
+        const idxSalidaOtros = getIndex('salidaOtros', 7);
+        const idxSalidaConsumo = getIndex('salidaConsumo', 8);
+        const idxAjustePositivo = getIndex('ajustePositivo', 9);
+        const idxAjusteNegativo = getIndex('ajusteNegativo', 10);
+        const idxTeorico = getIndex('saldoTeoricoSinJust', 11);
+        const idxFinal = getIndex('saldoFinalDeposito', 12);
+        
+        const parsedRows: PhysicalInventoryRow[] = [];
+        
+        for (let r = headerRowIndex + 1; r < rawData.length; r++) {
+          const row = rawData[r] as any[];
+          if (!row || row.length === 0) continue;
+          
+          const codigo = (row[idxCodigo] || '').toString().trim();
+          if (!codigo || codigo === '' || codigo.toLowerCase() === 'código' || codigo.toLowerCase() === 'codigo') continue;
+          
+          const producto = (row[idxProducto] || '').toString().trim() || 'Sin Nombre';
+          const tipo = (row[idxTipo] || '').toString().trim() || 'S/D';
+          
+          const parseNum = (val: any): number => {
+            if (val === undefined || val === null || val === '') return 0;
+            if (typeof val === 'number') return val;
+            const cleanStr = val.toString().replace(/\./g, '').replace(/,/g, '.').replace(/\s/g, '').trim();
+            const parsed = parseFloat(cleanStr);
+            return isNaN(parsed) ? 0 : parsed;
+          };
+          
+          const saldoInicial = parseNum(row[idxSaldoInicial]);
+          const entriesAlm = parseNum(row[idxEntradasAlm]);
+          const entriesOtr = parseNum(row[idxEntradasOtros]);
+          const devAlm = parseNum(row[idxDevoluciones]);
+          const outOtr = parseNum(row[idxSalidaOtros]);
+          const outConsumo = parseNum(row[idxSalidaConsumo]);
+          const ajustePos = parseNum(row[idxAjustePositivo]);
+          const ajusteNeg = parseNum(row[idxAjusteNegativo]);
+          const saldoTeorico = parseNum(row[idxTeorico]);
+          const saldoFinalDep = parseNum(row[idxFinal]);
+          
+          // Formula: Desvio = Saldo Inicial + Entradas Desde Almacen + Entradas Otros Conceptos + Devolución a Almacén + Salida Otros Conceptos + Salida por Consumo + Ajuste Positivo - Saldo Final Depósito
+          const desvioCalculado = saldoInicial + entriesAlm + entriesOtr + devAlm + outOtr + outConsumo + ajustePos - saldoFinalDep;
+          
+          // Formula: Porcentaje = Desvio / -Salida por Consumo
+          const porcentajeCalculado = outConsumo !== 0 ? (desvioCalculado / (-1 * outConsumo)) : 0;
+          
+          parsedRows.push({
+            codigo,
+            producto,
+            tipo,
+            saldoInicial,
+            entradasAlmacen: entriesAlm,
+            entradasOtros: entriesOtr,
+            devolucionAlmacen: devAlm,
+            salidaOtros: outOtr,
+            salidaConsumo: outConsumo,
+            ajustePositivo: ajustePos,
+            ajusteNegativo: ajusteNeg,
+            saldoTeoricoSinJust: saldoTeorico,
+            saldoFinalDeposito: saldoFinalDep,
+            desvio: desvioCalculado,
+            porcentaje: porcentajeCalculado
+          });
+        }
+        
+        setUploadedInventory(parsedRows);
+        setError(null);
+      } catch (err: any) {
+        console.error("Error parsing Inventory Excel:", err);
+        setError('No se pudo procesar el archivo Excel. Verifique que contenga las cabeceras requeridas.');
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  // Save parsed inventory to Firestore, overwriting sql_last_insumos_stock + simulatedStocks so both modes synchronize!
+  const saveInventoryToSystem = async () => {
+    if (uploadedInventory.length === 0) return;
+    setIsSavingInventory(true);
+    setError(null);
+    try {
+      const timestamp = new Date().toISOString();
+      const invId = `inventory-${timestamp.substring(0, 10)}-${Date.now()}`;
+      
+      const newStockData = uploadedInventory.map(row => ({
+        codigo_articulo: row.codigo,
+        nombre_articulo: row.producto,
+        stock_almacen: row.saldoFinalDeposito,
+        stock_piso: 0,
+        stock_final: row.saldoFinalDeposito
+      }));
+
+      // Overwrite the SQL Stock cache so non-simulation mode can see this data
+      await setDoc(doc(db, 'config', 'sql_last_insumos_stock'), {
+        data: newStockData,
+        updatedAt: timestamp
+      });
+
+      // Maintain a historical trace of loaded inventories, deviations, and percentages
+      await setDoc(doc(db, 'physical_inventories', invId), {
+        id: invId,
+        fileName: inventoryFileName || 'Inventario Manual',
+        uploadedAt: timestamp,
+        items: uploadedInventory
+      });
+
+      // Overwrite local stocks state
+      setStockData(newStockData);
+      setLastUpdatedCached(timestamp);
+
+      // Also migrate these numbers to simulatedStocks override buffer
+      const nextSimulated = { ...simulatedStocks };
+      uploadedInventory.forEach(row => {
+        // Search mapping for matches to assign simulated equivalents
+        const matchedInsumo = Object.keys(insumoMappings).find(k => insumoMappings[k] === row.codigo);
+        if (matchedInsumo) {
+          nextSimulated[matchedInsumo] = row.saldoFinalDeposito;
+        } else {
+          // Also check packaging configurations
+          if (config) {
+            const pref = (config?.preformasConfig || []).find(p => p.sqlCode === row.codigo);
+            if (pref) nextSimulated[pref.name] = row.saldoFinalDeposito;
+            const tm = (config?.termoConfig || []).find(t => t.sqlCode === row.codigo);
+            if (tm) nextSimulated[tm.name] = row.saldoFinalDeposito;
+            const str = (config?.stretchConfig || []).find(s => s.sqlCode === row.codigo);
+            if (str) nextSimulated[str.name] = row.saldoFinalDeposito;
+            const tp = (config?.tapaConfig || []).find(t => t.sqlCode === row.codigo);
+            if (tp) nextSimulated[tp.name] = row.saldoFinalDeposito;
+          }
+        }
+      });
+      
+      setSimulatedStocks(nextSimulated);
+      localStorage.setItem('simulated_stocks_cache', JSON.stringify(nextSimulated));
+
+      setSaveSuccess(true);
+      setTimeout(() => {
+        setSaveSuccess(false);
+      }, 4000);
+    } catch (err: any) {
+      console.error("Error saving inventory to Firestore:", err);
+      setError('Error al guardar el inventario físico en Firestore: ' + (err.message || err));
+    } finally {
+      setIsSavingInventory(false);
+    }
   };
 
   // Helper to read raw stock of an insumo (without equivalence)
@@ -880,6 +1133,245 @@ export function InsumosControlReport() {
       etiquetasAgg
     };
   }, [config, weeklyPlansOnly, goals, insumoMappings, stockData, simulatedStocks, simulationMode, getEffectiveInsumoStock]);
+
+  // Unified equivalent/compatible groups data aggregator for Excel Inventory tab
+  const unifiedGroupAnalysis = useMemo(() => {
+    if (!config || uploadedInventory.length === 0) return [];
+
+    const planRequiredSum: Record<string, number> = {};
+    const planMonthlyRequiredSum: Record<string, number> = {};
+
+    const findPreformaForProduct = (tamano: number, marca: string, sabor: string) => {
+      return (config?.preformasConfig || []).find(p => p.size === tamano);
+    };
+    const findTermoForProduct = (tamano: number, sabor: string) => {
+      return (config?.termoConfig || []).find(t => t.size === tamano);
+    };
+    const findStretchForProduct = (tamano: number, sabor: string) => {
+      return (config?.stretchConfig || []).find(s => s.size === tamano);
+    };
+    const findTapaForProduct = (tamano: number, sabor: string) => {
+      return (config?.tapaConfig || []).find(t => t.size === tamano);
+    };
+
+    plans.forEach(plan => {
+      const marca = plan.brand || '';
+      const sabor = plan.flavor || '';
+      const tamano = plan.size || 500;
+      const quantity = plan.plannedQuantity || 0;
+      
+      const botellasPorPack = config?.botellasPorPack?.[tamano] || BOTELLAS_POR_PACK[tamano] || 6;
+      const beverageLiters = quantity * botellasPorPack * (tamano / 1000);
+      const syrupLitersNeeded = beverageLiters / 6;
+      const syrupLitersPerUnit = config.syrupFormulas?.[marca]?.[sabor]?.liters || 0;
+      const unitsRequired = syrupLitersPerUnit > 0 ? (syrupLitersNeeded / syrupLitersPerUnit) : 0;
+      const matrixObj = config.insumosMatrix?.[marca]?.[sabor] || {};
+      
+      Object.keys(matrixObj).forEach(insName => {
+        const kgPerUnit = matrixObj[insName] || 0;
+        if (kgPerUnit > 0) {
+          planRequiredSum[insName] = (planRequiredSum[insName] || 0) + (unitsRequired * kgPerUnit);
+        }
+      });
+
+      const preformasNeeded = quantity * botellasPorPack;
+      const packsPerPaleta = PACKS_POR_PALETA[tamano] || 80;
+      const stretchNeededKg = (quantity / packsPerPaleta) * 0.4;
+      const bagsWeight = WASTE_WEIGHTS[tamano]?.termo || 0.055;
+      const termoNeededKg = quantity * bagsWeight;
+
+      const pConf = findPreformaForProduct(tamano, marca, sabor);
+      if (pConf) planRequiredSum[pConf.name] = (planRequiredSum[pConf.name] || 0) + preformasNeeded;
+
+      const tConf = findTermoForProduct(tamano, sabor);
+      if (tConf) planRequiredSum[tConf.name] = (planRequiredSum[tConf.name] || 0) + termoNeededKg;
+
+      const sConf = findStretchForProduct(tamano, sabor);
+      if (sConf) planRequiredSum[sConf.name] = (planRequiredSum[sConf.name] || 0) + stretchNeededKg;
+
+      const tpConf = findTapaForProduct(tamano, sabor);
+      if (tpConf) planRequiredSum[tpConf.name] = (planRequiredSum[tpConf.name] || 0) + preformasNeeded;
+
+      const labelKey = `Etiqueta ${marca} / ${sabor} / ${tamano}cc`;
+      planRequiredSum[labelKey] = (planRequiredSum[labelKey] || 0) + preformasNeeded;
+    });
+
+    goals.forEach(goal => {
+      const marca = goal.marca || '';
+      const sabor = goal.sabor || '';
+      const tamano = goal.tamano || 500;
+      const quantity = goal.quantity || 0;
+      
+      const botellasPorPack = config?.botellasPorPack?.[tamano] || BOTELLAS_POR_PACK[tamano] || 6;
+      const beverageLiters = quantity * botellasPorPack * (tamano / 1000);
+      const syrupLitersNeeded = beverageLiters / 6;
+      const syrupLitersPerUnit = config.syrupFormulas?.[marca]?.[sabor]?.liters || 0;
+      const unitsRequired = syrupLitersPerUnit > 0 ? (syrupLitersNeeded / syrupLitersPerUnit) : 0;
+      const matrixObj = config.insumosMatrix?.[marca]?.[sabor] || {};
+      
+      Object.keys(matrixObj).forEach(insName => {
+        const kgPerUnit = matrixObj[insName] || 0;
+        if (kgPerUnit > 0) {
+          planMonthlyRequiredSum[insName] = (planMonthlyRequiredSum[insName] || 0) + (unitsRequired * kgPerUnit);
+        }
+      });
+
+      const preformasNeeded = quantity * botellasPorPack;
+      const packsPerPaleta = PACKS_POR_PALETA[tamano] || 80;
+      const stretchNeededKg = (quantity / packsPerPaleta) * 0.4;
+      const bagsWeight = WASTE_WEIGHTS[tamano]?.termo || 0.055;
+      const termoNeededKg = quantity * bagsWeight;
+
+      const pConf = findPreformaForProduct(tamano, marca, sabor);
+      if (pConf) planMonthlyRequiredSum[pConf.name] = (planMonthlyRequiredSum[pConf.name] || 0) + preformasNeeded;
+
+      const tConf = findTermoForProduct(tamano, sabor);
+      if (tConf) planMonthlyRequiredSum[tConf.name] = (planMonthlyRequiredSum[tConf.name] || 0) + termoNeededKg;
+
+      const sConf = findStretchForProduct(tamano, sabor);
+      if (sConf) planMonthlyRequiredSum[sConf.name] = (planMonthlyRequiredSum[sConf.name] || 0) + stretchNeededKg;
+
+      const tpConf = findTapaForProduct(tamano, sabor);
+      if (tpConf) planMonthlyRequiredSum[tpConf.name] = (planMonthlyRequiredSum[tpConf.name] || 0) + preformasNeeded;
+
+      const labelKey = `Etiqueta ${marca} / ${sabor} / ${tamano}cc`;
+      planMonthlyRequiredSum[labelKey] = (planMonthlyRequiredSum[labelKey] || 0) + preformasNeeded;
+    });
+
+    const formulaInsumos = [
+      ...(config.insumos || []),
+      ...(config.preformasConfig || []).map(p => p.name),
+      ...(config.termoConfig || []).map(t => t.name),
+      ...(config.stretchConfig || []).map(s => s.name),
+      ...(config.tapaConfig || []).map(t => t.name)
+    ];
+
+    availableBrands.forEach(brand => {
+      availableSizes.forEach(size => {
+        const brandActive = config?.activeProducts?.[brand];
+        const hasBrandConfig = brandActive && Object.keys(brandActive).length > 0;
+        const hasSizeConfig = brandActive && size.toString() in brandActive;
+        const allowedFlavors = hasSizeConfig
+          ? brandActive[size.toString()]
+          : (hasBrandConfig ? [] : (config?.brandFlavorCombinations[brand] || []));
+        allowedFlavors.forEach(flavor => {
+          const key = `Etiqueta ${brand} / ${flavor} / ${size}cc`;
+          if (!formulaInsumos.includes(key)) formulaInsumos.push(key);
+        });
+      });
+    });
+
+    const compatibleGroupsList = [
+      ...(config.compatibleInsumoGroups ? Object.values(config.compatibleInsumoGroups) : []),
+      ...(config.compatiblePackagingGroups ? Object.values(config.compatiblePackagingGroups) : [])
+    ] as string[][];
+
+    const processedGroups = new Set<string>();
+    const results: any[] = [];
+
+    formulaInsumos.forEach(insumoName => {
+      const matchedGroup = compatibleGroupsList.find(g => g.includes(insumoName));
+      const groupKey = matchedGroup ? matchedGroup.join(' / ') : insumoName;
+
+      if (processedGroups.has(groupKey)) return;
+      processedGroups.add(groupKey);
+
+      const groupMembers = matchedGroup || [insumoName];
+      let physicalStockSum = 0;
+      let desvioSum = 0;
+      let totalSalidaConsumo = 0;
+      let matchedRowsCount = 0;
+      let membersDetails: any[] = [];
+
+      let planReqSum = 0;
+      let planMonthlyReqSum = 0;
+
+      groupMembers.forEach((member: string) => {
+        planReqSum += planRequiredSum[member] || 0;
+        planMonthlyReqSum += planMonthlyRequiredSum[member] || 0;
+
+        let code = insumoMappings[member];
+        if (!code && config) {
+          const p = (config.preformasConfig || []).find(item => item.name === member);
+          if (p) code = p.sqlCode;
+          const t = (config.termoConfig || []).find(item => item.name === member);
+          if (t) code = t.sqlCode;
+          const s = (config.stretchConfig || []).find(item => item.name === member);
+          if (s) code = s.sqlCode;
+          const tp = (config.tapaConfig || []).find(item => item.name === member);
+          if (tp) code = tp.sqlCode;
+          
+          if (!code && member.startsWith("Etiqueta ")) {
+            const parts = member.substring(9).split(" / ");
+            if (parts.length >= 3) {
+              const brand = parts[0];
+              const flavor = parts[1];
+              const size = parseInt(parts[2]);
+              const key = `${brand}-${flavor}-${size}`;
+              code = etiquetasMappings[key];
+            }
+          }
+        }
+
+        if (code) {
+          const rowMatch = uploadedInventory.find(row => row.codigo === code);
+          if (rowMatch) {
+            physicalStockSum += rowMatch.saldoFinalDeposito;
+            desvioSum += rowMatch.desvio;
+            totalSalidaConsumo += rowMatch.salidaConsumo;
+            matchedRowsCount++;
+            membersDetails.push({
+              name: member,
+              codigo: rowMatch.codigo,
+              producto: rowMatch.producto,
+              saldoFinalDeposito: rowMatch.saldoFinalDeposito,
+              desvio: rowMatch.desvio,
+              porcentaje: rowMatch.porcentaje
+            });
+          } else {
+            membersDetails.push({
+              name: member,
+              codigo: code,
+              producto: '(No encontrado en Excel)',
+              saldoFinalDeposito: 0,
+              desvio: 0,
+              porcentaje: 0,
+              noMatch: true
+            });
+          }
+        } else {
+          membersDetails.push({
+            name: member,
+            codigo: 'S/C',
+            producto: '(Sin mapeo en sistema)',
+            saldoFinalDeposito: 0,
+            desvio: 0,
+            porcentaje: 0,
+            noMap: true
+          });
+        }
+      });
+
+      const avgPorcentaje = totalSalidaConsumo !== 0 ? (desvioSum / (-1 * totalSalidaConsumo)) : 0;
+      const coverageMonths = planMonthlyReqSum > 0 ? (physicalStockSum / planMonthlyReqSum) : Infinity;
+
+      results.push({
+        groupName: groupKey,
+        isGroup: groupMembers.length > 1,
+        members: groupMembers,
+        membersDetails,
+        physicalStockSum,
+        desvioSum,
+        planReqSum,
+        planMonthlyReqSum,
+        avgPorcentaje,
+        coverageMonths,
+        matchedRowsCount
+      });
+    });
+
+    return results;
+  }, [config, uploadedInventory, plans, goals, insumoMappings, etiquetasMappings, availableBrands, availableSizes]);
 
   // Sugar Calculation Hooks
   const sugarInsumoName = useMemo(() => {

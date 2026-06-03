@@ -9,7 +9,7 @@ import {
   getDoc,
   onSnapshot,
 } from "firebase/firestore";
-import { db, handleFirestoreError } from "../firebase";
+import { db, handleFirestoreError, auth, OperationType } from "../firebase";
 import { ProductionReport } from "../types";
 import {
   format,
@@ -83,6 +83,17 @@ export function EnergyReport() {
   const [activeTab, setActiveTab] = useState<"predictivo" | "kwh_pack">(
     "predictivo",
   );
+  const [visibleLines, setVisibleLines] = useState<{
+    kwh: boolean;
+    predictedKwh: boolean;
+    packs: boolean;
+    ratio: boolean;
+  }>({
+    kwh: true,
+    predictedKwh: true,
+    packs: true,
+    ratio: true,
+  });
   const [factors, setFactors] = useState<EnergyFactors>(DEFAULT_FACTORS);
   const [showSettings, setShowSettings] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -121,8 +132,19 @@ export function EnergyReport() {
     loadFactors();
   }, []);
 
+  const [user, setUser] = useState<any>(auth.currentUser);
+
   useEffect(() => {
-    // Load real energy records
+    const unsubscribe = auth.onAuthStateChanged((u) => {
+      setUser(u);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    // Load real energy records once for the collection
     const loadRealEnergy = onSnapshot(
       collection(db, "energyRecords"),
       (snap) => {
@@ -131,16 +153,30 @@ export function EnergyReport() {
           records[doc.id] = doc.data() as MonthlyRealEnergy;
         });
         setRealEnergy(records);
-
-        if (records[selectedMonth]) {
-          setEditReal(records[selectedMonth]);
-        } else {
-          setEditReal({ kwh: 0, amount: 0 });
-        }
       },
+      (error) => {
+        console.error("onSnapshot energyRecords error:", error);
+        // Log gracefully without throwing fatal exceptions that crash the tab
+      }
     );
 
     return () => loadRealEnergy();
+  }, [user]);
+
+  // Synchronize editReal state only when we are NOT currently editing
+  useEffect(() => {
+    if (!isEditingReal) {
+      if (realEnergy[selectedMonth]) {
+        setEditReal(realEnergy[selectedMonth]);
+      } else {
+        setEditReal({ kwh: 0, amount: 0 });
+      }
+    }
+  }, [selectedMonth, realEnergy, isEditingReal]);
+
+  // Reset editing mode when month changes
+  useEffect(() => {
+    setIsEditingReal(false);
   }, [selectedMonth]);
 
   useEffect(() => {
@@ -155,7 +191,7 @@ export function EnergyReport() {
         );
         setAllReports(data);
       } catch (err) {
-        handleFirestoreError(err);
+        console.error("Error fetching production reports:", err);
       } finally {
         setLoading(false);
       }
@@ -171,18 +207,33 @@ export function EnergyReport() {
       setFactors(editFactors);
       setShowSettings(false);
     } catch (err) {
-      handleFirestoreError(err);
+      console.error("Error saving factors:", err);
     } finally {
       setSavingSettings(false);
     }
   };
 
   const handleSaveRealEnergy = async () => {
+    const cleanKwh = Number(editReal.kwh) || 0;
+    const cleanAmount = Number(editReal.amount) || 0;
+    
+    const savedVal = {
+      kwh: cleanKwh,
+      amount: cleanAmount,
+    };
+
     try {
-      await setDoc(doc(db, "energyRecords", selectedMonth), editReal);
+      // Actualización optimista instantánea
+      setRealEnergy((prev) => ({
+        ...prev,
+        [selectedMonth]: savedVal,
+      }));
       setIsEditingReal(false);
+
+      // Guardado asíncrono en Firestore
+      await setDoc(doc(db, "energyRecords", selectedMonth), savedVal);
     } catch (err) {
-      handleFirestoreError(err);
+      console.error("Error saving real energy:", err);
     }
   };
 
@@ -196,7 +247,13 @@ export function EnergyReport() {
     });
 
     // Business days (M-F)
-    const businessDays = allDays.filter((date) => !isWeekend(date)).length;
+    const today = new Date();
+    const todayStr = format(today, "yyyy-MM-dd");
+
+    const businessDays = allDays.filter((date) => {
+      const dateStr = format(date, "yyyy-MM-dd");
+      return !isWeekend(date) && dateStr <= todayStr;
+    }).length;
 
     // Total hours in month
     const totalHours = daysInMonth * 24;
@@ -313,13 +370,120 @@ export function EnergyReport() {
     };
   };
 
+  const getPredictionForMonth = (monthStr: string) => {
+    try {
+      const dateForMonth = parseISO(`${monthStr}-01`);
+      const daysInMonth = getDaysInMonth(dateForMonth);
+      const allDays = eachDayOfInterval({
+        start: startOfMonth(dateForMonth),
+        end: endOfMonth(dateForMonth),
+      });
+
+      const today = new Date();
+      const todayStr = format(today, "yyyy-MM-dd");
+
+      const businessDays = allDays.filter((date) => {
+        const dateStr = format(date, "yyyy-MM-dd");
+        return !isWeekend(date) && dateStr <= todayStr;
+      }).length;
+
+      const totalHours = daysInMonth * 24;
+      const adminHours = businessDays * 9;
+
+      let linea1Hours = 0;
+      let linea2Hours = 0;
+      let linea3Hours = 0;
+      let calentamientoCount = 0;
+
+      const botellasCount = {
+        3000: 0,
+        2250: 0,
+        2000: 0,
+        1500: 0,
+        500: 0,
+      };
+
+      const activeLineDays = new Set<string>();
+      const monthReports = allReports.filter((r) => r.fecha?.startsWith(monthStr));
+
+      monthReports.forEach((r) => {
+        let hours = 0;
+        let minutes = r.tiempoTurno || 0;
+        if (!minutes && r.entraTurno && r.saleTurno) {
+          const parseTime = (t: string) => {
+            const [h, m] = t.split(":").map(Number);
+            return h * 60 + (m || 0);
+          };
+          let s = parseTime(r.entraTurno);
+          let e = parseTime(r.saleTurno);
+          if (e <= s && s > 0) e += 24 * 60;
+          minutes = e - s;
+        }
+
+        if (minutes > 0) {
+          hours = minutes / 60;
+        } else if (r.turno && r.fecha) {
+          hours = getShiftHours(r.turno, r.fecha).length;
+        }
+
+        if (r.linea === "1" || r.linea === "Línea 1" || r.linea === "Linea 1")
+          linea1Hours += hours;
+        else if (r.linea === "2" || r.linea === "Línea 2" || r.linea === "Linea 2")
+          linea2Hours += hours;
+        else if (r.linea === "3" || r.linea === "Línea 3" || r.linea === "Linea 3")
+          linea3Hours += hours;
+
+        activeLineDays.add(`${r.fecha}-${r.linea}`);
+
+        const t = r.tamano || 0;
+        if (botellasCount.hasOwnProperty(t)) {
+          const quantity = r.botellas || (r.paquetes || 0) * (t === 3000 ? 4 : 6);
+          (botellasCount as any)[t] += quantity;
+        }
+      });
+
+      calentamientoCount = activeLineDays.size;
+
+      const kwhIntercept = factors.intercept * totalHours;
+      const kwhAdmin = factors.admin * adminHours;
+      const kwhLinea1 = factors.linea1 * linea1Hours;
+      const kwhLinea2 = factors.linea2 * linea2Hours;
+      const kwhLinea3 = factors.linea3 * linea3Hours;
+      const kwhCalentamiento = factors.calentamiento * calentamientoCount;
+
+      let kwhBotellas = 0;
+      Object.keys(botellasCount).forEach((t) => {
+        const size = Number(t);
+        kwhBotellas +=
+          botellasCount[size as keyof typeof botellasCount] *
+          (factors.botellas[size] || 0);
+      });
+
+      const totalKwh =
+        kwhIntercept +
+        kwhAdmin +
+        kwhLinea1 +
+        kwhLinea2 +
+        kwhLinea3 +
+        kwhCalentamiento +
+        kwhBotellas;
+
+      return totalKwh;
+    } catch (e) {
+      console.error("Error predicting for month", monthStr, e);
+      return 0;
+    }
+  };
+
   const prediction = calculatePrediction();
   const currentReal = realEnergy[selectedMonth] || { kwh: 0, amount: 0 };
 
+  const activeKwh = isEditingReal ? editReal.kwh : currentReal.kwh;
+
   const differences = {
-    kwh: currentReal.kwh ? currentReal.kwh - prediction.totalKwh : 0,
-    pct: currentReal.kwh
-      ? ((currentReal.kwh - prediction.totalKwh) / prediction.totalKwh) * 100
+    kwh: activeKwh ? activeKwh - prediction.totalKwh : 0,
+    pct: activeKwh && prediction.totalKwh
+      ? ((activeKwh - prediction.totalKwh) / prediction.totalKwh) * 100
       : 0,
   };
 
@@ -329,36 +493,61 @@ export function EnergyReport() {
       displayMonth: string;
       kwh: number;
       packs: number;
+      predictedKwh: number;
       ratio: number;
     }[] = [];
 
-    const energyMonths = Object.keys(realEnergy).sort();
+    const monthsSet = new Set<string>();
 
-    for (const m of energyMonths) {
+    Object.keys(realEnergy).forEach((m) => {
+      if (m && /^\d{4}-\d{2}$/.test(m)) {
+        monthsSet.add(m);
+      }
+    });
+
+    allReports.forEach((r) => {
+      if (r.fecha && r.fecha.length >= 7) {
+        const m = r.fecha.substring(0, 7);
+        monthsSet.add(m);
+      }
+    });
+
+    const sortedMonths = Array.from(monthsSet).sort();
+
+    for (const m of sortedMonths) {
       const energyData = realEnergy[m];
-      if (energyData && energyData.kwh > 0) {
-        const monthReports = allReports.filter((r) => r.fecha?.startsWith(m));
+      const kwhVal = energyData ? energyData.kwh || 0 : 0;
 
-        let totalPacks = 0;
-        monthReports.forEach((r) => {
-          totalPacks += r.paquetes || 0;
-        });
+      const monthReports = allReports.filter((r) => r.fecha?.startsWith(m));
+      let totalPacks = 0;
+      monthReports.forEach((r) => {
+        totalPacks += r.paquetes || 0;
+      });
 
-        if (totalPacks > 0) {
-          data.push({
-            month: m,
-            displayMonth: format(parseISO(`${m}-01`), "MMM yyyy", {
-              locale: es,
-            }).toUpperCase(),
-            kwh: energyData.kwh,
-            packs: totalPacks,
-            ratio: Number((energyData.kwh / totalPacks).toFixed(2)),
-          });
+      const predictedKwhValue = Math.round(getPredictionForMonth(m));
+
+      if (kwhVal > 0 || totalPacks > 0 || predictedKwhValue > 0) {
+        let displayMonthStr = m;
+        try {
+          displayMonthStr = format(parseISO(`${m}-01`), "MMM yyyy", {
+            locale: es,
+          }).toUpperCase();
+        } catch (e) {
+          console.error("Error formatting date:", m, e);
         }
+
+        data.push({
+          month: m,
+          displayMonth: displayMonthStr,
+          kwh: kwhVal,
+          packs: totalPacks,
+          predictedKwh: predictedKwhValue,
+          ratio: totalPacks > 0 ? Number((kwhVal / totalPacks).toFixed(2)) : 0,
+        });
       }
     }
     return data;
-  }, [realEnergy, allReports]);
+  }, [realEnergy, allReports, factors]);
 
   return (
     <div className="space-y-6">
@@ -424,6 +613,61 @@ export function EnergyReport() {
               Evolución KWh vs Packs Producidos
             </h3>
 
+            {/* Selector de visibilidad de variables */}
+            <div className="flex flex-wrap items-center gap-3 mb-6 bg-gray-50/50 p-4 rounded-xl border border-gray-100">
+              <span className="text-xs font-black text-gray-500 uppercase tracking-widest mr-2">
+                Mostrar / Esconder:
+              </span>
+              <button
+                type="button"
+                onClick={() => setVisibleLines(prev => ({ ...prev, kwh: !prev.kwh }))}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                  visibleLines.kwh
+                    ? "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-sm"
+                    : "bg-white border-gray-200 text-gray-400 hover:text-gray-600"
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full ${visibleLines.kwh ? "bg-indigo-600" : "bg-gray-300"}`} />
+                Consumo Real
+              </button>
+              <button
+                type="button"
+                onClick={() => setVisibleLines(prev => ({ ...prev, predictedKwh: !prev.predictedKwh }))}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                  visibleLines.predictedKwh
+                    ? "bg-yellow-50 border-yellow-200 text-yellow-700 shadow-sm"
+                    : "bg-white border-gray-200 text-gray-400 hover:text-gray-600 cursor-pointer"
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full ${visibleLines.predictedKwh ? "bg-yellow-500" : "bg-gray-300"}`} />
+                Consumo Estimado (Modelo)
+              </button>
+              <button
+                type="button"
+                onClick={() => setVisibleLines(prev => ({ ...prev, packs: !prev.packs }))}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                  visibleLines.packs
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-700 shadow-sm"
+                    : "bg-white border-gray-200 text-gray-400 hover:text-gray-600"
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full ${visibleLines.packs ? "bg-emerald-500" : "bg-gray-300"}`} />
+                Packs Producidos
+              </button>
+              <button
+                type="button"
+                onClick={() => setVisibleLines(prev => ({ ...prev, ratio: !prev.ratio }))}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                  visibleLines.ratio
+                    ? "bg-orange-50 border-orange-200 text-orange-700 shadow-sm"
+                    : "bg-white border-gray-200 text-gray-400 hover:text-gray-600"
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full ${visibleLines.ratio ? "bg-orange-500" : "bg-gray-300"}`} />
+                Ratio (KWh/Pack)
+              </button>
+            </div>
+
             <div className="h-[400px] w-full mt-4">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart
@@ -436,19 +680,35 @@ export function EnergyReport() {
                   <YAxis yAxisId="right" orientation="right" stroke="#82ca9d" />
                   <Tooltip />
                   <Legend />
-                  <Bar
+                  <Line
                     yAxisId="left"
+                    type="monotone"
                     dataKey="kwh"
-                    name="Consumo (KWh)"
-                    fill="#8884d8"
-                    radius={[4, 4, 0, 0]}
+                    name="Consumo Real (KWh)"
+                    stroke="#8884d8"
+                    strokeWidth={3}
+                    activeDot={{ r: 8 }}
+                    hide={!visibleLines.kwh}
                   />
-                  <Bar
+                  <Line
+                    yAxisId="left"
+                    type="monotone"
+                    dataKey="predictedKwh"
+                    name="Consumo Estimado (KWh)"
+                    stroke="#eab308"
+                    strokeWidth={3}
+                    activeDot={{ r: 8 }}
+                    hide={!visibleLines.predictedKwh}
+                  />
+                  <Line
                     yAxisId="right"
+                    type="monotone"
                     dataKey="packs"
                     name="Packs Producidos"
-                    fill="#82ca9d"
-                    radius={[4, 4, 0, 0]}
+                    stroke="#82ca9d"
+                    strokeWidth={3}
+                    activeDot={{ r: 8 }}
+                    hide={!visibleLines.packs}
                   />
                   <Line
                     yAxisId="left"
@@ -457,6 +717,7 @@ export function EnergyReport() {
                     name="Ratio (KWh/Pack)"
                     stroke="#ff7300"
                     strokeWidth={3}
+                    hide={!visibleLines.ratio}
                   />
                 </ComposedChart>
               </ResponsiveContainer>
@@ -480,6 +741,9 @@ export function EnergyReport() {
                       Consumo Real (KWh)
                     </th>
                     <th className="py-3 px-4 text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 text-right">
+                      Consumo Estimado (KWh)
+                    </th>
+                    <th className="py-3 px-4 text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 text-right">
                       Packs Producidos
                     </th>
                     <th className="py-3 px-4 text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 text-right">
@@ -497,12 +761,15 @@ export function EnergyReport() {
                         {row.displayMonth}
                       </td>
                       <td className="py-3 px-4 text-sm font-medium text-gray-600 text-right">
-                        {row.kwh.toLocaleString("es-AR")}
+                        {row.kwh > 0 ? row.kwh.toLocaleString("es-AR") : "-"}
+                      </td>
+                      <td className="py-3 px-4 text-sm font-medium text-yellow-600 text-right font-semibold">
+                        {row.predictedKwh > 0 ? row.predictedKwh.toLocaleString("es-AR") : "-"}
                       </td>
                       <td className="py-3 px-4 text-sm font-medium text-gray-600 text-right">
                         {row.packs.toLocaleString("es-AR")}
                       </td>
-                      <td className="py-3 px-4 text-sm font-black text-yellow-600 text-right">
+                      <td className="py-3 px-4 text-sm font-black text-indigo-600 text-right">
                         {row.ratio.toFixed(2)}
                       </td>
                     </tr>
@@ -510,7 +777,7 @@ export function EnergyReport() {
                   {kwhPackData.length === 0 && (
                     <tr>
                       <td
-                        colSpan={4}
+                        colSpan={5}
                         className="py-8 text-center text-gray-500 text-sm"
                       >
                         No hay datos suficientes para mostrar el análisis.
@@ -862,7 +1129,7 @@ export function EnergyReport() {
                 <div className="space-y-6">
                   <div className="bg-gray-900 text-white p-6 rounded-2xl shadow-sm relative overflow-hidden">
                     {/* Background Accents */}
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-yellow-400 opacity-10 rounded-full blur-3xl -mr-10 -mt-10"></div>
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-yellow-400 opacity-10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
 
                     <div className="flex justify-between items-start mb-6">
                       <div className="flex items-center gap-3 relative z-10">
@@ -875,8 +1142,11 @@ export function EnergyReport() {
                       </div>
                       {!isEditingReal ? (
                         <button
-                          onClick={() => setIsEditingReal(true)}
-                          className="p-2 bg-gray-800 hover:bg-gray-700 text-gray-300 transition-colors rounded-xl font-bold text-xs flex items-center gap-2"
+                          onClick={() => {
+                            setEditReal(realEnergy[selectedMonth] || { kwh: 0, amount: 0 });
+                            setIsEditingReal(true);
+                          }}
+                          className="relative z-20 p-2 bg-gray-800 hover:bg-gray-700 text-gray-300 transition-colors rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                           Editar Factura
@@ -884,7 +1154,7 @@ export function EnergyReport() {
                       ) : (
                         <button
                           onClick={handleSaveRealEnergy}
-                          className="p-2 bg-yellow-500 hover:bg-yellow-600 text-black transition-colors rounded-xl font-bold text-xs flex items-center gap-2"
+                          className="relative z-20 p-2 bg-yellow-500 hover:bg-yellow-600 text-black transition-colors rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer"
                         >
                           <Save className="w-3.5 h-3.5" />
                           Guardar
@@ -900,7 +1170,7 @@ export function EnergyReport() {
                           </label>
                           <input
                             type="number"
-                            value={editReal.kwh}
+                            value={editReal.kwh || ""}
                             onChange={(e) =>
                               setEditReal({
                                 ...editReal,
@@ -910,6 +1180,46 @@ export function EnergyReport() {
                             className="w-full bg-gray-800 text-white font-black text-xl border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-yellow-500"
                           />
                         </div>
+
+                        {editReal.kwh > 0 && (
+                          <div className="pt-4 border-t border-gray-800">
+                            <span className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+                              Desviación Estimada (Tiempo Real)
+                            </span>
+                            <div
+                              className={`p-4 rounded-xl border ${Math.abs(differences.pct) <= 5 ? "bg-green-900/30 border-green-800/50 text-green-400" : "bg-red-900/30 border-red-800/50 text-red-400"}`}
+                            >
+                              <div className="flex justify-between items-center">
+                                <div className="flex flex-col">
+                                  <span className="text-[10px] font-black uppercase mb-1">
+                                    Diferencia Neta
+                                  </span>
+                                  <span className="text-lg font-black">
+                                    {differences.kwh > 0 ? "+" : ""}
+                                    {differences.kwh.toLocaleString("es-AR", {
+                                      maximumFractionDigits: 0,
+                                    })}{" "}
+                                    kWh
+                                  </span>
+                                </div>
+                                <div className="flex flex-col items-end">
+                                  <span className="text-[10px] font-black uppercase mb-1">
+                                    Margen Error
+                                  </span>
+                                  <span className="text-xl font-black">
+                                    {differences.pct > 0 ? "+" : ""}
+                                    {differences.pct.toFixed(2)}%
+                                  </span>
+                                </div>
+                              </div>
+                              <p className="text-[10px] opacity-70 mt-3 font-medium text-center">
+                                {Math.abs(differences.pct) <= 5
+                                  ? "El modelo es altamente preciso con este valor."
+                                  : "Este valor presenta una desviación por encima de lo esperado."}
+                              </p>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div className="space-y-6 relative z-10">

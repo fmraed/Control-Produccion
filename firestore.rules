@@ -226,6 +226,14 @@ service cloud.firestore {
              isValidOptionalMap('configAtTime');
     }
 
+    function isValidPhysicalInventory(data) {
+      return hasRequiredFields(['id', 'fileName', 'uploadedAt', 'items']) &&
+             data.id is string &&
+             data.fileName is string &&
+             data.uploadedAt is string &&
+             data.items is list;
+    }
+
     function isValidProductionPlan(data) {
       return hasRequiredFields(['date', 'shift', 'linea', 'marca', 'sabor', 'tamano', 'plannedPacks', 'status', 'createdAt', 'authorId']) &&
              data.date is string &&
@@ -285,6 +293,12 @@ service cloud.firestore {
     match /monthly_snapshots/{snapshotId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
+    }
+
+    match /physical_inventories/{inventoryId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidPhysicalInventory(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     match /monthly_goals/{goalId} {

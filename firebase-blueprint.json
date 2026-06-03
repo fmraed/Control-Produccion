@@ -203,9 +203,35 @@
         "savedBy": { "type": "string" }
       },
       "required": ["date", "stocks", "savedAt", "savedBy"]
+    },
+    "MonthlyRealEnergy": {
+      "title": "Monthly Real Energy",
+      "description": "Real energy consumption record for a specific month",
+      "type": "object",
+      "properties": {
+        "kwh": { "type": "number" },
+        "amount": { "type": "number" }
+      },
+      "required": ["kwh"]
+    },
+    "PhysicalInventory": {
+      "title": "Physical Inventory",
+      "description": "An uploaded physical inventory containing parsed items from an Excel file",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fileName": { "type": "string" },
+        "uploadedAt": { "type": "string", "format": "date-time" },
+        "items": { "type": "array" }
+      },
+      "required": ["id", "fileName", "uploadedAt", "items"]
     }
   },
   "firestore": {
+    "physical_inventories/{inventoryId}": {
+      "schema": { "$ref": "#/entities/PhysicalInventory" },
+      "description": "Stores history of loaded Excel physical inventories."
+    },
     "daily_stocks/{dateId}": {
       "schema": { "$ref": "#/entities/DailyStock" },
       "description": "Stores daily stock snapshots."
@@ -253,6 +279,10 @@
     "monthly_goals/{goalId}": {
       "schema": { "$ref": "#/entities/MonthlyGoal" },
       "description": "Stores monthly production targets."
+    },
+    "energyRecords/{docId}": {
+      "schema": { "$ref": "#/entities/MonthlyRealEnergy" },
+      "description": "Stores monthly real energy consumption records."
     }
   }
 }
