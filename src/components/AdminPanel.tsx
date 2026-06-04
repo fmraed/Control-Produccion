@@ -3959,7 +3959,7 @@ export function AdminPanel() {
                  </div>
                </section>
 
-               <section className="bg-gray-50 p-4 rounded-xl border border-gray-200 mt-8">
+               <section className="bg-gray-50 p-4 rounded-xl border border-gray-200 mt-8 lg:col-span-2">
                  <div className="flex justify-between items-center mb-4 border-b pb-2">
                    <div>
                      <h3 className="text-lg font-semibold text-gray-800">Tapas</h3>

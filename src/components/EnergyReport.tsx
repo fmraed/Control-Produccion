@@ -43,7 +43,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import { getShiftHours } from "../utils";
+import { getShiftHours, getLogicalDate } from "../utils";
 
 interface EnergyFactors {
   intercept: number;
@@ -113,7 +113,7 @@ export function EnergyReport() {
     useState<EnergyFactors>(DEFAULT_FACTORS);
 
   // Derrived state for current view
-  const reports = allReports.filter((r) => r.fecha?.startsWith(selectedMonth));
+  const reports = allReports.filter((r) => getLogicalDate(r).startsWith(selectedMonth));
 
   useEffect(() => {
     // Load factors
@@ -263,8 +263,17 @@ export function EnergyReport() {
     let linea2Hours = 0;
     let linea3Hours = 0;
     let calentamientoCount = 0;
+    let totalPacks = 0;
 
     const botellasCount = {
+      3000: 0,
+      2250: 0,
+      2000: 0,
+      1500: 0,
+      500: 0,
+    };
+
+    const paquetesCount = {
       3000: 0,
       2250: 0,
       2000: 0,
@@ -315,12 +324,14 @@ export function EnergyReport() {
       // Calentamiento
       activeLineDays.add(`${r.fecha}-${r.linea}`);
 
-      // Botellas
+      // Botellas y Paquetes
       const t = r.tamano || 0;
       if (botellasCount.hasOwnProperty(t)) {
         const quantity = r.botellas || (r.paquetes || 0) * (t === 3000 ? 4 : 6); // Rough fallback if botellas is not there, typically we have botellas
         (botellasCount as any)[t] += quantity;
+        (paquetesCount as any)[t] += (r.paquetes || 0);
       }
+      totalPacks += (r.paquetes || 0);
     });
 
     calentamientoCount = activeLineDays.size;
@@ -366,6 +377,8 @@ export function EnergyReport() {
         linea3Hours,
         calentamientoCount,
         botellasCount,
+        paquetesCount,
+        totalPacks,
       },
     };
   };
@@ -403,8 +416,16 @@ export function EnergyReport() {
         500: 0,
       };
 
+      const paquetesCount = {
+        3000: 0,
+        2250: 0,
+        2000: 0,
+        1500: 0,
+        500: 0,
+      };
+
       const activeLineDays = new Set<string>();
-      const monthReports = allReports.filter((r) => r.fecha?.startsWith(monthStr));
+      const monthReports = allReports.filter((r) => getLogicalDate(r).startsWith(monthStr));
 
       monthReports.forEach((r) => {
         let hours = 0;
@@ -439,6 +460,7 @@ export function EnergyReport() {
         if (botellasCount.hasOwnProperty(t)) {
           const quantity = r.botellas || (r.paquetes || 0) * (t === 3000 ? 4 : 6);
           (botellasCount as any)[t] += quantity;
+          (paquetesCount as any)[t] += (r.paquetes || 0);
         }
       });
 
@@ -518,7 +540,7 @@ export function EnergyReport() {
       const energyData = realEnergy[m];
       const kwhVal = energyData ? energyData.kwh || 0 : 0;
 
-      const monthReports = allReports.filter((r) => r.fecha?.startsWith(m));
+      const monthReports = allReports.filter((r) => getLogicalDate(r).startsWith(m));
       let totalPacks = 0;
       monthReports.forEach((r) => {
         totalPacks += r.paquetes || 0;
@@ -964,7 +986,7 @@ export function EnergyReport() {
                       </h3>
                     </div>
 
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
                       <div className="p-4 bg-gray-50 rounded-xl">
                         <span className="block text-xs font-black text-gray-500 uppercase">
                           Total kWh
@@ -1007,6 +1029,16 @@ export function EnergyReport() {
                           {prediction.kwhBotellas.toLocaleString("es-AR", {
                             maximumFractionDigits: 0,
                           })}
+                        </span>
+                      </div>
+                      <div className="p-4 bg-gray-50 rounded-xl">
+                        <span className="block text-xs font-black text-gray-500 uppercase">
+                          KWH / Pack
+                        </span>
+                        <span className="text-xl font-bold text-gray-700">
+                          {prediction.stats.totalPacks > 0
+                            ? (prediction.totalKwh / prediction.stats.totalPacks).toFixed(2)
+                            : "-"}
                         </span>
                       </div>
                     </div>
@@ -1100,6 +1132,9 @@ export function EnergyReport() {
                               prediction.stats.botellasCount[
                                 size as keyof typeof prediction.stats.botellasCount
                               ];
+                            const packsForSize = prediction.stats.paquetesCount[
+                              size as keyof typeof prediction.stats.paquetesCount
+                            ];
                             const kwh = count * factors.botellas[size];
                             return (
                               <div
@@ -1110,7 +1145,11 @@ export function EnergyReport() {
                                   Botellas {size}ml
                                 </span>
                                 <span className="font-medium text-gray-900">
-                                  {count.toLocaleString("es-AR")} u &rarr;{" "}
+                                  {count.toLocaleString("es-AR")} u{" "}
+                                  <span className="text-gray-400">
+                                    ({packsForSize.toLocaleString("es-AR", { maximumFractionDigits: 0 })} packs)
+                                  </span>{" "}
+                                  &rarr;{" "}
                                   {kwh.toLocaleString("es-AR", {
                                     maximumFractionDigits: 0,
                                   })}{" "}
@@ -1119,6 +1158,15 @@ export function EnergyReport() {
                               </div>
                             );
                           })}
+                          
+                          <div className="flex justify-between items-center p-2 mt-4 border-t border-gray-200 text-sm">
+                            <span className="font-bold text-gray-800">
+                              Total Packs:
+                            </span>
+                            <span className="font-bold text-gray-900">
+                              {prediction.stats.totalPacks.toLocaleString("es-AR")} packs
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1164,21 +1212,33 @@ export function EnergyReport() {
 
                     {isEditingReal ? (
                       <div className="space-y-4 relative z-10">
-                        <div>
-                          <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-1.5">
-                            kWh Facturados
-                          </label>
-                          <input
-                            type="number"
-                            value={editReal.kwh || ""}
-                            onChange={(e) =>
-                              setEditReal({
-                                ...editReal,
-                                kwh: Number(e.target.value),
-                              })
-                            }
-                            className="w-full bg-gray-800 text-white font-black text-xl border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-yellow-500"
-                          />
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-1.5">
+                              kWh Facturados
+                            </label>
+                            <input
+                              type="number"
+                              value={editReal.kwh || ""}
+                              onChange={(e) =>
+                                setEditReal({
+                                  ...editReal,
+                                  kwh: Number(e.target.value),
+                                })
+                              }
+                              className="w-full bg-gray-800 text-white font-black text-xl border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-yellow-500"
+                            />
+                          </div>
+                          {editReal.kwh > 0 && prediction.stats.totalPacks > 0 && (
+                            <div>
+                              <span className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-1.5 pt-1">
+                                KWH / Pack (Real)
+                              </span>
+                              <div className="text-2xl font-black text-blue-400 mt-2">
+                                {(editReal.kwh / prediction.stats.totalPacks).toFixed(2)}
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         {editReal.kwh > 0 && (
@@ -1223,15 +1283,27 @@ export function EnergyReport() {
                       </div>
                     ) : (
                       <div className="space-y-6 relative z-10">
-                        <div>
-                          <span className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-1">
-                            kWh Facturados
-                          </span>
-                          <div className="text-4xl font-black text-white">
-                            {currentReal.kwh > 0
-                              ? currentReal.kwh.toLocaleString("es-AR")
-                              : "-"}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <span className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-1">
+                              kWh Facturados
+                            </span>
+                            <div className="text-4xl font-black text-white">
+                              {currentReal.kwh > 0
+                                ? currentReal.kwh.toLocaleString("es-AR")
+                                : "-"}
+                            </div>
                           </div>
+                          {currentReal.kwh > 0 && prediction.stats.totalPacks > 0 && (
+                            <div>
+                              <span className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-1">
+                                KWH / Pack (Real)
+                              </span>
+                              <div className="text-4xl font-black text-blue-400">
+                                {(currentReal.kwh / prediction.stats.totalPacks).toFixed(2)}
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         {currentReal.kwh > 0 && (

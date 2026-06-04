@@ -24,7 +24,9 @@ import {
   Clock,
   ArrowUpDown,
   SearchX,
-  FileText
+  FileText,
+  Percent,
+  TrendingUp
 } from 'lucide-react';
 import { startOfWeek, addDays, format, subDays, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -46,12 +48,15 @@ interface PhysicalInventoryRow {
   ajusteNegativo: number;
   saldoTeoricoSinJust?: number;
   saldoFinalDeposito: number;
+  desvio: number;
+  porcentaje: number;
 }
 
 interface HistoricalInventoryHeader {
   id: string;
   fileName: string;
   uploadedAt: string;
+  inventoryDate?: string;
   itemsCount: number;
 }
 
@@ -62,6 +67,7 @@ export function PhysicalInventoryReport() {
   const [insumoMappings, setInsumoMappings] = useState<Record<string, string>>({});
   const [etiquetasMappings, setEtiquetasMappings] = useState<Record<string, string>>({});
   const [historicalLoads, setHistoricalLoads] = useState<HistoricalInventoryHeader[]>([]);
+  const [fullHistoricalDocs, setFullHistoricalDocs] = useState<any[]>([]);
   
   // Local Upload State
   const [uploadedInventory, setUploadedInventory] = useState<PhysicalInventoryRow[]>([]);
@@ -71,6 +77,15 @@ export function PhysicalInventoryReport() {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyTab, setHistoryTab] = useState<'cargas' | 'desvios' | 'mensual'>('cargas');
+  const [analysisPeriod, setAnalysisPeriod] = useState<string>('all');
+  const [analysisSearch, setAnalysisSearch] = useState<string>('');
+  const [analysisCategoryFilter, setAnalysisCategoryFilter] = useState<string>('all');
+  const [mensualFilterType, setMensualFilterType] = useState<'articulo' | 'categoria' | 'grupo'>('articulo');
+  const [mensualSearch, setMensualSearch] = useState<string>('');
+  const [percentBase, setPercentBase] = useState<'consumo' | 'teorico' | 'fisico'>('consumo');
+  const [prefFont, setPrefFont] = useState<'sans' | 'display' | 'mono'>('sans');
+  const [desviosViewGrouped, setDesviosViewGrouped] = useState<'articulo' | 'grupo'>('articulo');
 
   // Sorting and Filtering
   const [searchTerm, setSearchTerm] = useState('');
@@ -112,18 +127,28 @@ export function PhysicalInventoryReport() {
     );
 
     const unsubscribeInventories = onSnapshot(qInventories, (snap) => {
+      const docsList: any[] = [];
       const loads = snap.docs.map(d => {
         const data = d.data();
+        docsList.push({
+          id: d.id,
+          fileName: data.fileName || 'Inventario',
+          uploadedAt: data.uploadedAt || '',
+          inventoryDate: data.inventoryDate || '',
+          items: data.items || []
+        });
         return {
           id: d.id,
           fileName: data.fileName || 'Inventario',
           uploadedAt: data.uploadedAt || '',
+          inventoryDate: data.inventoryDate || '',
           itemsCount: Array.isArray(data.items) ? data.items.length : 0
         };
       });
       // Sort newest upload first
       loads.sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt));
       setHistoricalLoads(loads);
+      setFullHistoricalDocs(docsList);
     });
 
     return () => {
@@ -233,6 +258,8 @@ export function PhysicalInventoryReport() {
         const idxAjusteNegativo = getIndex('ajusteNegativo', 10);
         const idxTeorico = getIndex('saldoTeoricoSinJust', 11);
         const idxFinal = getIndex('saldoFinalDeposito', 13);
+        const idxDesvio = getIndex('desvio', -1);
+        const idxPorcentaje = getIndex('porcentaje', -1);
 
         const parsedRows: PhysicalInventoryRow[] = [];
 
@@ -257,16 +284,33 @@ export function PhysicalInventoryReport() {
           const saldoInicial = parseNum(row[idxSaldoInicial]);
           const entriesAlm = parseNum(row[idxEntradasAlm]);
           const entriesOtr = parseNum(row[idxEntradasOtros]);
-          const devAlm = parseNum(row[idxDevoluciones]);
-          const outOtr = parseNum(row[idxSalidaOtros]);
-          const outConsumo = parseNum(row[idxSalidaConsumo]);
+          const rawConsumo = parseNum(row[idxSalidaConsumo]);
+          const devAlm = Math.abs(parseNum(row[idxDevoluciones]));
+          const outOtr = Math.abs(parseNum(row[idxSalidaOtros]));
+          const outConsumo = Math.abs(rawConsumo);
+          
           const ajustePos = parseNum(row[idxAjustePositivo]);
-          const ajusteNeg = parseNum(row[idxAjusteNegativo]);
+          const ajusteNeg = Math.abs(parseNum(row[idxAjusteNegativo]));
           const saldoTeorico = parseNum(row[idxTeorico]);
           const saldoFinalDep = parseNum(row[idxFinal]);
 
-          // Formula: Desvio = Saldo Inicial + Entradas Desde Almacen + Entradas Otros Conceptos + Devolución a Almacén + Salida Otros Conceptos + Salida por Consumo + Ajuste Positivo - Saldo Final Depósito
+          // Stock teórico = Saldo inicial + movimientos (sin ajustes)
+          const calcIn = entriesAlm + entriesOtr;
+          const calcOut = devAlm + outOtr + outConsumo;
+          const expectedTeorico = saldoInicial + calcIn - calcOut;
           
+          let desvio = 0;
+          let porcentaje = 0;
+
+          if (idxDesvio !== -1) {
+             desvio = parseNum(row[idxDesvio]);
+          } else {
+             desvio = saldoFinalDep - expectedTeorico;
+          }
+
+          // Porcentaje = desvio / magnitud del consumo (siempre positiva)
+          porcentaje = outConsumo !== 0 ? (desvio / Math.abs(outConsumo)) * 100 : 0;
+
           parsedRows.push({
             codigo,
             producto,
@@ -276,11 +320,13 @@ export function PhysicalInventoryReport() {
             entradasOtros: entriesOtr,
             devolucionAlmacen: devAlm,
             salidaOtros: outOtr,
-            salidaConsumo: outConsumo,
+            salidaConsumo: outConsumo, // guardamos en abs (positivo) para la vista o logic
             ajustePositivo: ajustePos,
             ajusteNegativo: ajusteNeg,
-            saldoTeoricoSinJust: saldoTeorico,
-            saldoFinalDeposito: saldoFinalDep
+            saldoTeoricoSinJust: expectedTeorico, // Sobrescribimos con el calculado
+            saldoFinalDeposito: saldoFinalDep,
+            desvio,
+            porcentaje
           });
         }
 
@@ -305,21 +351,8 @@ export function PhysicalInventoryReport() {
     setError(null);
     try {
       const timestamp = new Date().toISOString();
-      const invId = `inventory-${timestamp.substring(0, 10)}-${Date.now()}`;
-
-      // Overwrite the SQL Stock Cache document so all modules view and load these final warehouse numbers
-      const newStockData = uploadedInventory.map(row => ({
-        codigo_articulo: row.codigo,
-        nombre_articulo: row.producto,
-        stock_almacen: row.saldoFinalDeposito,
-        stock_piso: 0,
-        stock_final: row.saldoFinalDeposito
-      }));
-
-      await setDoc(doc(db, 'config', 'sql_last_insumos_stock'), {
-        data: newStockData,
-        updatedAt: timestamp
-      });
+      // Use the selected inventoryDate to generate the ID prefix so it is correctly categorized by its reporting date
+      const invId = `inventory-${inventoryDate}-${Date.now()}`;
 
       // Maintain a historical upload trace
       await setDoc(doc(db, 'physical_inventories', invId), {
@@ -329,35 +362,6 @@ export function PhysicalInventoryReport() {
         uploadedAt: timestamp,
         items: uploadedInventory
       });
-
-      // Merge and Override simulated_stocks_cache in localStorage so Simulation Mode matches these numbers
-      try {
-        const cachedSimStr = localStorage.getItem('simulated_stocks_cache');
-        const nextSimulated = cachedSimStr ? JSON.parse(cachedSimStr) : {};
-
-        uploadedInventory.forEach(row => {
-          // Search mappings
-          const matchedInsumo = Object.keys(insumoMappings).find(k => insumoMappings[k] === row.codigo);
-          if (matchedInsumo) {
-            nextSimulated[matchedInsumo] = row.saldoFinalDeposito;
-          } else {
-            // Check packages configurations
-            if (config) {
-              const pref = (config.preformasConfig || []).find(p => p.sqlCode === row.codigo);
-              if (pref) nextSimulated[pref.name] = row.saldoFinalDeposito;
-              const tm = (config.termoConfig || []).find(t => t.sqlCode === row.codigo);
-              if (tm) nextSimulated[tm.name] = row.saldoFinalDeposito;
-              const str = (config.stretchConfig || []).find(s => s.sqlCode === row.codigo);
-              if (str) nextSimulated[str.name] = row.saldoFinalDeposito;
-              const tp = (config.tapaConfig || []).find(t => t.sqlCode === row.codigo);
-              if (tp) nextSimulated[tp.name] = row.saldoFinalDeposito;
-            }
-          }
-        });
-        localStorage.setItem('simulated_stocks_cache', JSON.stringify(nextSimulated));
-      } catch (e) {
-        console.error("Local simulated stock cache update failed", e);
-      }
 
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 4000);
@@ -378,6 +382,9 @@ export function PhysicalInventoryReport() {
         if (Array.isArray(data.items)) {
           setUploadedInventory(data.items);
           setInventoryFileName(data.fileName || 'Inventario Restaurado');
+          if (data.inventoryDate) {
+            setInventoryDate(data.inventoryDate);
+          }
           setHistoryOpen(false);
           setError(null);
         }
@@ -397,6 +404,494 @@ export function PhysicalInventoryReport() {
       console.error("Deletion failed", e);
     }
   };
+
+  // Helper to check if a date falls in the selected period
+  const isWithinPeriod = useCallback((docDateStr: string, period: string) => {
+    if (period === 'all') return true;
+    const docDate = new Date(docDateStr + 'T00:00:00');
+    const cutoff = new Date();
+    if (period === 'year') {
+      cutoff.setFullYear(cutoff.getFullYear() - 1);
+    } else if (period === '6months') {
+      cutoff.setMonth(cutoff.getMonth() - 6);
+    } else if (period === '3months') {
+      cutoff.setMonth(cutoff.getMonth() - 3);
+    } else if (period === '1month') {
+      cutoff.setMonth(cutoff.getMonth() - 1);
+    }
+    // Set hours to 0 to compare cleanly
+    cutoff.setHours(0, 0, 0, 0);
+    return docDate >= cutoff;
+  }, []);
+
+  // Compute aggregated analytical data
+  const desviosAnalysis = useMemo(() => {
+    const matchedDocs = fullHistoricalDocs.filter(docVal => {
+      const dateVal = docVal.inventoryDate || docVal.uploadedAt?.substring(0, 10);
+      if (!dateVal) return false;
+      return isWithinPeriod(dateVal, analysisPeriod);
+    });
+
+    const articlesMap: Record<string, {
+      codigo: string;
+      producto: string;
+      tipo: string;
+      desvioAcumulado: number;
+      desvioAbsolutoAcumulado: number;
+      consumoAcumulado: number;
+      teoricoAcumulado: number;
+      fisicoAcumulado: number;
+      conteoReportes: number;
+    }> = {};
+
+    const categoriesMap: Record<string, {
+      tipo: string;
+      desvioAcumulado: number;
+      desvioAbsolutoAcumulado: number;
+      consumoAcumulado: number;
+      teoricoAcumulado: number;
+      fisicoAcumulado: number;
+      conteoReportes: number;
+    }> = {};
+
+    matchedDocs.forEach(itemDoc => {
+      if (Array.isArray(itemDoc.items)) {
+        itemDoc.items.forEach((item: any) => {
+          const code = item.codigo || 'S/C';
+          const name = item.producto || 'Desconocido';
+          const type = item.tipo || 'Insumo';
+          const devVal = item.desvio || 0;
+          const consVal = item.salidaConsumo || 0;
+          const teoricoVal = item.saldoTeoricoSinJust || 0;
+          const fisicoVal = item.saldoFinalDeposito || 0;
+
+          // Article aggregate
+          if (!articlesMap[code]) {
+            articlesMap[code] = {
+              codigo: code,
+              producto: name,
+              tipo: type,
+              desvioAcumulado: 0,
+              desvioAbsolutoAcumulado: 0,
+              consumoAcumulado: 0,
+              teoricoAcumulado: 0,
+              fisicoAcumulado: 0,
+              conteoReportes: 0
+            };
+          }
+          articlesMap[code].desvioAcumulado += devVal;
+          articlesMap[code].desvioAbsolutoAcumulado += Math.abs(devVal);
+          articlesMap[code].consumoAcumulado += Math.abs(consVal);
+          articlesMap[code].teoricoAcumulado += Math.abs(teoricoVal);
+          articlesMap[code].fisicoAcumulado += Math.abs(fisicoVal);
+          articlesMap[code].conteoReportes += 1;
+
+          // Category aggregate
+          if (!categoriesMap[type]) {
+            categoriesMap[type] = {
+              tipo: type,
+              desvioAcumulado: 0,
+              desvioAbsolutoAcumulado: 0,
+              consumoAcumulado: 0,
+              teoricoAcumulado: 0,
+              fisicoAcumulado: 0,
+              conteoReportes: 0
+            };
+          }
+          categoriesMap[type].desvioAcumulado += devVal;
+          categoriesMap[type].desvioAbsolutoAcumulado += Math.abs(devVal);
+          categoriesMap[type].consumoAcumulado += Math.abs(consVal);
+          categoriesMap[type].teoricoAcumulado += Math.abs(teoricoVal);
+          categoriesMap[type].fisicoAcumulado += Math.abs(fisicoVal);
+          categoriesMap[type].conteoReportes += 1;
+        });
+      }
+    });
+
+    const finalArticles = Object.values(articlesMap).map(art => {
+      let denom = art.consumoAcumulado;
+      if (percentBase === 'teorico') denom = art.teoricoAcumulado;
+      else if (percentBase === 'fisico') denom = art.fisicoAcumulado;
+
+      return {
+        ...art,
+        porcentajeDesvio: denom !== 0 ? (art.desvioAcumulado / denom) * 100 : 0
+      };
+    });
+
+    const finalCategories = Object.values(categoriesMap).map(cat => {
+      let denom = cat.consumoAcumulado;
+      if (percentBase === 'teorico') denom = cat.teoricoAcumulado;
+      else if (percentBase === 'fisico') denom = cat.fisicoAcumulado;
+
+      return {
+        ...cat,
+        porcentajeDesvio: denom !== 0 ? (cat.desvioAcumulado / denom) * 100 : 0
+      };
+    });
+
+    return {
+      documentsCount: matchedDocs.length,
+      articles: finalArticles,
+      categories: finalCategories
+    };
+  }, [fullHistoricalDocs, analysisPeriod, percentBase, isWithinPeriod]);
+
+  // Unique list of category names in the analytical dataset
+  const availableCategories = useMemo(() => {
+    return desviosAnalysis.categories.map(c => c.tipo);
+  }, [desviosAnalysis.categories]);
+
+  // Filtered list of analytical articles by user search query and category filter
+  const filteredAnalysisArticles = useMemo(() => {
+    let list = desviosAnalysis.articles;
+
+    if (desviosViewGrouped === 'grupo') {
+      // Build Reverse Map for Consolidated Groups
+      const sqlToInsumoMap: Record<string, string> = {};
+      Object.entries(insumoMappings || {}).forEach(([insName, idStr]) => {
+        if (idStr) sqlToInsumoMap[idStr as string] = insName;
+      });
+
+      if (config) {
+        (config.preformasConfig || []).forEach(p => { if (p.sqlCode) sqlToInsumoMap[p.sqlCode] = p.name; });
+        (config.termoConfig || []).forEach(t => { if (t.sqlCode) sqlToInsumoMap[t.sqlCode] = t.name; });
+        (config.stretchConfig || []).forEach(s => { if (s.sqlCode) sqlToInsumoMap[s.sqlCode] = s.name; });
+        (config.tapaConfig || []).forEach(tp => { if (tp.sqlCode) sqlToInsumoMap[tp.sqlCode] = tp.name; });
+      }
+
+      const combinedGroups = config ? [
+        ...(config.compatibleInsumoGroups ? Object.values(config.compatibleInsumoGroups) : []),
+        ...(config.compatiblePackagingGroups ? Object.values(config.compatiblePackagingGroups) : [])
+      ] as string[][] : [];
+
+      const groupedMap: Record<string, {
+        codigo: string;
+        producto: string;
+        tipo: string;
+        desvioAcumulado: number;
+        desvioAbsolutoAcumulado: number;
+        consumoAcumulado: number;
+        teoricoAcumulado: number;
+        fisicoAcumulado: number;
+        conteoReportes: number;
+        porcentajeDesvio: number;
+      }> = {};
+
+      list.forEach(art => {
+        const insName = sqlToInsumoMap[art.codigo];
+        let groupKey: string | null = null;
+        if (insName) {
+          const group = combinedGroups.find(g => g.includes(insName));
+          if (group) {
+            groupKey = `Grupo Consolidado: ${group.join(' / ')}`;
+          }
+        }
+
+        const targetKey = groupKey || art.producto;
+        const targetCode = groupKey ? 'G-' + art.codigo : art.codigo;
+
+        if (!groupedMap[targetKey]) {
+          groupedMap[targetKey] = {
+            codigo: targetCode,
+            producto: targetKey,
+            tipo: art.tipo || 'Insumo',
+            desvioAcumulado: 0,
+            desvioAbsolutoAcumulado: 0,
+            consumoAcumulado: 0,
+            teoricoAcumulado: 0,
+            fisicoAcumulado: 0,
+            conteoReportes: 0,
+            porcentajeDesvio: 0
+          };
+        }
+
+        groupedMap[targetKey].desvioAcumulado += art.desvioAcumulado;
+        groupedMap[targetKey].desvioAbsolutoAcumulado += art.desvioAbsolutoAcumulado;
+        groupedMap[targetKey].consumoAcumulado += art.consumoAcumulado;
+        groupedMap[targetKey].teoricoAcumulado += art.teoricoAcumulado;
+        groupedMap[targetKey].fisicoAcumulado += art.fisicoAcumulado;
+        groupedMap[targetKey].conteoReportes = Math.max(groupedMap[targetKey].conteoReportes, art.conteoReportes);
+      });
+
+      list = Object.values(groupedMap).map(g => {
+        let denom = g.consumoAcumulado;
+        if (percentBase === 'teorico') denom = g.teoricoAcumulado;
+        else if (percentBase === 'fisico') denom = g.fisicoAcumulado;
+        return {
+          ...g,
+          porcentajeDesvio: denom !== 0 ? (g.desvioAcumulado / denom) * 100 : 0
+        };
+      });
+    }
+
+    if (analysisCategoryFilter !== 'all') {
+      list = list.filter(item => item.tipo === analysisCategoryFilter);
+    }
+    if (analysisSearch.trim() !== '') {
+      const q = analysisSearch.toLowerCase();
+      list = list.filter(item => 
+        item.codigo.toLowerCase().includes(q) ||
+        item.producto.toLowerCase().includes(q)
+      );
+    }
+    // Sort articles by magnitude of total deviation by default
+    return [...list].sort((a, b) => b.desvioAbsolutoAcumulado - a.desvioAbsolutoAcumulado);
+  }, [desviosAnalysis.articles, analysisSearch, analysisCategoryFilter, desviosViewGrouped, config, insumoMappings, percentBase]);
+
+  // Compute monthly evolution data for articles and categories for any month on record
+  const monthlyEvolutionAnalysis = useMemo(() => {
+    const monthKeysSet = new Set<string>();
+    fullHistoricalDocs.forEach(docVal => {
+      const dateVal = docVal.inventoryDate || docVal.uploadedAt?.substring(0, 10);
+      if (dateVal && dateVal.length >= 7) {
+        monthKeysSet.add(dateVal.substring(0, 7)); // YYYY-MM
+      }
+    });
+
+    const sortedMonths = Array.from(monthKeysSet).sort((a, b) => b.localeCompare(a)); // Newest first
+
+    const formatMonthAbbr = (ym: string) => {
+      const [year, month] = ym.split('-');
+      const monthsSpan = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+      const monthIdx = parseInt(month, 10) - 1;
+      return `${monthsSpan[monthIdx] || month} ${year}`;
+    };
+
+    const monthlyArticlesMap: Record<string, {
+      codigo: string;
+      producto: string;
+      tipo: string;
+      months: Record<string, { desvio: number; consumo: number; teorico: number; fisico: number }>;
+    }> = {};
+
+    const monthlyCategoriesMap: Record<string, {
+      tipo: string;
+      months: Record<string, { desvio: number; consumo: number; teorico: number; fisico: number }>;
+    }> = {};
+
+    fullHistoricalDocs.forEach(itemDoc => {
+      const dateVal = itemDoc.inventoryDate || itemDoc.uploadedAt?.substring(0, 10);
+      if (!dateVal || dateVal.length < 7) return;
+      const monthKey = dateVal.substring(0, 7);
+
+      if (Array.isArray(itemDoc.items)) {
+        itemDoc.items.forEach((item: any) => {
+          const code = item.codigo || 'S/C';
+          const name = item.producto || 'Desconocido';
+          const type = item.tipo || 'Insumo';
+          const devVal = item.desvio || 0;
+          const consVal = item.salidaConsumo || 0;
+          const teoricoVal = item.saldoTeoricoSinJust || 0;
+          const fisicoVal = item.saldoFinalDeposito || 0;
+
+          // Article Monthly setup
+          if (!monthlyArticlesMap[code]) {
+            monthlyArticlesMap[code] = {
+              codigo: code,
+              producto: name,
+              tipo: type,
+              months: {}
+            };
+          }
+          if (!monthlyArticlesMap[code].months[monthKey]) {
+            monthlyArticlesMap[code].months[monthKey] = { desvio: 0, consumo: 0, teorico: 0, fisico: 0 };
+          }
+          const artMonth = monthlyArticlesMap[code].months[monthKey];
+          artMonth.desvio += devVal;
+          artMonth.consumo += Math.abs(consVal);
+          artMonth.teorico += Math.abs(teoricoVal);
+          artMonth.fisico += Math.abs(fisicoVal);
+
+          // Category Monthly setup
+          if (!monthlyCategoriesMap[type]) {
+            monthlyCategoriesMap[type] = {
+              tipo: type,
+              months: {}
+            };
+          }
+          if (!monthlyCategoriesMap[type].months[monthKey]) {
+            monthlyCategoriesMap[type].months[monthKey] = { desvio: 0, consumo: 0, teorico: 0, fisico: 0 };
+          }
+          const catMonth = monthlyCategoriesMap[type].months[monthKey];
+          catMonth.desvio += devVal;
+          catMonth.consumo += Math.abs(consVal);
+          catMonth.teorico += Math.abs(teoricoVal);
+          catMonth.fisico += Math.abs(fisicoVal);
+        });
+      }
+    });
+
+    // Build Reverse Map for Consolidated Groups
+    const sqlToInsumoMap: Record<string, string> = {};
+    Object.entries(insumoMappings || {}).forEach(([insName, idStr]) => {
+      if (idStr) sqlToInsumoMap[idStr as string] = insName;
+    });
+
+    if (config) {
+      (config.preformasConfig || []).forEach(p => { if (p.sqlCode) sqlToInsumoMap[p.sqlCode] = p.name; });
+      (config.termoConfig || []).forEach(t => { if (t.sqlCode) sqlToInsumoMap[t.sqlCode] = t.name; });
+      (config.stretchConfig || []).forEach(s => { if (s.sqlCode) sqlToInsumoMap[s.sqlCode] = s.name; });
+      (config.tapaConfig || []).forEach(tp => { if (tp.sqlCode) sqlToInsumoMap[tp.sqlCode] = tp.name; });
+    }
+
+    const combinedGroups = config ? [
+      ...(config.compatibleInsumoGroups ? Object.values(config.compatibleInsumoGroups) : []),
+      ...(config.compatiblePackagingGroups ? Object.values(config.compatiblePackagingGroups) : [])
+    ] as string[][] : [];
+
+    // Group articles by consolidated groups
+    const monthlyGroupsMap: Record<string, {
+      codigo: string;
+      producto: string;
+      tipo: string;
+      months: Record<string, { desvio: number; consumo: number; teorico: number; fisico: number }>;
+    }> = {};
+
+    Object.values(monthlyArticlesMap).forEach(art => {
+      const insName = sqlToInsumoMap[art.codigo];
+      let groupKey: string | null = null;
+      if (insName) {
+        const group = combinedGroups.find(g => g.includes(insName));
+        if (group) {
+          groupKey = `Grupo Consolidado: ${group.join(' / ')}`;
+        }
+      }
+
+      const targetKey = groupKey || art.producto;
+      const targetCode = groupKey ? 'G-' + art.codigo : art.codigo;
+
+      if (!monthlyGroupsMap[targetKey]) {
+        monthlyGroupsMap[targetKey] = {
+          codigo: targetCode,
+          producto: targetKey,
+          tipo: art.tipo || 'Insumo',
+          months: {}
+        };
+      }
+
+      Object.entries(art.months).forEach(([monthKey, mData]) => {
+        if (!monthlyGroupsMap[targetKey].months[monthKey]) {
+          monthlyGroupsMap[targetKey].months[monthKey] = { desvio: 0, consumo: 0, teorico: 0, fisico: 0 };
+        }
+        const groupMonth = monthlyGroupsMap[targetKey].months[monthKey];
+        groupMonth.desvio += mData.desvio;
+        groupMonth.consumo += mData.consumo;
+        groupMonth.teorico += mData.teorico;
+        groupMonth.fisico += mData.fisico;
+      });
+    });
+
+    const getPorcentaje = (mData: { desvio: number; consumo: number; teorico: number; fisico: number }) => {
+      let denom = mData.consumo;
+      if (percentBase === 'teorico') denom = mData.teorico;
+      else if (percentBase === 'fisico') denom = mData.fisico;
+      return denom !== 0 ? (mData.desvio / denom) * 100 : 0;
+    };
+
+    const articlesList = Object.values(monthlyArticlesMap).map(art => {
+      const monthsData: Record<string, { desvio: number; consumo: number; teorico: number; fisico: number; porcentaje: number }> = {};
+      sortedMonths.forEach(mKey => {
+        const mData = art.months[mKey];
+        if (mData) {
+          monthsData[mKey] = {
+            ...mData,
+            porcentaje: getPorcentaje(mData)
+          };
+        }
+      });
+      return {
+        ...art,
+        monthsList: monthsData
+      };
+    });
+
+    const categoriesList = Object.values(monthlyCategoriesMap).map(cat => {
+      const monthsData: Record<string, { desvio: number; consumo: number; teorico: number; fisico: number; porcentaje: number }> = {};
+      sortedMonths.forEach(mKey => {
+        const mData = cat.months[mKey];
+        if (mData) {
+          monthsData[mKey] = {
+            ...mData,
+            porcentaje: getPorcentaje(mData)
+          };
+        }
+      });
+      return {
+        ...cat,
+        monthsList: monthsData
+      };
+    });
+
+    const groupsList = Object.values(monthlyGroupsMap).map(grp => {
+      const monthsData: Record<string, { desvio: number; consumo: number; teorico: number; fisico: number; porcentaje: number }> = {};
+      sortedMonths.forEach(mKey => {
+        const mData = grp.months[mKey];
+        if (mData) {
+          monthsData[mKey] = {
+            ...mData,
+            porcentaje: getPorcentaje(mData)
+          };
+        }
+      });
+      return {
+        ...grp,
+        monthsList: monthsData
+      };
+    });
+
+    return {
+      sortedMonths,
+      formattedMonths: sortedMonths.map(m => ({ key: m, label: formatMonthAbbr(m) })),
+      articles: articlesList,
+      categories: categoriesList,
+      groups: groupsList
+    };
+  }, [fullHistoricalDocs, insumoMappings, config, percentBase]);
+
+  // Filtered list of monthly evolution articles
+  const filteredMonthlyArticles = useMemo(() => {
+    let list = monthlyEvolutionAnalysis.articles;
+    if (analysisCategoryFilter !== 'all') {
+      list = list.filter(item => item.tipo === analysisCategoryFilter);
+    }
+    if (mensualSearch.trim() !== '') {
+      const q = mensualSearch.toLowerCase();
+      list = list.filter(item => 
+        item.codigo.toLowerCase().includes(q) ||
+        item.producto.toLowerCase().includes(q)
+      );
+    }
+    return [...list].sort((a, b) => a.producto.localeCompare(b.producto));
+  }, [monthlyEvolutionAnalysis.articles, mensualSearch, analysisCategoryFilter]);
+
+  // Filtered list of monthly evolution categories
+  const filteredMonthlyCategories = useMemo(() => {
+    let list = monthlyEvolutionAnalysis.categories;
+    if (mensualSearch.trim() !== '') {
+      const q = mensualSearch.toLowerCase();
+      list = list.filter(item => 
+        item.tipo.toLowerCase().includes(q)
+      );
+    }
+    return [...list].sort((a, b) => a.tipo.localeCompare(b.tipo));
+  }, [monthlyEvolutionAnalysis.categories, mensualSearch]);
+
+  // Filtered list of monthly evolution groups
+  const filteredMonthlyGroups = useMemo(() => {
+    let list = monthlyEvolutionAnalysis.groups;
+    if (analysisCategoryFilter !== 'all') {
+      list = list.filter(item => item.tipo === analysisCategoryFilter);
+    }
+    if (mensualSearch.trim() !== '') {
+      const q = mensualSearch.toLowerCase();
+      list = list.filter(item => 
+        item.codigo.toLowerCase().includes(q) ||
+        item.producto.toLowerCase().includes(q)
+      );
+    }
+    return [...list].sort((a, b) => a.producto.localeCompare(b.producto));
+  }, [monthlyEvolutionAnalysis.groups, mensualSearch, analysisCategoryFilter]);
 
   // Equivalent analysis matching system insumos to Excel values
   const systemEquivalences = useMemo(() => {
@@ -485,6 +980,82 @@ export function PhysicalInventoryReport() {
   const processedTableRows = useMemo(() => {
     let list = [...uploadedInventory];
 
+    if (config) {
+      const combinedGroups = [
+        ...(config.compatibleInsumoGroups ? Object.values(config.compatibleInsumoGroups) : []),
+        ...(config.compatiblePackagingGroups ? Object.values(config.compatiblePackagingGroups) : [])
+      ] as string[][];
+
+      const sqlToInsumoMap: Record<string, string> = {};
+      systemEquivalences.forEach(eq => {
+         if (eq.matched && eq.code !== 'S/C') {
+            sqlToInsumoMap[eq.code] = eq.insumoName;
+         }
+      });
+
+      const groupedConfigList: PhysicalInventoryRow[] = [];
+      const usedIds = new Set<string>();
+
+      list.forEach(row => {
+         if (usedIds.has(row.codigo)) return;
+         
+         const insumoName = sqlToInsumoMap[row.codigo];
+         if (insumoName) {
+            const group = combinedGroups.find(g => g.includes(insumoName));
+            if (group) {
+                const groupRows = list.filter(r => {
+                   const rName = sqlToInsumoMap[r.codigo];
+                   return rName && group.includes(rName);
+                });
+
+                if (groupRows.length > 1) {
+                   const merged: PhysicalInventoryRow = {
+                       codigo: 'G-' + groupRows[0].codigo,
+                       producto: `Grupo Consolidado: ${group.join(' / ')}`,
+                       tipo: groupRows[0].tipo,
+                       saldoInicial: 0,
+                       entradasAlmacen: 0,
+                       entradasOtros: 0,
+                       devolucionAlmacen: 0,
+                       salidaOtros: 0,
+                       salidaConsumo: 0,
+                       ajustePositivo: 0,
+                       ajusteNegativo: 0,
+                       saldoTeoricoSinJust: 0,
+                       saldoFinalDeposito: 0,
+                       desvio: 0,
+                       porcentaje: 0
+                   };
+                   groupRows.forEach(gr => {
+                      merged.saldoInicial += gr.saldoInicial;
+                      merged.entradasAlmacen += gr.entradasAlmacen;
+                      merged.entradasOtros += gr.entradasOtros;
+                      merged.devolucionAlmacen += gr.devolucionAlmacen;
+                      merged.salidaOtros += gr.salidaOtros;
+                      merged.salidaConsumo += gr.salidaConsumo;
+                      merged.ajustePositivo += gr.ajustePositivo;
+                      merged.ajusteNegativo += gr.ajusteNegativo;
+                      merged.saldoTeoricoSinJust = (merged.saldoTeoricoSinJust || 0) + (gr.saldoTeoricoSinJust || 0);
+                      merged.saldoFinalDeposito += gr.saldoFinalDeposito;
+                      merged.desvio += gr.desvio;
+                   });
+                   
+                   // desvio is summed directly inside the loop above
+                   merged.porcentaje = merged.salidaConsumo !== 0 ? (merged.desvio / Math.abs(merged.salidaConsumo)) * 100 : 0;
+                   
+                   groupedConfigList.push(merged);
+                   groupRows.forEach(gr => usedIds.add(gr.codigo));
+                   return;
+                }
+            }
+         }
+         
+         groupedConfigList.push(row);
+         usedIds.add(row.codigo);
+      });
+      list = groupedConfigList;
+    }
+
     // Term search
     if (searchTerm.trim() !== '') {
       const term = searchTerm.toLowerCase();
@@ -519,7 +1090,7 @@ export function PhysicalInventoryReport() {
     });
 
     return list;
-  }, [uploadedInventory, searchTerm, typeFilter, sortField, sortAsc]);
+  }, [uploadedInventory, searchTerm, typeFilter, sortField, sortAsc, config, systemEquivalences]);
 
   // Available parsed categories
   const parsedCategories = useMemo(() => {
@@ -626,11 +1197,12 @@ export function PhysicalInventoryReport() {
 
       {/* Historical Side Panel overlay drawer */}
       {historyOpen && (
-        <div className="bg-white rounded-2xl border border-indigo-100 p-6 shadow-md shadow-indigo-50/50 transition-all">
-          <div className="flex items-center justify-between border-b pb-3 mb-4">
+        <div className="bg-white rounded-2xl border border-indigo-100 p-6 shadow-md shadow-indigo-50/50 transition-all space-y-4 animate-fadeIn" id="historical-panel-container">
+          {/* Header */}
+          <div className="flex items-center justify-between border-b border-gray-100 pb-3">
             <h3 className="text-sm font-black text-indigo-900 uppercase tracking-widest flex items-center gap-2">
               <History className="w-4 h-4" />
-              Histórico de Cargas Guardadas
+              Historial y Análisis Acumulado d​e Desvíos
             </h3>
             <button 
               onClick={() => setHistoryOpen(false)}
@@ -640,35 +1212,652 @@ export function PhysicalInventoryReport() {
             </button>
           </div>
 
-          {historicalLoads.length === 0 ? (
-            <p className="text-gray-400 text-xs py-4 text-center">No hay registros de inventarios cargados anteriormente.</p>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {historicalLoads.map((load) => (
-                <div 
-                  key={load.id}
-                  onClick={() => loadHistoricalInventory(load.id)}
-                  className="bg-gray-50 hover:bg-indigo-50/40 border border-gray-100 hover:border-indigo-200 rounded-xl p-4 cursor-pointer transition-all flex items-start justify-between gap-4"
-                >
-                  <div className="space-y-1">
-                    <span className="text-xs font-bold text-gray-900 line-clamp-1 block" title={load.fileName}>{load.fileName}</span>
-                    <span className="text-[10px] text-gray-400 flex items-center gap-1">
-                      <Clock className="w-3 h-3 text-indigo-400" />
-                      {new Date(load.uploadedAt).toLocaleString('es-AR')}
-                    </span>
-                    <span className="text-[10px] font-black uppercase text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full inline-block">
-                      {load.itemsCount} Artículos
-                    </span>
+          {/* Tab Selection */}
+          <div className="flex items-center gap-2 border-b border-gray-100 pb-1">
+            <button
+              onClick={() => setHistoryTab('cargas')}
+              className={`px-4 py-2 text-xs font-black uppercase tracking-wider border-b-2 transition-all ${
+                historyTab === 'cargas'
+                  ? 'border-indigo-600 text-indigo-600'
+                  : 'border-transparent text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              Cargas Guardadas ({historicalLoads.length})
+            </button>
+            <button
+              onClick={() => setHistoryTab('desvios')}
+              className={`px-4 py-2 text-xs font-black uppercase tracking-wider border-b-2 transition-all ${
+                historyTab === 'desvios'
+                  ? 'border-indigo-600 text-indigo-600'
+                  : 'border-transparent text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              Análisis de Desvíos Acumulados
+            </button>
+            <button
+              onClick={() => setHistoryTab('mensual')}
+              className={`px-4 py-2 text-xs font-black uppercase tracking-wider border-b-2 transition-all ${
+                historyTab === 'mensual'
+                  ? 'border-indigo-600 text-indigo-600'
+                  : 'border-transparent text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              Evolución Mensual %
+            </button>
+          </div>
+
+          {/* Tab contents */}
+          {historyTab === 'cargas' && (
+            historicalLoads.length === 0 ? (
+              <p className="text-gray-400 text-xs py-4 text-center">No hay registros de inventarios cargados anteriormente.</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 animate-fadeIn">
+                {historicalLoads.map((load) => {
+                  // Format inventory calendar date nicely: yyyy-MM-dd to dd/MM/yyyy
+                  const formattedDate = load.inventoryDate 
+                    ? load.inventoryDate.split('-').reverse().join('/')
+                    : 'Sin fecha';
+
+                  return (
+                    <div 
+                      key={load.id}
+                      onClick={() => loadHistoricalInventory(load.id)}
+                      className="bg-gray-50 hover:bg-indigo-50/40 border border-gray-100 hover:border-indigo-200 rounded-xl p-4 cursor-pointer transition-all flex items-start justify-between gap-4"
+                    >
+                      <div className="space-y-1">
+                        <span className="text-xs font-bold text-gray-900 line-clamp-1 block animate-none" title={load.fileName}>{load.fileName}</span>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] text-indigo-700 font-bold flex items-center gap-1">
+                            <Calendar className="w-3 h-3 text-indigo-500" />
+                            Ref. Inventario: {formattedDate}
+                          </span>
+                          <span className="text-[10px] text-gray-400 flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-gray-400" />
+                            Cargado: {new Date(load.uploadedAt).toLocaleString('es-AR')}
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-black uppercase text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full inline-block">
+                          {load.itemsCount} Artículos
+                        </span>
+                      </div>
+                      <button
+                        onClick={(e) => deleteHistoricalInventory(e, load.id)}
+                        className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded-lg transition-colors border border-transparent hover:border-red-100 self-start shrink-0"
+                        title="Eliminar registro"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )
+          )}
+
+          {historyTab === 'desvios' && (
+            /* ANALYTICS TAB */
+            <div className="space-y-6 animate-fadeIn">
+              {/* Controls and quick metrics */}
+              <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                {/* Left controls column */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4 flex-wrap">
+                  {/* Period Selector */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider block">Periodo de Análisis</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { id: '1month', label: 'Último Mes' },
+                        { id: '3months', label: 'Últimos 3 Meses' },
+                        { id: '6months', label: 'Últimos 6 Meses' },
+                        { id: 'year', label: 'Último Año' },
+                        { id: 'all', label: 'Histórico Completo' }
+                      ].map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => setAnalysisPeriod(p.id)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                            analysisPeriod === p.id
+                              ? 'bg-indigo-600 text-white shadow-sm'
+                              : 'bg-white hover:bg-slate-100 border border-slate-200 text-gray-600'
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <button
-                    onClick={(e) => deleteHistoricalInventory(e, load.id)}
-                    className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded-lg transition-colors border border-transparent hover:border-red-100"
-                    title="Eliminar registro"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+
+                  {/* Group Mode Selector */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider block">Visualización</label>
+                    <div className="flex bg-white border border-slate-200 rounded-lg p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setDesviosViewGrouped('articulo')}
+                        className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${
+                          desviosViewGrouped === 'articulo'
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        Artículos
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDesviosViewGrouped('grupo')}
+                        className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${
+                          desviosViewGrouped === 'grupo'
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        Grupo Consolidado
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Percent Base Selector */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider block">Base de Cálculo Desvío % (Origen)</label>
+                    <select
+                      value={percentBase}
+                      onChange={(e) => setPercentBase(e.target.value as any)}
+                      className="bg-white border border-slate-200 rounded-lg text-xs font-bold text-gray-700 py-1.5 px-3 focus:outline-none focus:ring-1 focus:ring-indigo-500 h-8"
+                    >
+                      <option value="consumo">Consumo Neto (Salidas)</option>
+                      <option value="teorico">Stock Teórico (Saldos)</option>
+                      <option value="fisico">Saldo Físico (Inventario)</option>
+                    </select>
+                  </div>
                 </div>
-              ))}
+
+                {/* Quick Statistics */}
+                <div className="flex gap-4 shrink-0 sm:self-end">
+                  <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-sm min-w-[125px]">
+                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider block">Inventarios</span>
+                    <span className="text-lg font-black text-indigo-700">{desviosAnalysis.documentsCount}</span>
+                    <span className="text-[9px] text-gray-400 block mt-0.5">procesados</span>
+                  </div>
+                  <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-sm min-w-[140px]">
+                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider block">Artículos Controlados</span>
+                    <span className="text-lg font-black text-indigo-700">{desviosAnalysis.articles.length}</span>
+                    <span className="text-[9px] text-gray-400 block mt-0.5">bajo auditoría</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Grid content */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                {/* Categories Aggregated Table */}
+                <div className="lg:col-span-1 bg-white border border-slate-100 rounded-xl p-4 shadow-sm space-y-3">
+                  <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
+                    <Layers className="w-4 h-4 text-indigo-600" />
+                    <h4 className="text-xs font-black uppercase text-gray-800 tracking-wider">Desvío por Categoría</h4>
+                  </div>
+
+                  {desviosAnalysis.categories.length === 0 ? (
+                    <p className="text-gray-400 text-xs py-4 text-center">Sin desvíos registrados en este periodo.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-gray-100 text-[10px] font-bold uppercase text-gray-400">
+                            <th className="py-2">Categoría</th>
+                            <th className="py-2 text-right">Controles</th>
+                            <th className="py-2 text-right">Desvío Neto</th>
+                            <th className="py-2 text-right">Desvío %</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50 text-[11px] font-medium text-gray-600">
+                          {desviosAnalysis.categories.map((cat) => (
+                            <tr key={cat.tipo} className="hover:bg-slate-50/50">
+                              <td className="py-2">
+                                <span className="font-extrabold text-gray-800">{cat.tipo}</span>
+                              </td>
+                              <td className="py-2 text-right text-gray-500">{cat.conteoReportes}</td>
+                              <td className="py-2 text-right font-black">
+                                <span className={
+                                  cat.desmioAcumulado < 0 || cat.desvioAcumulado < 0
+                                    ? 'text-red-600' 
+                                    : cat.desvioAcumulado > 0 
+                                      ? 'text-emerald-600' 
+                                      : 'text-gray-500'
+                                }>
+                                  {cat.desvioAcumulado > 0 ? `+${cat.desvioAcumulado.toLocaleString('es-AR')}` : cat.desvioAcumulado.toLocaleString('es-AR')}
+                                </span>
+                              </td>
+                              <td className="py-2 text-right font-black">
+                                <span className={
+                                  cat.porcentajeDesvio < 0 
+                                    ? 'text-red-600' 
+                                    : cat.porcentajeDesvio > 0 
+                                      ? 'text-emerald-600' 
+                                      : 'text-gray-500'
+                                }>
+                                  {cat.porcentajeDesvio > 0 ? `+${cat.porcentajeDesvio.toFixed(1)}%` : `${cat.porcentajeDesvio.toFixed(1)}%`}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* Articles Aggregated Table */}
+                <div className="lg:col-span-2 bg-white border border-slate-100 rounded-xl p-4 shadow-sm space-y-4">
+                  {/* Title and filters */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-indigo-600" />
+                      <h4 className="text-xs font-black uppercase text-gray-800 tracking-wider">Desvíos por Artículo (Mayor Desvío Primero)</h4>
+                    </div>
+                    
+                    {/* Select Dropdown & Search Inside Analysis */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        value={analysisCategoryFilter}
+                        onChange={(e) => setAnalysisCategoryFilter(e.target.value)}
+                        className="bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-gray-700 py-1 px-2 focus:outline-none focus:ring-1 focus:ring-indigo-500 h-8"
+                      >
+                        <option value="all">Todas las Categorías</option>
+                        {availableCategories.map(catType => (
+                          <option key={catType} value={catType}>{catType}</option>
+                        ))}
+                      </select>
+
+                      <div className="relative max-w-xs shadow-xs">
+                        <Search className="absolute left-2.5 top-2.5 h-3 w-3 text-gray-400" />
+                        <input
+                          type="text"
+                          placeholder="Buscar por código o producto..."
+                          value={analysisSearch}
+                          onChange={(e) => setAnalysisSearch(e.target.value)}
+                          className="pl-8 pr-3 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs placeholder:text-gray-400 text-gray-700 font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500 h-8 text-[11px]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {filteredAnalysisArticles.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center p-8 text-center">
+                      <Search className="w-8 h-8 text-gray-300 mb-2" />
+                      <p className="text-gray-400 text-xs">No se encontraron artículos con desvíos en este rango.</p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto max-h-[380px] overflow-y-auto w-full">
+                      <table className="w-full text-left border-collapse table-auto min-w-[500px]">
+                        <thead>
+                          <tr className="sticky top-0 bg-white border-b border-gray-100 text-[10px] font-bold uppercase text-gray-400 z-10">
+                            <th className="py-2.5">Artículo</th>
+                            <th className="py-2.5">Categoría</th>
+                            <th className="py-2.5 text-right">Controles</th>
+                            <th className="py-2.5 text-right">Desvío Acumulado</th>
+                            <th className="py-2.5 text-right">Desvío %</th>
+                            <th className="py-2.5 text-right">Magnitud Absoluta</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50 text-[11px] font-semibold text-gray-600">
+                          {filteredAnalysisArticles.map((art) => (
+                            <tr key={art.codigo} className="hover:bg-slate-50">
+                              <td className="py-2.5">
+                                <div className="font-extrabold text-gray-900 line-clamp-1 truncate max-w-[170px]" title={art.producto}>{art.producto}</div>
+                                <span className="font-mono text-[9px] text-gray-400 block">{art.codigo}</span>
+                              </td>
+                              <td className="py-2.5">
+                                <span className="px-2 py-0.5 text-[9px] font-black uppercase text-slate-600 bg-slate-100 rounded-md">
+                                  {art.tipo}
+                                </span>
+                              </td>
+                              <td className="py-2.5 text-right text-gray-500 font-bold">
+                                {art.conteoReportes}
+                              </td>
+                              <td className="py-2.5 text-right font-black">
+                                <span className={
+                                  art.desvioAcumulado < 0 
+                                    ? 'text-red-650 text-red-650 text-red-600' 
+                                    : art.desvioAcumulado > 0 
+                                      ? 'text-emerald-600 font-black' 
+                                      : 'text-gray-500'
+                                }>
+                                  {art.desvioAcumulado > 0 ? `+${art.desvioAcumulado.toLocaleString('es-AR')}` : art.desvioAcumulado.toLocaleString('es-AR')}
+                                </span>
+                              </td>
+                              <td className="py-2.5 text-right font-black">
+                                <span className={
+                                  art.porcentajeDesvio < 0 
+                                    ? 'text-red-600' 
+                                    : art.porcentajeDesvio > 0 
+                                      ? 'text-emerald-600' 
+                                      : 'text-gray-500'
+                                }>
+                                  {art.porcentajeDesvio > 0 ? `+${art.porcentajeDesvio.toFixed(1)}%` : `${art.porcentajeDesvio.toFixed(1)}%`}
+                                </span>
+                              </td>
+                              <td className="py-2.5 text-right font-black text-slate-700">
+                                {art.desvioAbsolutoAcumulado.toLocaleString('es-AR')}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+              </div>
+            </div>
+          )}
+
+          {historyTab === 'mensual' && (
+            <div className="space-y-6 animate-fadeIn">
+              {/* Controls */}
+              <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                <div className="flex flex-wrap items-center gap-4">
+                  {/* View mode toggle */}
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider block">Visualizar por</span>
+                    <div className="flex bg-white border border-slate-200 rounded-lg p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setMensualFilterType('articulo')}
+                        className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${
+                          mensualFilterType === 'articulo'
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        Artículos
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMensualFilterType('categoria')}
+                        className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${
+                          mensualFilterType === 'categoria'
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        Categorías
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMensualFilterType('grupo')}
+                        className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${
+                          mensualFilterType === 'grupo'
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        Grupos Consolidados
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Base de Cálculo Selector */}
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider block">Fuente de Datos (Desvío %)</span>
+                    <select
+                      value={percentBase}
+                      onChange={(e) => setPercentBase(e.target.value as any)}
+                      className="bg-white border border-slate-200 rounded-lg text-xs font-bold text-gray-700 py-1 px-2.5 h-8 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    >
+                      <option value="consumo">Consumo Neto (Salidas)</option>
+                      <option value="teorico">Stock Teórico (Saldos)</option>
+                      <option value="fisico">Saldo Físico (Inventario)</option>
+                    </select>
+                  </div>
+
+                  {/* Font Family Selector */}
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider block">Tipografía (Letra)</span>
+                    <select
+                      value={prefFont}
+                      onChange={(e) => setPrefFont(e.target.value as any)}
+                      className="bg-white border border-slate-200 rounded-lg text-xs font-bold text-gray-700 py-1 px-2.5 h-8 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    >
+                      <option value="sans">Interfaz Limpia (Inter Web)</option>
+                      <option value="display">Moderna (Outfit Display)</option>
+                      <option value="mono">Técnica (JetBrains Mono)</option>
+                    </select>
+                  </div>
+
+                  {/* Category Filter for Articles & Groups */}
+                  {(mensualFilterType === 'articulo' || mensualFilterType === 'grupo') && (
+                    <div className="space-y-1">
+                      <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider block">Filtrar Categoría</span>
+                      <select
+                        value={analysisCategoryFilter}
+                        onChange={(e) => setAnalysisCategoryFilter(e.target.value)}
+                        className="bg-white border border-slate-200 rounded-lg text-xs font-bold text-gray-700 py-1 px-2.5 h-8 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      >
+                        <option value="all">Todas las Categorías</option>
+                        {availableCategories.map(catType => (
+                          <option key={catType} value={catType}>{catType}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                {/* Monthly Search */}
+                <div className="space-y-1">
+                  <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider block">Búsqueda</span>
+                  <div className="relative max-w-xs shadow-xs">
+                    <Search className="absolute left-2.5 top-2.5 h-3 w-3 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Buscar..."
+                      value={mensualSearch}
+                      onChange={(e) => setMensualSearch(e.target.value)}
+                      className="pl-8 pr-3 py-1 w-full bg-white border border-slate-200 rounded-lg text-xs placeholder:text-gray-400 text-gray-700 font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500 h-8"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Monthly percentage Table */}
+              <div className="bg-white border border-slate-100 rounded-xl p-4 shadow-sm space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-indigo-600" />
+                    <h4 className="text-xs font-black uppercase text-gray-800 tracking-wider">
+                      Desvíos Porcentuales Históricos Mes a Mes
+                    </h4>
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-400 hidden sm:inline">
+                    *Porcentaje calculado sobre {percentBase === 'consumo' ? 'consumo' : percentBase === 'teorico' ? 'stock teórico' : 'saldo físico'}. Pase el cursor para ver detalles de volumen.
+                  </span>
+                </div>
+
+                {monthlyEvolutionAnalysis.sortedMonths.length === 0 ? (
+                  <p className="text-gray-400 text-xs py-12 text-center">No se encontraron datos históricos de inventario para desplegar la evolución mensual.</p>
+                ) : (
+                  <div className="overflow-x-auto w-full">
+                    <table className={`w-full text-left border-collapse table-fixed min-w-[750px] ${
+                      prefFont === 'sans' ? 'font-sans' : prefFont === 'display' ? 'font-display tracking-[0.015em]' : 'font-mono'
+                    }`}>
+                      <thead>
+                        <tr className="border-b border-gray-100 text-[10px] font-bold uppercase text-gray-400">
+                          <th className="py-2.5 w-[220px]">Elemento</th>
+                          {(mensualFilterType === 'articulo' || mensualFilterType === 'grupo') && <th className="py-2.5 w-[110px]">Categoría</th>}
+                          {monthlyEvolutionAnalysis.formattedMonths.map(m => (
+                            <th key={m.key} className="py-2.5 text-center text-[10px] font-black text-indigo-900 bg-indigo-50/20 px-1 truncate">
+                              {m.label}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50 text-[11px] font-semibold text-gray-600">
+                        {mensualFilterType === 'articulo' ? (
+                          filteredMonthlyArticles.length === 0 ? (
+                            <tr>
+                              <td colSpan={monthlyEvolutionAnalysis.sortedMonths.length + 2} className="py-8 text-center text-gray-400 text-xs">
+                                No se encontraron artículos coincidentes.
+                              </td>
+                            </tr>
+                          ) : (
+                            filteredMonthlyArticles.map(art => (
+                              <tr key={art.codigo} className="hover:bg-slate-50/50">
+                                <td className="py-3 pr-2 truncate" title={art.producto}>
+                                  <div className="font-extrabold text-gray-900 truncate max-w-[200px]" title={art.producto}>{art.producto}</div>
+                                  <span className="font-mono text-[9px] text-slate-400 block">{art.codigo}</span>
+                                </td>
+                                <td className="py-3">
+                                  <span className="px-2 py-0.5 text-[9px] font-black uppercase text-slate-600 bg-slate-100 rounded-md">
+                                    {art.tipo}
+                                  </span>
+                                </td>
+                                {monthlyEvolutionAnalysis.sortedMonths.map(monthKey => {
+                                  const mData = art.monthsList[monthKey];
+                                  if (!mData) {
+                                    return (
+                                      <td key={monthKey} className="py-3 text-center text-gray-300 font-normal">
+                                        -
+                                      </td>
+                                    );
+                                  }
+                                  const labelStr = mData.porcentaje > 0 ? `+${mData.porcentaje.toFixed(1)}%` : `${mData.porcentaje.toFixed(1)}%`;
+                                  return (
+                                    <td key={monthKey} className="py-3 px-1 text-center font-mono">
+                                      <span 
+                                        className={`inline-block w-full py-1 rounded-md text-[10px] font-bold ${
+                                          mData.porcentaje < 0 
+                                            ? 'text-red-750 bg-red-50/70 text-red-700' 
+                                            : mData.porcentaje > 0 
+                                              ? 'text-emerald-750 bg-emerald-50/70 text-emerald-700' 
+                                              : 'text-gray-500 bg-gray-50/50'
+                                        }`}
+                                        title={`Desvío: ${mData.desvio > 0 ? '+' : ''}${mData.desvio.toLocaleString('es-AR')} | Base: ${
+                                          percentBase === 'consumo' 
+                                            ? mData.consumo.toLocaleString('es-AR') 
+                                            : percentBase === 'teorico' 
+                                              ? mData.teorico.toLocaleString('es-AR') 
+                                              : mData.fisico.toLocaleString('es-AR')
+                                        }`}
+                                      >
+                                        {labelStr}
+                                      </span>
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))
+                          )
+                        ) : mensualFilterType === 'categoria' ? (
+                          filteredMonthlyCategories.length === 0 ? (
+                            <tr>
+                              <td colSpan={monthlyEvolutionAnalysis.sortedMonths.length + 1} className="py-8 text-center text-gray-400 text-xs">
+                                No se encontraron categorías coincidentes.
+                              </td>
+                            </tr>
+                          ) : (
+                            filteredMonthlyCategories.map(cat => (
+                              <tr key={cat.tipo} className="hover:bg-slate-50/50">
+                                <td className="py-3 font-extrabold text-gray-900">
+                                  {cat.tipo}
+                                </td>
+                                {monthlyEvolutionAnalysis.sortedMonths.map(monthKey => {
+                                  const mData = cat.monthsList[monthKey];
+                                  if (!mData) {
+                                    return (
+                                      <td key={monthKey} className="py-3 text-center text-gray-300 font-normal">
+                                        -
+                                      </td>
+                                    );
+                                  }
+                                  const labelStr = mData.porcentaje > 0 ? `+${mData.porcentaje.toFixed(1)}%` : `${mData.porcentaje.toFixed(1)}%`;
+                                  return (
+                                    <td key={monthKey} className="py-3 px-1 text-center font-mono">
+                                      <span 
+                                        className={`inline-block w-full py-1 rounded-md text-[10px] font-bold ${
+                                          mData.porcentaje < 0 
+                                            ? 'text-red-750 bg-red-50/70 text-red-700' 
+                                            : mData.porcentaje > 0 
+                                              ? 'text-emerald-750 bg-emerald-50/70 text-emerald-700' 
+                                              : 'text-gray-500 bg-gray-50/50'
+                                        }`}
+                                        title={`Desvío: ${mData.desvio > 0 ? '+' : ''}${mData.desvio.toLocaleString('es-AR')} | Base: ${
+                                          percentBase === 'consumo' 
+                                            ? mData.consumo.toLocaleString('es-AR') 
+                                            : percentBase === 'teorico' 
+                                              ? mData.teorico.toLocaleString('es-AR') 
+                                              : mData.fisico.toLocaleString('es-AR')
+                                        }`}
+                                      >
+                                        {labelStr}
+                                      </span>
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))
+                          )
+                        ) : (
+                          /* GRUPO CONSOLIDADO MODE */
+                          filteredMonthlyGroups.length === 0 ? (
+                            <tr>
+                              <td colSpan={monthlyEvolutionAnalysis.sortedMonths.length + 2} className="py-8 text-center text-gray-400 text-xs">
+                                No se encontraron grupos consolidados.
+                              </td>
+                            </tr>
+                          ) : (
+                            filteredMonthlyGroups.map(grp => (
+                              <tr key={grp.producto} className="hover:bg-slate-50/50">
+                                <td className="py-3 pr-2 truncate">
+                                  <div className="font-extrabold text-gray-900 truncate max-w-[200px]" title={grp.producto}>{grp.producto}</div>
+                                  <span className="font-mono text-[9px] text-gray-400 block">Consolidado</span>
+                                </td>
+                                <td className="py-3">
+                                  <span className="px-2 py-0.5 text-[9px] font-black uppercase text-indigo-600 bg-indigo-50 rounded-md">
+                                    {grp.tipo}
+                                  </span>
+                                </td>
+                                {monthlyEvolutionAnalysis.sortedMonths.map(monthKey => {
+                                  const mData = grp.monthsList[monthKey];
+                                  if (!mData) {
+                                    return (
+                                      <td key={monthKey} className="py-3 text-center text-gray-300 font-normal">
+                                        -
+                                      </td>
+                                    );
+                                  }
+                                  const labelStr = mData.porcentaje > 0 ? `+${mData.porcentaje.toFixed(1)}%` : `${mData.porcentaje.toFixed(1)}%`;
+                                  return (
+                                    <td key={monthKey} className="py-3 px-1 text-center font-mono">
+                                      <span 
+                                        className={`inline-block w-full py-1 rounded-md text-[10px] font-bold ${
+                                          mData.porcentaje < 0 
+                                            ? 'text-red-750 bg-red-50/70 text-red-700' 
+                                            : mData.porcentaje > 0 
+                                              ? 'text-emerald-750 bg-emerald-50/70 text-emerald-700' 
+                                              : 'text-gray-500 bg-gray-50/50'
+                                        }`}
+                                        title={`Desvío: ${mData.desvio > 0 ? '+' : ''}${mData.desvio.toLocaleString('es-AR')} | Base: ${
+                                          percentBase === 'consumo' 
+                                            ? mData.consumo.toLocaleString('es-AR') 
+                                            : percentBase === 'teorico' 
+                                              ? mData.teorico.toLocaleString('es-AR') 
+                                              : mData.fisico.toLocaleString('es-AR')
+                                        }`}
+                                      >
+                                        {labelStr}
+                                      </span>
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))
+                          )
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -768,57 +1957,7 @@ export function PhysicalInventoryReport() {
 
           </div>
 
-          {/* Equivalent / Mapped Database Groups Table (Coverage Indicators Removed) */}
-          <div className="bg-white rounded-2xl border border-gray-150 p-6 shadow-sm">
-            <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <h3 className="text-md font-bold text-gray-900 flex items-center gap-1.5 font-sans">
-                  <Layers className="w-5 h-5 text-indigo-600" />
-                  Mapeo de Equivalencias de Insumos Activos
-                </h3>
-                <p className="text-xs text-gray-400 mt-1">Conexión directa entre los insumos vigentes del sistema y los registros leídos del Excel</p>
-              </div>
-            </div>
 
-            {systemEquivalences.length === 0 ? (
-              <p className="text-center py-6 text-xs text-gray-400">Verifique las configuraciones y mappings de códigos en Administración.</p>
-            ) : (
-              <div className="overflow-x-auto border border-gray-100 rounded-xl">
-                <table className="min-w-full divide-y divide-gray-100 text-xs">
-                  <thead>
-                    <tr className="bg-slate-50 text-gray-500 uppercase tracking-wider font-black text-left text-[10px]">
-                      <th className="px-4 py-3 font-sans">Insumo del Sistema</th>
-                      <th className="px-4 py-3 font-sans">Código Mapeado</th>
-                      <th className="px-4 py-3 font-sans">Descripción en Excel</th>
-                      <th className="px-4 py-3 font-sans">Categoría</th>
-                      <th className="px-4 py-3 text-right font-sans">Existencia Física (Excel)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-150">
-                    {systemEquivalences.map((res: any, idx: number) => (
-                      <tr key={idx} className={`hover:bg-slate-50/70 transition-colors ${!res.matched ? 'bg-gray-50/30' : ''}`}>
-                        <td className="px-4 py-3.5">
-                          <span className="font-extrabold text-slate-800 block text-[11px] leading-snug">{res.insumoName}</span>
-                        </td>
-                        <td className="px-4 py-3.5 font-mono font-bold text-gray-500">{res.code}</td>
-                        <td className={`px-4 py-3.5 text-slate-700 italic font-medium ${!res.matched ? 'text-gray-400 font-normal' : ''}`}>
-                          {res.excelName}
-                        </td>
-                        <td className="px-4 py-3.5">
-                          <span className="text-[9px] bg-slate-100 px-2 py-0.5 rounded-full text-slate-600 font-extrabold uppercase">
-                            {res.tipo}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3.5 text-right font-extrabold text-indigo-900 bg-indigo-50/5">
-                          {res.matched ? Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(res.saldoFinalDeposito) : '-'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
 
           {/* Filtering and Detailed Table Tab */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
@@ -888,15 +2027,24 @@ export function PhysicalInventoryReport() {
                         <div className="flex items-center justify-end gap-1">Saldo Inicial <ArrowUpDown className="w-3 h-3" /></div>
                       </th>
                       <th className="px-4 py-3 text-right font-sans">Movs (+ / -)</th>
+                      <th className="px-4 py-3 text-right cursor-pointer select-none font-sans" onClick={() => requestSort('saldoTeoricoSinJust')}>
+                        <div className="flex items-center justify-end gap-1">Stock Teórico <ArrowUpDown className="w-3 h-3" /></div>
+                      </th>
                       <th className="px-4 py-3 text-right cursor-pointer select-none text-indigo-850 font-sans" onClick={() => requestSort('saldoFinalDeposito')}>
                         <div className="flex items-center justify-end gap-1">Stock Físico <ArrowUpDown className="w-3 h-3" /></div>
+                      </th>
+                      <th className="px-4 py-3 text-right cursor-pointer select-none font-sans" onClick={() => requestSort('desvio')}>
+                        <div className="flex items-center justify-end gap-1">Desvío <ArrowUpDown className="w-3 h-3" /></div>
+                      </th>
+                      <th className="px-4 py-3 text-right cursor-pointer select-none font-sans" onClick={() => requestSort('porcentaje')}>
+                        <div className="flex items-center justify-end gap-1">Desvío % <ArrowUpDown className="w-3 h-3" /></div>
                       </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {processedTableRows.map((row, idx) => {
-                      const calculatedIn = (row.entradasAlmacen + row.entradasOtros + row.ajustePositivo);
-                      const calculatedOut = (row.devolucionAlmacen + row.salidaOtros + row.salidaConsumo + row.ajusteNegativo);
+                      const calculatedIn = (row.entradasAlmacen + row.entradasOtros);
+                      const calculatedOut = (row.devolucionAlmacen + row.salidaOtros + row.salidaConsumo);
                       const isDesv = Math.abs(row.desvio) > 0.01;
                       
                       return (
@@ -915,8 +2063,17 @@ export function PhysicalInventoryReport() {
                             <span className="text-[10px] text-emerald-600 block font-bold">+{Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(calculatedIn)}</span>
                             <span className="text-[10px] text-red-500 block font-bold">-{Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(Math.abs(calculatedOut))}</span>
                           </td>
+                          <td className="px-4 py-3 text-right font-bold text-gray-800 bg-gray-50">
+                            {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(row.saldoTeoricoSinJust || 0)}
+                          </td>
                           <td className="px-4 py-3 text-right font-extrabold text-indigo-900 bg-indigo-50/15">
                             {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(row.saldoFinalDeposito)}
+                          </td>
+                          <td className={`px-4 py-3 text-right font-bold ${row.desvio < 0 ? 'text-red-600' : row.desvio > 0 ? 'text-emerald-600' : 'text-gray-500'}`}>
+                            {row.desvio > 0 ? '+' : ''}{Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(row.desvio)}
+                          </td>
+                          <td className={`px-4 py-3 text-right font-bold ${row.porcentaje < -5 ? 'text-red-700 bg-red-50' : row.porcentaje > 5 ? 'text-emerald-700 bg-emerald-50' : 'text-gray-500'}`}>
+                            {row.porcentaje > 0 ? '+' : ''}{Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(row.porcentaje)}%
                           </td>
                         </tr>
                       );

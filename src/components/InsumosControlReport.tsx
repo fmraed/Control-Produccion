@@ -2496,7 +2496,7 @@ export function InsumosControlReport() {
             <div className="space-y-6">
               {/* Empaque Grupos */}
               {(() => {
-                const items = [...programCrossover.requiredInsumosAgg].filter(item => isEmpaqueItem(item.insumoName));
+                const items = [...programCrossover.requiredInsumosAgg].filter(item => isEmpaqueItem(item.insumoName) && getPackingCategory(item.insumoName) !== 'Etiquetas');
                 const groups: Record<string, typeof items> = {};
                 items.forEach(item => {
                   const cat = getPackingCategory(item.insumoName);
@@ -2658,7 +2658,7 @@ export function InsumosControlReport() {
                                 return (
                                   <tr key={item.insumoName} className="hover:bg-slate-50 transition-colors">
                                     <td className="px-4 py-3">
-                                      <span className="font-bold text-gray-900 block truncate max-w-[200px]" title={item.insumoName}>
+                                      <span className="font-bold text-gray-900 block" title={item.insumoName}>
                                         {item.insumoName}
                                       </span>
                                     </td>
@@ -2695,7 +2695,7 @@ export function InsumosControlReport() {
 
                       {/* Empaque Grupos */}
                       {(() => {
-                        const items = [...programCrossover.requiredInsumosAgg].filter(item => isEmpaqueItem(item.insumoName));
+                        const items = [...programCrossover.requiredInsumosAgg].filter(item => isEmpaqueItem(item.insumoName) && getPackingCategory(item.insumoName) !== 'Etiquetas');
                         const groups: Record<string, typeof items> = {};
                         items.forEach(item => {
                           const cat = getPackingCategory(item.insumoName);
@@ -2725,7 +2725,7 @@ export function InsumosControlReport() {
                                     return (
                                       <tr key={item.insumoName} className="hover:bg-orange-50/30 transition-colors">
                                         <td className="px-4 py-3">
-                                          <span className="font-bold text-gray-900 block truncate max-w-[200px]" title={item.insumoName}>
+                                          <span className="font-bold text-gray-900 block break-words whitespace-normal" title={item.insumoName}>
                                             {item.insumoName}
                                           </span>
                                         </td>
@@ -2761,6 +2761,67 @@ export function InsumosControlReport() {
                           </div>
                         ));
                       })()}
+
+                      {/* Etiquetas Grupo (Solo consumidas en el plan) */}
+                      {(() => {
+                        const items = [...programCrossover.requiredInsumosAgg].filter(item => getPackingCategory(item.insumoName) === 'Etiquetas' && item.requiredKg > 0);
+                        if (items.length === 0) return null;
+                        
+                        return (
+                          <div className="mt-6">
+                            <h4 className="font-bold text-xs text-indigo-900 uppercase tracking-widest block mb-4">Etiquetas</h4>
+                            <div className="overflow-x-auto">
+                              <table className="min-w-full divide-y divide-gray-200">
+                                <thead>
+                                  <tr className="bg-indigo-50/50 text-indigo-800 font-bold uppercase text-xs tracking-wide">
+                                    <th className="px-4 py-3 text-left">Insumo</th>
+                                    <th className="px-4 py-3 text-right text-indigo-700">Req. Semanal</th>
+                                    <th className="px-4 py-3 text-right">Stock</th>
+                                    <th className="px-4 py-3 text-center">Estado (Semanal)</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 bg-white text-sm">
+                                  {items.map(item => {
+                                    return (
+                                      <tr key={item.insumoName} className="hover:bg-indigo-50/30 transition-colors">
+                                        <td className="px-4 py-3">
+                                          <span className="font-bold text-gray-900 block break-words whitespace-normal" title={item.insumoName}>
+                                            {item.insumoName}
+                                          </span>
+                                        </td>
+                                        <td className="px-4 py-3 text-right">
+                                          <span className="font-semibold text-indigo-700">
+                                            {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.requiredKg)} u.
+                                          </span>
+                                        </td>
+                                        <td className="px-4 py-3 text-right font-medium text-gray-800">
+                                          {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)} u.
+                                        </td>
+                                        <td className="px-4 py-3 text-center">
+                                          {item.requiredKg === 0 ? (
+                                            <span className="bg-gray-200 text-gray-600 text-[10px] font-black uppercase px-2 py-1 rounded">
+                                              Sin programar
+                                            </span>
+                                          ) : item.isMet ? (
+                                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase px-2 py-1 rounded inline-flex items-center gap-1">
+                                              <CheckCircle2 className="w-3 h-3 text-emerald-600" /> OK
+                                            </span>
+                                          ) : (
+                                            <span className="bg-red-100 text-red-800 text-[10px] font-black uppercase px-2 py-1 rounded inline-flex items-center gap-1 leading-tight">
+                                              <TrendingDown className="w-3 h-3 text-red-600" /> Falta {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.deficit)} u.
+                                            </span>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
                     </div>
 
                     {/* Weekly Production Supplies Summary (Preformas, Termo, Stretch, Tapas, Etiquetas) */}
@@ -2844,7 +2905,7 @@ export function InsumosControlReport() {
                           <div className="mt-3 border-t border-slate-200/60 pt-2 max-h-[120px] overflow-y-auto space-y-1.5 scrollbar-thin">
                             {Object.entries(programCrossover.tapasAgg || {}).map(([key, value]) => (
                               <div key={key} className="flex justify-between items-center text-[11px] font-medium text-slate-700">
-                                <span className="truncate max-w-[90px] font-semibold" title={key}>{key}</span>
+                                <span className="font-semibold text-left break-words max-w-[120px]" title={key}>{key}</span>
                                 <span className="font-bold font-mono text-blue-900 bg-blue-50 px-1.5 py-0.5 rounded whitespace-nowrap">{Intl.NumberFormat('es-AR').format(value as number)} u.</span>
                               </div>
                             ))}
@@ -2864,7 +2925,7 @@ export function InsumosControlReport() {
                           <div className="mt-3 border-t border-slate-200/60 pt-2 max-h-[120px] overflow-y-auto space-y-1.5 scrollbar-thin">
                             {Object.entries(programCrossover.etiquetasAgg || {}).map(([key, value]) => (
                               <div key={key} className="flex justify-between items-center text-[11px] font-medium text-slate-700">
-                                <span className="truncate max-w-[90px] font-semibold" title={key}>{key}</span>
+                                <span className="font-semibold text-left break-words max-w-[120px]" title={key}>{key}</span>
                                 <span className="font-bold font-mono text-rose-950 bg-rose-50 px-1.5 py-0.5 rounded whitespace-nowrap">{Intl.NumberFormat('es-AR').format(value as number)} u.</span>
                               </div>
                             ))}
