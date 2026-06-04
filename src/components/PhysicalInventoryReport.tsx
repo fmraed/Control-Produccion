@@ -76,8 +76,10 @@ export function PhysicalInventoryReport() {
   const [isSavingInventory, setIsSavingInventory] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [historyTab, setHistoryTab] = useState<'cargas' | 'desvios' | 'mensual'>('cargas');
+  
+  // Tabs and view structures
+  const [activeMainTab, setActiveMainTab] = useState<'historial' | 'carga'>('historial');
+  const [historyTab, setHistoryTab] = useState<'desvios' | 'mensual'>('desvios');
   const [analysisPeriod, setAnalysisPeriod] = useState<string>('all');
   const [analysisSearch, setAnalysisSearch] = useState<string>('');
   const [analysisCategoryFilter, setAnalysisCategoryFilter] = useState<string>('all');
@@ -86,6 +88,55 @@ export function PhysicalInventoryReport() {
   const [percentBase, setPercentBase] = useState<'consumo' | 'teorico' | 'fisico'>('consumo');
   const [prefFont, setPrefFont] = useState<'sans' | 'display' | 'mono'>('sans');
   const [desviosViewGrouped, setDesviosViewGrouped] = useState<'articulo' | 'grupo'>('articulo');
+
+  // Advanced Sorting states
+  const [sortCatField, setSortCatField] = useState<'tipo' | 'conteoReportes' | 'desvioAcumulado' | 'porcentajeDesvio'>('tipo');
+  const [sortCatAsc, setSortCatAsc] = useState<boolean>(true);
+
+  const [sortArtField, setSortArtField] = useState<'producto' | 'codigo' | 'tipo' | 'conteoReportes' | 'desvioAcumulado' | 'porcentajeDesvio' | 'desvioAbsolutoAcumulado'>('desvioAbsolutoAcumulado');
+  const [sortArtAsc, setSortArtAsc] = useState<boolean>(false);
+
+  const [sortMonthlyField, setSortMonthlyField] = useState<string>('elemento');
+  const [sortMonthlyAsc, setSortMonthlyAsc] = useState<boolean>(true);
+
+  const handleSortCat = (field: typeof sortCatField) => {
+    if (sortCatField === field) {
+      setSortCatAsc(!sortCatAsc);
+    } else {
+      setSortCatField(field);
+      setSortCatAsc(true);
+    }
+  };
+
+  const handleSortArt = (field: typeof sortArtField) => {
+    if (sortArtField === field) {
+      setSortArtAsc(!sortArtAsc);
+    } else {
+      setSortArtField(field);
+      setSortArtAsc(true);
+    }
+  };
+
+  const handleSortMonthly = (field: string) => {
+    if (sortMonthlyField === field) {
+      setSortMonthlyAsc(!sortMonthlyAsc);
+    } else {
+      setSortMonthlyField(field);
+      setSortMonthlyAsc(true);
+    }
+  };
+
+  const deleteHistoricalInventory = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm("¿Está seguro de que desea eliminar permanentemente esta planilla histórica del sistema?")) return;
+    try {
+      await deleteDoc(doc(db, 'physical_inventories', id));
+      setError(null);
+    } catch (err: any) {
+      console.error("Error deleting historical inventory document:", err);
+      setError("No se pudo eliminar el registro histórico.");
+    }
+  };
 
   // Sorting and Filtering
   const [searchTerm, setSearchTerm] = useState('');
@@ -385,7 +436,7 @@ export function PhysicalInventoryReport() {
           if (data.inventoryDate) {
             setInventoryDate(data.inventoryDate);
           }
-          setHistoryOpen(false);
+          setActiveMainTab('carga');
           setError(null);
         }
       }
@@ -394,16 +445,7 @@ export function PhysicalInventoryReport() {
     }
   };
 
-  // Remove trace from historical lists safely
-  const deleteHistoricalInventory = async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    if (!confirm('¿Está seguro de eliminar de forma permanente este registro histórico?')) return;
-    try {
-      await deleteDoc(doc(db, 'physical_inventories', id));
-    } catch (e: any) {
-      console.error("Deletion failed", e);
-    }
-  };
+
 
   // Helper to check if a date falls in the selected period
   const isWithinPeriod = useCallback((docDateStr: string, period: string) => {
@@ -530,12 +572,29 @@ export function PhysicalInventoryReport() {
       };
     });
 
+    finalCategories.sort((a, b) => {
+      let valA = a[sortCatField];
+      let valB = b[sortCatField];
+
+      if (typeof valA === 'string' && typeof valB === 'string') {
+        return sortCatAsc 
+          ? valA.localeCompare(valB) 
+          : valB.localeCompare(valA);
+      } else {
+        const numA = (valA as number) || 0;
+        const numB = (valB as number) || 0;
+        return sortCatAsc 
+          ? numA - numB 
+          : numB - numA;
+      }
+    });
+
     return {
       documentsCount: matchedDocs.length,
       articles: finalArticles,
       categories: finalCategories
     };
-  }, [fullHistoricalDocs, analysisPeriod, percentBase, isWithinPeriod]);
+  }, [fullHistoricalDocs, analysisPeriod, percentBase, isWithinPeriod, sortCatField, sortCatAsc]);
 
   // Unique list of category names in the analytical dataset
   const availableCategories = useMemo(() => {
@@ -635,9 +694,24 @@ export function PhysicalInventoryReport() {
         item.producto.toLowerCase().includes(q)
       );
     }
-    // Sort articles by magnitude of total deviation by default
-    return [...list].sort((a, b) => b.desvioAbsolutoAcumulado - a.desvioAbsolutoAcumulado);
-  }, [desviosAnalysis.articles, analysisSearch, analysisCategoryFilter, desviosViewGrouped, config, insumoMappings, percentBase]);
+    // Sort articles
+    return [...list].sort((a, b) => {
+      let valA = a[sortArtField];
+      let valB = b[sortArtField];
+
+      if (typeof valA === 'string' && typeof valB === 'string') {
+        return sortArtAsc 
+          ? valA.localeCompare(valB) 
+          : valB.localeCompare(valA);
+      } else {
+        const numA = (valA as number) || 0;
+        const numB = (valB as number) || 0;
+        return sortArtAsc 
+          ? numA - numB 
+          : numB - numA;
+      }
+    });
+  }, [desviosAnalysis.articles, analysisSearch, analysisCategoryFilter, desviosViewGrouped, config, insumoMappings, percentBase, sortArtField, sortArtAsc]);
 
   // Compute monthly evolution data for articles and categories for any month on record
   const monthlyEvolutionAnalysis = useMemo(() => {
@@ -862,8 +936,23 @@ export function PhysicalInventoryReport() {
         item.producto.toLowerCase().includes(q)
       );
     }
-    return [...list].sort((a, b) => a.producto.localeCompare(b.producto));
-  }, [monthlyEvolutionAnalysis.articles, mensualSearch, analysisCategoryFilter]);
+    return [...list].sort((a, b) => {
+      let result = 0;
+      if (sortMonthlyField === 'elemento') {
+        result = a.producto.localeCompare(b.producto);
+      } else if (sortMonthlyField === 'categoria') {
+        result = a.tipo.localeCompare(b.tipo);
+      } else {
+        const valA = a.monthsList[sortMonthlyField]?.porcentaje;
+        const valB = b.monthsList[sortMonthlyField]?.porcentaje;
+        if (valA === undefined && valB === undefined) result = 0;
+        else if (valA === undefined) result = 1;
+        else if (valB === undefined) result = -1;
+        else result = valA - valB;
+      }
+      return sortMonthlyAsc ? result : -result;
+    });
+  }, [monthlyEvolutionAnalysis.articles, mensualSearch, analysisCategoryFilter, sortMonthlyField, sortMonthlyAsc]);
 
   // Filtered list of monthly evolution categories
   const filteredMonthlyCategories = useMemo(() => {
@@ -874,8 +963,21 @@ export function PhysicalInventoryReport() {
         item.tipo.toLowerCase().includes(q)
       );
     }
-    return [...list].sort((a, b) => a.tipo.localeCompare(b.tipo));
-  }, [monthlyEvolutionAnalysis.categories, mensualSearch]);
+    return [...list].sort((a, b) => {
+      let result = 0;
+      if (sortMonthlyField === 'elemento' || sortMonthlyField === 'categoria') {
+        result = a.tipo.localeCompare(b.tipo);
+      } else {
+        const valA = a.monthsList[sortMonthlyField]?.porcentaje;
+        const valB = b.monthsList[sortMonthlyField]?.porcentaje;
+        if (valA === undefined && valB === undefined) result = 0;
+        else if (valA === undefined) result = 1;
+        else if (valB === undefined) result = -1;
+        else result = valA - valB;
+      }
+      return sortMonthlyAsc ? result : -result;
+    });
+  }, [monthlyEvolutionAnalysis.categories, mensualSearch, sortMonthlyField, sortMonthlyAsc]);
 
   // Filtered list of monthly evolution groups
   const filteredMonthlyGroups = useMemo(() => {
@@ -890,8 +992,23 @@ export function PhysicalInventoryReport() {
         item.producto.toLowerCase().includes(q)
       );
     }
-    return [...list].sort((a, b) => a.producto.localeCompare(b.producto));
-  }, [monthlyEvolutionAnalysis.groups, mensualSearch, analysisCategoryFilter]);
+    return [...list].sort((a, b) => {
+      let result = 0;
+      if (sortMonthlyField === 'elemento') {
+        result = a.producto.localeCompare(b.producto);
+      } else if (sortMonthlyField === 'categoria') {
+        result = a.tipo.localeCompare(b.tipo);
+      } else {
+        const valA = a.monthsList[sortMonthlyField]?.porcentaje;
+        const valB = b.monthsList[sortMonthlyField]?.porcentaje;
+        if (valA === undefined && valB === undefined) result = 0;
+        else if (valA === undefined) result = 1;
+        else if (valB === undefined) result = -1;
+        else result = valA - valB;
+      }
+      return sortMonthlyAsc ? result : -result;
+    });
+  }, [monthlyEvolutionAnalysis.groups, mensualSearch, analysisCategoryFilter, sortMonthlyField, sortMonthlyAsc]);
 
   // Equivalent analysis matching system insumos to Excel values
   const systemEquivalences = useMemo(() => {
@@ -1131,51 +1248,55 @@ export function PhysicalInventoryReport() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
         <div>
           <div className="flex items-center gap-3">
-            <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+            <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl">
               <FileSpreadsheet className="w-6 h-6 animate-pulse" />
             </div>
             <div>
               <h1 className="text-xl font-black text-gray-900 tracking-tight">Conciliación de Inventario Físico</h1>
-              <p className="text-xs text-gray-400 mt-0.5">Suba sus planillas Excel diarias/mensuales de existencias para analizar desvíos, auditar consumos y proyectar coberturas</p>
+              <p className="text-xs text-gray-400 mt-0.5">Suba sus planillas Excel de existencias para analizar desvíos históricos, auditar consumos y proyectar desvíos con exactitud</p>
             </div>
           </div>
         </div>
 
-        {/* Action Controls */}
-        <div className="flex items-center gap-3">
-          <input 
-            type="date"
-            value={inventoryDate}
-            onChange={(e) => setInventoryDate(e.target.value)}
-            className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-xs font-black text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
-          <button
-            onClick={() => setHistoryOpen(!historyOpen)}
-            className="px-4 py-2.5 bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all shadow-sm"
+        {/* Universal Web Font Style Configuration */}
+        <div className="flex items-center gap-2 self-start md:self-auto bg-slate-50 border border-slate-200/60 rounded-xl px-3 py-1.5 shrink-0 shadow-xs">
+          <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Tipografía / Letra:</span>
+          <select
+            value={prefFont}
+            onChange={(e) => setPrefFont(e.target.value as any)}
+            className="bg-white border border-slate-200 rounded-lg text-xs font-extrabold text-gray-700 py-1 px-2.5 h-7 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           >
-            <History className="w-4 h-4 text-indigo-600" />
-            Ver Historial ({historicalLoads.length})
-          </button>
-          
-          {uploadedInventory.length > 0 && (
-            <button
-              onClick={saveInventoryToSystem}
-              disabled={isSavingInventory}
-              className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all shadow-sm ${
-                isSavingInventory 
-                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                  : 'bg-emerald-600 hover:bg-emerald-700 text-white hover:shadow-emerald-200'
-              }`}
-            >
-              {isSavingInventory ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
-              ) : (
-                <Check className="w-4 h-4" />
-              )}
-              {isSavingInventory ? 'Guardando...' : 'Aplicar Inventario en Sistema'}
-            </button>
-          )}
+            <option value="sans">Interfaz Limpia (Inter Web)</option>
+            <option value="display">Moderna (Outfit Display)</option>
+            <option value="mono">Técnica (JetBrains Mono)</option>
+          </select>
         </div>
+      </div>
+
+      {/* Main Dual Tab Controller */}
+      <div className="flex border-b border-slate-200">
+        <button
+          onClick={() => setActiveMainTab('historial')}
+          className={`flex items-center gap-2 px-6 py-3 text-sm font-black uppercase tracking-wider border-b-2 transition-all duration-200 select-none ${
+            activeMainTab === 'historial'
+              ? 'border-indigo-600 text-indigo-600 bg-indigo-50/20 font-black'
+              : 'border-transparent text-gray-400 hover:text-gray-650 hover:bg-slate-50 font-bold'
+          }`}
+        >
+          <History className="w-4 h-4 text-indigo-505" />
+          Historial y Auditoría de Desvíos
+        </button>
+        <button
+          onClick={() => setActiveMainTab('carga')}
+          className={`flex items-center gap-2 px-6 py-3 text-sm font-black uppercase tracking-wider border-b-2 transition-all duration-200 select-none ${
+            activeMainTab === 'carga'
+              ? 'border-indigo-605 text-indigo-600 bg-indigo-50/20 font-black'
+              : 'border-transparent text-gray-405 text-gray-400 hover:text-gray-650 hover:bg-slate-50 font-bold'
+          }`}
+        >
+          <Upload className="w-4 h-4 text-emerald-505" />
+          Importar / Planilla Activa {uploadedInventory.length > 0 && `(${uploadedInventory.length})`}
+        </button>
       </div>
 
       {/* Upload Info Alerts */}
@@ -1183,117 +1304,114 @@ export function PhysicalInventoryReport() {
         <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl p-4 flex items-center gap-3 shadow-sm animate-fade-in">
           <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
           <div className="text-xs font-bold">
-            ¡Inventario consolidado correctamente en el sistema! Los datos de control de insumos y simuladores se han sincronizado con éxito.
+            ¡Planilla de inventario consolidada en base de datos correctamente! Desvíos agregados con éxito al Historial de Auditoría.
           </div>
         </div>
       )}
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-800 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
-          <XCircle className="w-5 h-5 text-red-600 shrink-0" />
+          <XCircle className="w-5 h-5 text-red-650 shrink-0" />
           <div className="text-xs font-bold">{error}</div>
         </div>
       )}
-
-      {/* Historical Side Panel overlay drawer */}
-      {historyOpen && (
-        <div className="bg-white rounded-2xl border border-indigo-100 p-6 shadow-md shadow-indigo-50/50 transition-all space-y-4 animate-fadeIn" id="historical-panel-container">
-          {/* Header */}
-          <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+      {activeMainTab === 'historial' && (
+        <div className="space-y-6" id="historical-panel-container">
+          
+          {/* Historical Saved Planillas Horizontal Scroll Deck */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm space-y-3">
             <h3 className="text-sm font-black text-indigo-900 uppercase tracking-widest flex items-center gap-2">
-              <History className="w-4 h-4" />
-              Historial y Análisis Acumulado d​e Desvíos
+              <Layers className="w-4 h-4 text-indigo-600" />
+              Lotes de Planillas Guardadas ({historicalLoads.length})
             </h3>
-            <button 
-              onClick={() => setHistoryOpen(false)}
-              className="text-xs text-gray-400 hover:text-gray-700 font-bold"
-            >
-              Cerrar (✕)
-            </button>
-          </div>
-
-          {/* Tab Selection */}
-          <div className="flex items-center gap-2 border-b border-gray-100 pb-1">
-            <button
-              onClick={() => setHistoryTab('cargas')}
-              className={`px-4 py-2 text-xs font-black uppercase tracking-wider border-b-2 transition-all ${
-                historyTab === 'cargas'
-                  ? 'border-indigo-600 text-indigo-600'
-                  : 'border-transparent text-gray-400 hover:text-gray-600'
-              }`}
-            >
-              Cargas Guardadas ({historicalLoads.length})
-            </button>
-            <button
-              onClick={() => setHistoryTab('desvios')}
-              className={`px-4 py-2 text-xs font-black uppercase tracking-wider border-b-2 transition-all ${
-                historyTab === 'desvios'
-                  ? 'border-indigo-600 text-indigo-600'
-                  : 'border-transparent text-gray-400 hover:text-gray-600'
-              }`}
-            >
-              Análisis de Desvíos Acumulados
-            </button>
-            <button
-              onClick={() => setHistoryTab('mensual')}
-              className={`px-4 py-2 text-xs font-black uppercase tracking-wider border-b-2 transition-all ${
-                historyTab === 'mensual'
-                  ? 'border-indigo-600 text-indigo-600'
-                  : 'border-transparent text-gray-400 hover:text-gray-600'
-              }`}
-            >
-              Evolución Mensual %
-            </button>
-          </div>
-
-          {/* Tab contents */}
-          {historyTab === 'cargas' && (
-            historicalLoads.length === 0 ? (
-              <p className="text-gray-400 text-xs py-4 text-center">No hay registros de inventarios cargados anteriormente.</p>
+            <p className="text-[11px] text-gray-400">Haga clic en cualquier tarjeta de planilla guardada para visualizarla en la pestaña de simulación/auditoría línea por línea</p>
+            
+            {historicalLoads.length === 0 ? (
+              <div className="bg-slate-50 text-gray-400 text-xs py-6 text-center rounded-xl border border-dashed border-slate-200">
+                Aún no hay planillas importadas en el sistema. Vaya a la pestaña "Importar / Planilla Activa" para subir su archivo Excel.
+              </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 animate-fadeIn">
-                {historicalLoads.map((load) => {
-                  // Format inventory calendar date nicely: yyyy-MM-dd to dd/MM/yyyy
-                  const formattedDate = load.inventoryDate 
-                    ? load.inventoryDate.split('-').reverse().join('/')
-                    : 'Sin fecha';
-
-                  return (
-                    <div 
-                      key={load.id}
-                      onClick={() => loadHistoricalInventory(load.id)}
-                      className="bg-gray-50 hover:bg-indigo-50/40 border border-gray-100 hover:border-indigo-200 rounded-xl p-4 cursor-pointer transition-all flex items-start justify-between gap-4"
-                    >
-                      <div className="space-y-1">
-                        <span className="text-xs font-bold text-gray-900 line-clamp-1 block animate-none" title={load.fileName}>{load.fileName}</span>
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-[10px] text-indigo-700 font-bold flex items-center gap-1">
-                            <Calendar className="w-3 h-3 text-indigo-500" />
-                            Ref. Inventario: {formattedDate}
-                          </span>
-                          <span className="text-[10px] text-gray-400 flex items-center gap-1">
-                            <Clock className="w-3 h-3 text-gray-400" />
-                            Cargado: {new Date(load.uploadedAt).toLocaleString('es-AR')}
-                          </span>
-                        </div>
-                        <span className="text-[10px] font-black uppercase text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full inline-block">
-                          {load.itemsCount} Artículos
-                        </span>
+              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-thin">
+                {historicalLoads.map((load) => (
+                  <div 
+                    key={load.id}
+                    onClick={() => loadHistoricalInventory(load.id)}
+                    className="bg-slate-50 hover:bg-indigo-50/20 border border-slate-200 hover:border-indigo-200 rounded-xl p-3 shadow-xs space-y-2 cursor-pointer transition-all duration-200 min-w-[240px] max-w-[250px] flex-shrink-0 group relative"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="space-y-0.5 truncate">
+                        <span className="font-mono text-[9px] font-black text-indigo-600 block truncate">{load.inventoryDate}</span>
+                        <h5 className="text-xs font-extrabold text-gray-800 truncate group-hover:text-indigo-900" title={load.fileName}>{load.fileName}</h5>
                       </div>
+                      
                       <button
-                        onClick={(e) => deleteHistoricalInventory(e, load.id)}
-                        className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded-lg transition-colors border border-transparent hover:border-red-100 self-start shrink-0"
-                        title="Eliminar registro"
+                        onClick={(e) => deleteHistoricalInventory(load.id, e)}
+                        className="p-1 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-md transition-colors"
+                        title="Eliminar este lote de inventario"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
-                  );
-                })}
+                    <div className="flex items-center justify-between text-[10px] text-gray-400 font-bold bg-white group-hover:bg-indigo-50/40 p-1.5 rounded-lg border border-slate-100 font-sans">
+                      <span className="flex items-center gap-1"><Clock className="w-3 h-3 text-slate-400" /> {load.uploadedAt.substring(11, 16)}hs</span>
+                      <span className="text-indigo-600">{load.itemsCount} artículos</span>
+                    </div>
+                  </div>
+                ))}
               </div>
-            )
-          )}
+            )}
+          </div>
 
+          <div className="bg-white rounded-2xl border border-indigo-50 p-6 shadow-sm space-y-4">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <h3 className="text-sm font-black text-indigo-900 uppercase tracking-widest flex items-center gap-2">
+                <History className="w-4 h-4 text-indigo-600" />
+                Historial y Análisis Acumulado d​e Desvíos
+              </h3>
+            </div>
+
+          {/* Tab Selection & Universal Web Font Style Configuration */}
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-gray-100 pb-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setHistoryTab('desvios')}
+                className={`px-4 py-2 text-xs font-black uppercase tracking-wider border-b-2 transition-all ${
+                  historyTab === 'desvios'
+                    ? 'border-indigo-600 text-indigo-600'
+                    : 'border-transparent text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                Análisis de Desvíos Acumulados
+              </button>
+              <button
+                onClick={() => setHistoryTab('mensual')}
+                className={`px-4 py-2 text-xs font-black uppercase tracking-wider border-b-2 transition-all ${
+                  historyTab === 'mensual'
+                    ? 'border-indigo-600 text-indigo-600'
+                    : 'border-transparent text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                Evolución Mensual %
+              </button>
+            </div>
+
+            {/* Typography Configuration for enhanced readability */}
+            <div className="flex items-center gap-2 self-start md:self-auto bg-slate-50 border border-slate-200/60 rounded-xl px-3 py-1.5 shrink-0 shadow-xs">
+              <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Tipografía / Letra:</span>
+              <select
+                value={prefFont}
+                onChange={(e) => setPrefFont(e.target.value as any)}
+                className="bg-white border border-slate-200 rounded-lg text-xs font-extrabold text-gray-700 py-1 px-2.5 h-7 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              >
+                <option value="sans">Interfaz Limpia (Inter Web)</option>
+                <option value="display">Moderna (Outfit Display)</option>
+                <option value="mono">Técnica (JetBrains Mono)</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Tab contents */}
           {historyTab === 'desvios' && (
             /* ANALYTICS TAB */
             <div className="space-y-6 animate-fadeIn">
@@ -1387,53 +1505,75 @@ export function PhysicalInventoryReport() {
                 </div>
               </div>
 
-              {/* Grid content */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Stacking layout vertically to avoid horizontal space constraints for Articles and Categories */}
+              <div className="space-y-6">
                 
                 {/* Categories Aggregated Table */}
-                <div className="lg:col-span-1 bg-white border border-slate-100 rounded-xl p-4 shadow-sm space-y-3">
+                <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-sm space-y-3">
                   <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
                     <Layers className="w-4 h-4 text-indigo-600" />
-                    <h4 className="text-xs font-black uppercase text-gray-800 tracking-wider">Desvío por Categoría</h4>
+                    <h4 className="text-xs font-black uppercase text-gray-800 tracking-wider">Desvío acumulado por Categoría</h4>
                   </div>
 
                   {desviosAnalysis.categories.length === 0 ? (
                     <p className="text-gray-400 text-xs py-4 text-center">Sin desvíos registrados en este periodo.</p>
                   ) : (
                     <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse">
+                      <table className={`w-full text-left border-collapse ${
+                        prefFont === 'sans' ? 'font-sans' : prefFont === 'display' ? 'font-display tracking-[0.015em]' : 'font-mono'
+                      }`}>
                         <thead>
-                          <tr className="border-b border-gray-100 text-[10px] font-bold uppercase text-gray-400">
-                            <th className="py-2">Categoría</th>
-                            <th className="py-2 text-right">Controles</th>
-                            <th className="py-2 text-right">Desvío Neto</th>
-                            <th className="py-2 text-right">Desvío %</th>
+                          <tr className="border-b border-gray-100 text-[11px] font-black uppercase text-slate-400 select-none">
+                            <th className="py-2.5 cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSortCat('tipo')}>
+                              <div className="flex items-center gap-1.5">
+                                Categoría
+                                {sortCatField === 'tipo' && <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
+                              </div>
+                            </th>
+                            <th className="py-2.5 text-right cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSortCat('conteoReportes')}>
+                              <div className="flex items-center justify-end gap-1.5">
+                                Controles
+                                {sortCatField === 'conteoReportes' && <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
+                              </div>
+                            </th>
+                            <th className="py-2.5 text-right cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSortCat('desvioAcumulado')}>
+                              <div className="flex items-center justify-end gap-1.5">
+                                Desvío Neto
+                                {sortCatField === 'desvioAcumulado' && <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
+                              </div>
+                            </th>
+                            <th className="py-2.5 text-right cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSortCat('porcentajeDesvio')}>
+                              <div className="flex items-center justify-end gap-1.5">
+                                Desvío %
+                                {sortCatField === 'porcentajeDesvio' && <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
+                              </div>
+                            </th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-50 text-[11px] font-medium text-gray-600">
+                        <tbody className="divide-y divide-gray-50 text-xs font-semibold text-gray-700 tabular-nums">
                           {desviosAnalysis.categories.map((cat) => (
                             <tr key={cat.tipo} className="hover:bg-slate-50/50">
-                              <td className="py-2">
-                                <span className="font-extrabold text-gray-800">{cat.tipo}</span>
+                              <td className="py-2.5">
+                                <span className="font-extrabold text-gray-900">{cat.tipo}</span>
                               </td>
-                              <td className="py-2 text-right text-gray-500">{cat.conteoReportes}</td>
-                              <td className="py-2 text-right font-black">
+                              <td className="py-2.5 text-right text-gray-500 font-medium">{cat.conteoReportes}</td>
+                              <td className="py-2.5 text-right font-black">
                                 <span className={
                                   cat.desmioAcumulado < 0 || cat.desvioAcumulado < 0
-                                    ? 'text-red-600' 
+                                    ? 'text-red-650 text-red-600' 
                                     : cat.desvioAcumulado > 0 
-                                      ? 'text-emerald-600' 
+                                      ? 'text-emerald-600 font-extrabold' 
                                       : 'text-gray-500'
                                 }>
                                   {cat.desvioAcumulado > 0 ? `+${cat.desvioAcumulado.toLocaleString('es-AR')}` : cat.desvioAcumulado.toLocaleString('es-AR')}
                                 </span>
                               </td>
-                              <td className="py-2 text-right font-black">
+                              <td className="py-2.5 text-right font-black">
                                 <span className={
                                   cat.porcentajeDesvio < 0 
-                                    ? 'text-red-600' 
+                                    ? 'text-red-600 font-bold' 
                                     : cat.porcentajeDesvio > 0 
-                                      ? 'text-emerald-600' 
+                                      ? 'text-emerald-605 text-emerald-600 font-bold' 
                                       : 'text-gray-500'
                                 }>
                                   {cat.porcentajeDesvio > 0 ? `+${cat.porcentajeDesvio.toFixed(1)}%` : `${cat.porcentajeDesvio.toFixed(1)}%`}
@@ -1448,12 +1588,12 @@ export function PhysicalInventoryReport() {
                 </div>
 
                 {/* Articles Aggregated Table */}
-                <div className="lg:col-span-2 bg-white border border-slate-100 rounded-xl p-4 shadow-sm space-y-4">
+                <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-sm space-y-4">
                   {/* Title and filters */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
                     <div className="flex items-center gap-2">
                       <FileText className="w-4 h-4 text-indigo-600" />
-                      <h4 className="text-xs font-black uppercase text-gray-800 tracking-wider">Desvíos por Artículo (Mayor Desvío Primero)</h4>
+                      <h4 className="text-xs font-black uppercase text-gray-800 tracking-wider">Desvíos por Artículo (Ordenable)</h4>
                     </div>
                     
                     {/* Select Dropdown & Search Inside Analysis */}
@@ -1488,39 +1628,71 @@ export function PhysicalInventoryReport() {
                       <p className="text-gray-400 text-xs">No se encontraron artículos con desvíos en este rango.</p>
                     </div>
                   ) : (
-                    <div className="overflow-x-auto max-h-[380px] overflow-y-auto w-full">
-                      <table className="w-full text-left border-collapse table-auto min-w-[500px]">
+                    <div className="overflow-x-auto w-full">
+                      <table className={`w-full text-left border-collapse table-auto min-w-[500px] ${
+                        prefFont === 'sans' ? 'font-sans' : prefFont === 'display' ? 'font-display tracking-[0.015em]' : 'font-mono'
+                      }`}>
                         <thead>
-                          <tr className="sticky top-0 bg-white border-b border-gray-100 text-[10px] font-bold uppercase text-gray-400 z-10">
-                            <th className="py-2.5">Artículo</th>
-                            <th className="py-2.5">Categoría</th>
-                            <th className="py-2.5 text-right">Controles</th>
-                            <th className="py-2.5 text-right">Desvío Acumulado</th>
-                            <th className="py-2.5 text-right">Desvío %</th>
-                            <th className="py-2.5 text-right">Magnitud Absoluta</th>
+                          <tr className="sticky top-0 bg-white border-b border-gray-100 text-[11px] font-black uppercase text-slate-400 z-10 select-none">
+                            <th className="py-2.5 cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSortArt('producto')}>
+                              <div className="flex items-center gap-1.5">
+                                Artículo
+                                {sortArtField === 'producto' && <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
+                              </div>
+                            </th>
+                            <th className="py-2.5 cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSortArt('tipo')}>
+                              <div className="flex items-center gap-1.5">
+                                Categoría
+                                {sortArtField === 'tipo' && <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
+                              </div>
+                            </th>
+                            <th className="py-2.5 text-right cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSortArt('conteoReportes')}>
+                              <div className="flex items-center justify-end gap-1.5">
+                                Controles
+                                {sortArtField === 'conteoReportes' && <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
+                              </div>
+                            </th>
+                            <th className="py-2.5 text-right cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSortArt('desvioAcumulado')}>
+                              <div className="flex items-center justify-end gap-1.5">
+                                Desvío Acumulado
+                                {sortArtField === 'desvioAcumulado' && <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
+                              </div>
+                            </th>
+                            <th className="py-2.5 text-right cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSortArt('porcentajeDesvio')}>
+                              <div className="flex items-center justify-end gap-1.5">
+                                Desvío %
+                                {sortArtField === 'porcentajeDesvio' && <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
+                              </div>
+                            </th>
+                            <th className="py-2.5 text-right cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSortArt('desvioAbsolutoAcumulado')}>
+                              <div className="flex items-center justify-end gap-1.5">
+                                Magnitud Absoluta
+                                {sortArtField === 'desvioAbsolutoAcumulado' && <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
+                              </div>
+                            </th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-50 text-[11px] font-semibold text-gray-600">
+                        <tbody className="divide-y divide-gray-50 text-xs font-semibold text-gray-700 tabular-nums">
                           {filteredAnalysisArticles.map((art) => (
                             <tr key={art.codigo} className="hover:bg-slate-50">
                               <td className="py-2.5">
-                                <div className="font-extrabold text-gray-900 line-clamp-1 truncate max-w-[170px]" title={art.producto}>{art.producto}</div>
-                                <span className="font-mono text-[9px] text-gray-400 block">{art.codigo}</span>
+                                <div className="font-extrabold text-gray-905 text-gray-900 line-clamp-1 truncate max-w-[280px]" title={art.producto}>{art.producto}</div>
+                                <span className="font-mono text-[9px] text-gray-405 text-gray-400 font-bold block">{art.codigo}</span>
                               </td>
                               <td className="py-2.5">
-                                <span className="px-2 py-0.5 text-[9px] font-black uppercase text-slate-600 bg-slate-100 rounded-md">
+                                <span className="px-2 py-0.5 text-[9px] font-black uppercase text-slate-700 bg-slate-100 rounded-md">
                                   {art.tipo}
                                 </span>
                               </td>
-                              <td className="py-2.5 text-right text-gray-500 font-bold">
+                              <td className="py-2.5 text-right text-gray-500 font-medium">
                                 {art.conteoReportes}
                               </td>
                               <td className="py-2.5 text-right font-black">
                                 <span className={
                                   art.desvioAcumulado < 0 
-                                    ? 'text-red-650 text-red-650 text-red-600' 
+                                    ? 'text-red-650 text-red-600 font-bold' 
                                     : art.desvioAcumulado > 0 
-                                      ? 'text-emerald-600 font-black' 
+                                      ? 'text-emerald-600 font-extrabold' 
                                       : 'text-gray-500'
                                 }>
                                   {art.desvioAcumulado > 0 ? `+${art.desvioAcumulado.toLocaleString('es-AR')}` : art.desvioAcumulado.toLocaleString('es-AR')}
@@ -1529,15 +1701,15 @@ export function PhysicalInventoryReport() {
                               <td className="py-2.5 text-right font-black">
                                 <span className={
                                   art.porcentajeDesvio < 0 
-                                    ? 'text-red-600' 
+                                    ? 'text-red-600 font-bold' 
                                     : art.porcentajeDesvio > 0 
-                                      ? 'text-emerald-600' 
+                                      ? 'text-emerald-605 text-emerald-600 font-bold' 
                                       : 'text-gray-500'
                                 }>
                                   {art.porcentajeDesvio > 0 ? `+${art.porcentajeDesvio.toFixed(1)}%` : `${art.porcentajeDesvio.toFixed(1)}%`}
                                 </span>
                               </td>
-                              <td className="py-2.5 text-right font-black text-slate-700">
+                              <td className="py-2.5 text-right font-black text-slate-800">
                                 {art.desvioAbsolutoAcumulado.toLocaleString('es-AR')}
                               </td>
                             </tr>
@@ -1611,20 +1783,6 @@ export function PhysicalInventoryReport() {
                     </select>
                   </div>
 
-                  {/* Font Family Selector */}
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider block">Tipografía (Letra)</span>
-                    <select
-                      value={prefFont}
-                      onChange={(e) => setPrefFont(e.target.value as any)}
-                      className="bg-white border border-slate-200 rounded-lg text-xs font-bold text-gray-700 py-1 px-2.5 h-8 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                    >
-                      <option value="sans">Interfaz Limpia (Inter Web)</option>
-                      <option value="display">Moderna (Outfit Display)</option>
-                      <option value="mono">Técnica (JetBrains Mono)</option>
-                    </select>
-                  </div>
-
                   {/* Category Filter for Articles & Groups */}
                   {(mensualFilterType === 'articulo' || mensualFilterType === 'grupo') && (
                     <div className="space-y-1">
@@ -1681,33 +1839,52 @@ export function PhysicalInventoryReport() {
                       prefFont === 'sans' ? 'font-sans' : prefFont === 'display' ? 'font-display tracking-[0.015em]' : 'font-mono'
                     }`}>
                       <thead>
-                        <tr className="border-b border-gray-100 text-[10px] font-bold uppercase text-gray-400">
-                          <th className="py-2.5 w-[220px]">Elemento</th>
-                          {(mensualFilterType === 'articulo' || mensualFilterType === 'grupo') && <th className="py-2.5 w-[110px]">Categoría</th>}
+                        <tr className="border-b border-gray-100 text-xs md:text-sm font-black uppercase text-indigo-950 select-none">
+                          <th className="py-3 w-[220px] px-3 bg-slate-50/50 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleSortMonthly('elemento')}>
+                            <div className="flex items-center gap-1.5">
+                              Elemento
+                              {sortMonthlyField === 'elemento' && <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
+                            </div>
+                          </th>
+                          {(mensualFilterType === 'articulo' || mensualFilterType === 'grupo') && (
+                            <th className="py-3 w-[110px] px-2 bg-slate-50/50 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleSortMonthly('categoria')}>
+                              <div className="flex items-center gap-1.5">
+                                Categoría
+                                {sortMonthlyField === 'categoria' && <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
+                              </div>
+                            </th>
+                          )}
                           {monthlyEvolutionAnalysis.formattedMonths.map(m => (
-                            <th key={m.key} className="py-2.5 text-center text-[10px] font-black text-indigo-900 bg-indigo-50/20 px-1 truncate">
-                              {m.label}
+                            <th 
+                              key={m.key} 
+                              onClick={() => handleSortMonthly(m.key)}
+                              className="py-3 text-center text-xs font-black text-indigo-950 bg-indigo-50/55 hover:bg-indigo-100/60 px-2 truncate min-w-[75px] cursor-pointer transition-colors"
+                            >
+                              <div className="flex items-center justify-center gap-1">
+                                {m.label}
+                                {sortMonthlyField === m.key && <ArrowUpDown className="w-3 h-3 text-indigo-600 shrink-0" />}
+                              </div>
                             </th>
                           ))}
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-50 text-[11px] font-semibold text-gray-600">
+                      <tbody className="divide-y divide-gray-100 text-xs md:text-sm font-bold text-gray-700 tabular-nums">
                         {mensualFilterType === 'articulo' ? (
                           filteredMonthlyArticles.length === 0 ? (
                             <tr>
-                              <td colSpan={monthlyEvolutionAnalysis.sortedMonths.length + 2} className="py-8 text-center text-gray-400 text-xs">
+                              <td colSpan={monthlyEvolutionAnalysis.sortedMonths.length + 2} className="py-8 text-center text-gray-400 text-sm">
                                 No se encontraron artículos coincidentes.
                               </td>
                             </tr>
                           ) : (
                             filteredMonthlyArticles.map(art => (
                               <tr key={art.codigo} className="hover:bg-slate-50/50">
-                                <td className="py-3 pr-2 truncate" title={art.producto}>
-                                  <div className="font-extrabold text-gray-900 truncate max-w-[200px]" title={art.producto}>{art.producto}</div>
-                                  <span className="font-mono text-[9px] text-slate-400 block">{art.codigo}</span>
+                                <td className="py-3.5 px-2 pr-2 truncate" title={art.producto}>
+                                  <div className="font-extrabold text-xs md:text-sm text-gray-900 truncate max-w-[200px]" title={art.producto}>{art.producto}</div>
+                                  <span className="font-mono text-[10px] md:text-xs text-slate-500 block font-semibold">{art.codigo}</span>
                                 </td>
-                                <td className="py-3">
-                                  <span className="px-2 py-0.5 text-[9px] font-black uppercase text-slate-600 bg-slate-100 rounded-md">
+                                <td className="py-3.5 px-2">
+                                  <span className="px-2 py-1 text-[10px] md:text-xs font-black uppercase text-slate-705 text-slate-700 bg-slate-100 rounded-md">
                                     {art.tipo}
                                   </span>
                                 </td>
@@ -1715,21 +1892,21 @@ export function PhysicalInventoryReport() {
                                   const mData = art.monthsList[monthKey];
                                   if (!mData) {
                                     return (
-                                      <td key={monthKey} className="py-3 text-center text-gray-300 font-normal">
+                                      <td key={monthKey} className="py-3.5 text-center text-gray-300 font-normal text-xs md:text-sm">
                                         -
                                       </td>
                                     );
                                   }
                                   const labelStr = mData.porcentaje > 0 ? `+${mData.porcentaje.toFixed(1)}%` : `${mData.porcentaje.toFixed(1)}%`;
                                   return (
-                                    <td key={monthKey} className="py-3 px-1 text-center font-mono">
+                                    <td key={monthKey} className="py-3.5 px-1.5 text-center font-mono">
                                       <span 
-                                        className={`inline-block w-full py-1 rounded-md text-[10px] font-bold ${
+                                        className={`inline-block w-full py-1.5 px-2 rounded-md text-xs md:text-[13px] font-black tracking-wide ${
                                           mData.porcentaje < 0 
-                                            ? 'text-red-750 bg-red-50/70 text-red-700' 
+                                            ? 'text-red-800 bg-red-100/90 text-red-900' 
                                             : mData.porcentaje > 0 
-                                              ? 'text-emerald-750 bg-emerald-50/70 text-emerald-700' 
-                                              : 'text-gray-500 bg-gray-50/50'
+                                              ? 'text-emerald-800 bg-emerald-100/90 text-emerald-900' 
+                                              : 'text-gray-600 bg-gray-100/80 font-bold'
                                         }`}
                                         title={`Desvío: ${mData.desvio > 0 ? '+' : ''}${mData.desvio.toLocaleString('es-AR')} | Base: ${
                                           percentBase === 'consumo' 
@@ -1750,35 +1927,35 @@ export function PhysicalInventoryReport() {
                         ) : mensualFilterType === 'categoria' ? (
                           filteredMonthlyCategories.length === 0 ? (
                             <tr>
-                              <td colSpan={monthlyEvolutionAnalysis.sortedMonths.length + 1} className="py-8 text-center text-gray-400 text-xs">
+                              <td colSpan={monthlyEvolutionAnalysis.sortedMonths.length + 1} className="py-8 text-center text-gray-400 text-sm">
                                 No se encontraron categorías coincidentes.
                               </td>
                             </tr>
                           ) : (
                             filteredMonthlyCategories.map(cat => (
                               <tr key={cat.tipo} className="hover:bg-slate-50/50">
-                                <td className="py-3 font-extrabold text-gray-900">
+                                <td className="py-4 px-2 font-black text-xs md:text-sm text-gray-900">
                                   {cat.tipo}
                                 </td>
                                 {monthlyEvolutionAnalysis.sortedMonths.map(monthKey => {
                                   const mData = cat.monthsList[monthKey];
                                   if (!mData) {
                                     return (
-                                      <td key={monthKey} className="py-3 text-center text-gray-300 font-normal">
+                                      <td key={monthKey} className="py-4 text-center text-gray-300 font-normal text-xs md:text-sm">
                                         -
                                       </td>
                                     );
                                   }
                                   const labelStr = mData.porcentaje > 0 ? `+${mData.porcentaje.toFixed(1)}%` : `${mData.porcentaje.toFixed(1)}%`;
                                   return (
-                                    <td key={monthKey} className="py-3 px-1 text-center font-mono">
+                                    <td key={monthKey} className="py-4 px-1.5 text-center font-mono">
                                       <span 
-                                        className={`inline-block w-full py-1 rounded-md text-[10px] font-bold ${
+                                        className={`inline-block w-full py-1.5 px-2 rounded-md text-xs md:text-[13px] font-black tracking-wide ${
                                           mData.porcentaje < 0 
-                                            ? 'text-red-750 bg-red-50/70 text-red-700' 
+                                            ? 'text-red-800 bg-red-100/90 text-red-900' 
                                             : mData.porcentaje > 0 
-                                              ? 'text-emerald-750 bg-emerald-50/70 text-emerald-700' 
-                                              : 'text-gray-500 bg-gray-50/50'
+                                              ? 'text-emerald-800 bg-emerald-100/90 text-emerald-900' 
+                                              : 'text-gray-600 bg-gray-100/80 font-bold'
                                         }`}
                                         title={`Desvío: ${mData.desvio > 0 ? '+' : ''}${mData.desvio.toLocaleString('es-AR')} | Base: ${
                                           percentBase === 'consumo' 
@@ -1800,19 +1977,19 @@ export function PhysicalInventoryReport() {
                           /* GRUPO CONSOLIDADO MODE */
                           filteredMonthlyGroups.length === 0 ? (
                             <tr>
-                              <td colSpan={monthlyEvolutionAnalysis.sortedMonths.length + 2} className="py-8 text-center text-gray-400 text-xs">
+                              <td colSpan={monthlyEvolutionAnalysis.sortedMonths.length + 2} className="py-8 text-center text-gray-400 text-sm">
                                 No se encontraron grupos consolidados.
                               </td>
                             </tr>
                           ) : (
                             filteredMonthlyGroups.map(grp => (
                               <tr key={grp.producto} className="hover:bg-slate-50/50">
-                                <td className="py-3 pr-2 truncate">
-                                  <div className="font-extrabold text-gray-900 truncate max-w-[200px]" title={grp.producto}>{grp.producto}</div>
-                                  <span className="font-mono text-[9px] text-gray-400 block">Consolidado</span>
+                                <td className="py-3.5 px-2 pr-2 truncate">
+                                  <div className="font-extrabold text-xs md:text-sm text-gray-900 truncate max-w-[200px]" title={grp.producto}>{grp.producto}</div>
+                                  <span className="font-mono text-[10px] md:text-xs text-indigo-505 text-indigo-500 block font-semibold">Consolidado</span>
                                 </td>
-                                <td className="py-3">
-                                  <span className="px-2 py-0.5 text-[9px] font-black uppercase text-indigo-600 bg-indigo-50 rounded-md">
+                                <td className="py-3.5 px-2">
+                                  <span className="px-2 py-1 text-[10px] md:text-xs font-black uppercase text-indigo-650 text-indigo-600 bg-indigo-50 rounded-md">
                                     {grp.tipo}
                                   </span>
                                 </td>
@@ -1820,21 +1997,21 @@ export function PhysicalInventoryReport() {
                                   const mData = grp.monthsList[monthKey];
                                   if (!mData) {
                                     return (
-                                      <td key={monthKey} className="py-3 text-center text-gray-300 font-normal">
+                                      <td key={monthKey} className="py-3.5 text-center text-gray-300 font-normal text-xs md:text-sm">
                                         -
                                       </td>
                                     );
                                   }
                                   const labelStr = mData.porcentaje > 0 ? `+${mData.porcentaje.toFixed(1)}%` : `${mData.porcentaje.toFixed(1)}%`;
                                   return (
-                                    <td key={monthKey} className="py-3 px-1 text-center font-mono">
+                                    <td key={monthKey} className="py-3.5 px-1.5 text-center font-mono">
                                       <span 
-                                        className={`inline-block w-full py-1 rounded-md text-[10px] font-bold ${
+                                        className={`inline-block w-full py-1.5 px-2 rounded-md text-xs md:text-[13px] font-black tracking-wide ${
                                           mData.porcentaje < 0 
-                                            ? 'text-red-750 bg-red-50/70 text-red-700' 
+                                            ? 'text-red-800 bg-red-100/90 text-red-900' 
                                             : mData.porcentaje > 0 
-                                              ? 'text-emerald-750 bg-emerald-50/70 text-emerald-700' 
-                                              : 'text-gray-500 bg-gray-50/50'
+                                              ? 'text-emerald-800 bg-emerald-100/90 text-emerald-900' 
+                                              : 'text-gray-600 bg-gray-100/80'
                                         }`}
                                         title={`Desvío: ${mData.desvio > 0 ? '+' : ''}${mData.desvio.toLocaleString('es-AR')} | Base: ${
                                           percentBase === 'consumo' 
@@ -1860,6 +2037,7 @@ export function PhysicalInventoryReport() {
               </div>
             </div>
           )}
+          </div>
         </div>
       )}
 
@@ -1900,26 +2078,68 @@ export function PhysicalInventoryReport() {
         /* Data is uploaded: Render metrics, groups analyzed, and table filters */
         <div className="space-y-6">
           
-          {/* File state & reset banner */}
-          <div className="bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <FileSpreadsheet className="w-5 h-5 text-emerald-600 shrink-0" />
-              <div>
-                <span className="text-xs font-black text-gray-400 uppercase tracking-widest block">Archivo Seleccionado</span>
-                <span className="text-sm font-extrabold text-slate-850">{inventoryFileName || 'Inventario cargado'}</span>
+          {/* File state & save controls panel */}
+          <div className="bg-white border border-gray-150 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-5">
+            {/* Left: File metadata / reset */}
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl shrink-0">
+                <FileSpreadsheet className="w-6 h-6" />
+              </div>
+              <div className="space-y-1 min-w-0">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Archivo Seleccionado</span>
+                <h4 className="text-sm font-extrabold text-slate-800 leading-tight truncate max-w-full" title={inventoryFileName || 'Inventario cargado'}>
+                  {inventoryFileName || 'Inventario cargado'}
+                </h4>
+                <div>
+                  <button
+                    onClick={() => {
+                      setUploadedInventory([]);
+                      setInventoryFileName(null);
+                      setError(null);
+                    }}
+                    className="text-[11px] font-bold text-red-500 hover:text-red-700 transition-colors inline-flex items-center gap-1 hover:underline"
+                  >
+                    Reiniciar / Limpiar Datos e Importar Otro
+                  </button>
+                </div>
               </div>
             </div>
-            
-            <button
-              onClick={() => {
-                setUploadedInventory([]);
-                setInventoryFileName(null);
-                setError(null);
-              }}
-              className="px-4 py-2 text-slate-600 hover:text-red-700 text-xs font-black uppercase tracking-wider rounded-xl transition-colors border border-dashed border-slate-300 hover:border-red-300 bg-white"
-            >
-              Reiniciar / Limpiar Datos
-            </button>
+
+            {/* Right: Date selection & Save action controls */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 bg-slate-50 border border-slate-200/60 rounded-xl p-3 shrink-0">
+              {/* Date Input */}
+              <div className="flex flex-col justify-center">
+                <label className="text-[9px] font-black uppercase text-gray-400 tracking-wider mb-1 flex items-center gap-1 select-none">
+                  <Calendar className="w-3.5 h-3.5 text-indigo-500" /> Fecha del Inventario:
+                </label>
+                <input 
+                  type="date"
+                  value={inventoryDate}
+                  onChange={(e) => setInventoryDate(e.target.value)}
+                  className="px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-extrabold text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer h-9"
+                />
+              </div>
+
+              {/* Action Button: Save to Database / History */}
+              <div className="flex items-end h-full">
+                <button
+                  onClick={saveInventoryToSystem}
+                  disabled={isSavingInventory}
+                  className={`w-full sm:w-auto h-[36px] px-5 rounded-lg text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-xs ${
+                    isSavingInventory 
+                      ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed' 
+                      : 'bg-indigo-600 hover:bg-indigo-700 text-white hover:shadow-indigo-100 active:scale-95 cursor-pointer'
+                  }`}
+                >
+                  {isSavingInventory ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Upload className="w-3.5 h-3.5" />
+                  )}
+                  {isSavingInventory ? 'Guardando...' : 'Guardar y Subir al Historial'}
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Quick Metrics Header Row */}

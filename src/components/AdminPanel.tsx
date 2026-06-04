@@ -484,48 +484,59 @@ export function AdminPanel() {
 
   useEffect(() => {
     if (activeTab === 'permissions') {
+      const analyticsDefaultsTrue = {
+        viewManagementSummary: true, viewConsolidated: true, viewWaste: true,
+        viewSyrup: true, viewGoalFulfillment: true, viewStockControl: true,
+        viewDowntime: true, viewEfficiency: true, viewGantt: true
+      };
+      const analyticsDefaultsFalse = {
+        viewManagementSummary: false, viewConsolidated: false, viewWaste: false,
+        viewSyrup: false, viewGoalFulfillment: false, viewStockControl: false,
+        viewDowntime: false, viewEfficiency: false, viewGantt: false
+      };
+      
+      const defaults: Record<UserRole, RolePermissions> = {
+        admin: {
+          viewReports: true, editReports: true, viewElaboracion: true, editElaboracion: true,
+          viewScheduler: true, editScheduler: true, viewPersonnel: true, editPersonnel: true,
+          viewLiveMonitor: true, viewAnalytics: true, ...analyticsDefaultsTrue, viewAdmin: true,
+          viewPersonnelPayroll: true,
+          viewEnergy: true, editEnergy: true, viewHistoricalData: true, editHistoricalData: true
+        },
+        jefe_produccion: {
+          viewReports: true, editReports: true, viewElaboracion: true, editElaboracion: true,
+          viewScheduler: true, editScheduler: true, viewPersonnel: true, editPersonnel: true,
+          viewLiveMonitor: true, viewAnalytics: true, ...analyticsDefaultsTrue, viewAdmin: false,
+          viewPersonnelPayroll: true,
+          viewEnergy: true, editEnergy: true, viewHistoricalData: true, editHistoricalData: true
+        },
+        produccion: {
+          viewReports: true, editReports: true, viewElaboracion: true, editElaboracion: true,
+          viewScheduler: true, editScheduler: false, viewPersonnel: true, editPersonnel: true,
+          viewLiveMonitor: true, viewAnalytics: false, ...analyticsDefaultsFalse, viewAdmin: false,
+          viewPersonnelPayroll: false,
+          viewEnergy: true, editEnergy: false, viewHistoricalData: false, editHistoricalData: false
+        },
+        calidad: {
+          viewReports: true, editReports: false, viewElaboracion: true, editElaboracion: true,
+          viewScheduler: true, editScheduler: false, viewPersonnel: true, editPersonnel: true,
+          viewLiveMonitor: true, viewAnalytics: false, ...analyticsDefaultsFalse, viewAdmin: false,
+          viewPersonnelPayroll: false,
+          viewEnergy: true, editEnergy: false, viewHistoricalData: false, editHistoricalData: false
+        }
+      };
+
       const unsub = onSnapshot(doc(db, 'config', 'permissions'), (snap) => {
         if (snap.exists()) {
-          setRolePermissions(snap.data() as Record<UserRole, RolePermissions>);
-        } else {
-          // Initialize with defaults if empty
-          const analyticsDefaultsTrue = {
-            viewManagementSummary: true, viewConsolidated: true, viewWaste: true,
-            viewSyrup: true, viewGoalFulfillment: true, viewStockControl: true,
-            viewDowntime: true, viewEfficiency: true, viewGantt: true
-          };
-          const analyticsDefaultsFalse = {
-            viewManagementSummary: false, viewConsolidated: false, viewWaste: false,
-            viewSyrup: false, viewGoalFulfillment: false, viewStockControl: false,
-            viewDowntime: false, viewEfficiency: false, viewGantt: false
-          };
-          
-          const defaults: Record<UserRole, RolePermissions> = {
-            admin: {
-              viewReports: true, editReports: true, viewElaboracion: true, editElaboracion: true,
-              viewScheduler: true, editScheduler: true, viewPersonnel: true, editPersonnel: true,
-              viewLiveMonitor: true, viewAnalytics: true, ...analyticsDefaultsTrue, viewAdmin: true,
-              viewPersonnelPayroll: true
-            },
-            jefe_produccion: {
-              viewReports: true, editReports: true, viewElaboracion: true, editElaboracion: true,
-              viewScheduler: true, editScheduler: true, viewPersonnel: true, editPersonnel: true,
-              viewLiveMonitor: true, viewAnalytics: true, ...analyticsDefaultsTrue, viewAdmin: false,
-              viewPersonnelPayroll: true
-            },
-            produccion: {
-              viewReports: true, editReports: true, viewElaboracion: true, editElaboracion: true,
-              viewScheduler: true, editScheduler: false, viewPersonnel: true, editPersonnel: true,
-              viewLiveMonitor: true, viewAnalytics: false, ...analyticsDefaultsFalse, viewAdmin: false,
-              viewPersonnelPayroll: false
-            },
-            calidad: {
-              viewReports: true, editReports: false, viewElaboracion: true, editElaboracion: true,
-              viewScheduler: true, editScheduler: false, viewPersonnel: true, editPersonnel: true,
-              viewLiveMonitor: true, viewAnalytics: false, ...analyticsDefaultsFalse, viewAdmin: false,
-              viewPersonnelPayroll: false
+          const remote = snap.data() as Record<UserRole, RolePermissions>;
+          const merged: Record<UserRole, RolePermissions> = { ...defaults };
+          (Object.keys(defaults) as UserRole[]).forEach(role => {
+            if (remote[role]) {
+              merged[role] = { ...defaults[role], ...remote[role] };
             }
-          };
+          });
+          setRolePermissions(merged);
+        } else {
           setRolePermissions(defaults);
         }
       });
@@ -4149,7 +4160,11 @@ export function AdminPanel() {
                       viewEfficiency: 'Reporte: Eficiencia',
                       viewGantt: 'Reporte: Gantt',
                       viewAdmin: 'Acceso Admin Panel',
-                      viewPersonnelPayroll: 'Ver Nómina (Personal)'
+                      viewPersonnelPayroll: 'Ver Nómina (Personal)',
+                      viewEnergy: 'Ver Módulo Energía',
+                      editEnergy: 'Cargar Factura Real Energía',
+                      viewHistoricalData: 'Ver Históricos Importer/Exporter',
+                      editHistoricalData: 'Gestionar Importer/Exporter Históricos'
                     };
                     const label = labelMap[perm] || perm.replace(/([A-Z])/g, ' $1').trim();
                     return (

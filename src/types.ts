@@ -138,6 +138,10 @@ export interface RolePermissions {
   viewGantt?: boolean;
   viewAdmin: boolean;
   viewPersonnelPayroll?: boolean;
+  viewEnergy?: boolean;
+  editEnergy?: boolean;
+  viewHistoricalData?: boolean;
+  editHistoricalData?: boolean;
 }
 
 export interface UserProfile {

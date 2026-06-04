@@ -205,11 +205,11 @@ export default function App() {
         new: permissions.editReports,
         elaboracion: permissions.editElaboracion,
         historical_report: true,
-        historical_importer: permissions.viewAnalytics,
-        historical_exporter: permissions.viewAnalytics,
-        historical_elab_importer: permissions.viewAnalytics,
-        historical_elab_exporter: permissions.viewAnalytics,
-        energy: permissions.viewAnalytics,
+        historical_importer: permissions.viewHistoricalData,
+        historical_exporter: permissions.viewHistoricalData,
+        historical_elab_importer: permissions.viewHistoricalData,
+        historical_elab_exporter: permissions.viewHistoricalData,
+        energy: permissions.viewEnergy !== false,
         profile: true,
       };
 
@@ -795,7 +795,7 @@ export default function App() {
                         </button>
                       )}
 
-                      {permissions.viewAnalytics && (
+                      {permissions.viewEnergy !== false && (
                         <button
                           onClick={() => {
                             setCurrentView("energy");
@@ -879,65 +879,73 @@ export default function App() {
                         Histórico
                       </button>
 
-                      <button
-                        onClick={() => {
-                          setCurrentView("historical_importer");
-                          setActiveMenu(null);
-                        }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === "historical_importer"
-                            ? "bg-indigo-50 text-indigo-700 font-bold"
-                            : "text-gray-600 hover:bg-gray-50"
-                        }`}
-                      >
-                        <Upload className="w-4 h-4" />
-                        Imp. Hist. (Envasado)
-                      </button>
+                      {permissions.viewHistoricalData && (
+                        <button
+                          onClick={() => {
+                            setCurrentView("historical_importer");
+                            setActiveMenu(null);
+                          }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                            currentView === "historical_importer"
+                              ? "bg-indigo-50 text-indigo-700 font-bold"
+                              : "text-gray-600 hover:bg-gray-50"
+                          }`}
+                        >
+                          <Upload className="w-4 h-4" />
+                          Imp. Hist. (Envasado)
+                        </button>
+                      )}
 
-                      <button
-                        onClick={() => {
-                          setCurrentView("historical_exporter");
-                          setActiveMenu(null);
-                        }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === "historical_exporter"
-                            ? "bg-indigo-50 text-indigo-700 font-bold"
-                            : "text-gray-600 hover:bg-gray-50"
-                        }`}
-                      >
-                        <Download className="w-4 h-4" />
-                        Exp. Hist. (Envasado)
-                      </button>
+                      {permissions.viewHistoricalData && (
+                        <button
+                          onClick={() => {
+                            setCurrentView("historical_exporter");
+                            setActiveMenu(null);
+                          }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                            currentView === "historical_exporter"
+                              ? "bg-indigo-50 text-indigo-700 font-bold"
+                              : "text-gray-600 hover:bg-gray-50"
+                          }`}
+                        >
+                          <Download className="w-4 h-4" />
+                          Exp. Hist. (Envasado)
+                        </button>
+                      )}
 
-                      <button
-                        onClick={() => {
-                          setCurrentView("historical_elab_importer");
-                          setActiveMenu(null);
-                        }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === "historical_elab_importer"
-                            ? "bg-indigo-50 text-indigo-700 font-bold"
-                            : "text-gray-600 hover:bg-gray-50"
-                        }`}
-                      >
-                        <Upload className="w-4 h-4" />
-                        Imp. Hist. (Elab)
-                      </button>
+                      {permissions.viewHistoricalData && (
+                        <button
+                          onClick={() => {
+                            setCurrentView("historical_elab_importer");
+                            setActiveMenu(null);
+                          }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                            currentView === "historical_elab_importer"
+                              ? "bg-indigo-50 text-indigo-700 font-bold"
+                              : "text-gray-600 hover:bg-gray-50"
+                          }`}
+                        >
+                          <Upload className="w-4 h-4" />
+                          Imp. Hist. (Elab)
+                        </button>
+                      )}
 
-                      <button
-                        onClick={() => {
-                          setCurrentView("historical_elab_exporter");
-                          setActiveMenu(null);
-                        }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          currentView === "historical_elab_exporter"
-                            ? "bg-indigo-50 text-indigo-700 font-bold"
-                            : "text-gray-600 hover:bg-gray-50"
-                        }`}
-                      >
-                        <Download className="w-4 h-4" />
-                        Exp. Hist. (Elab)
-                      </button>
+                      {permissions.viewHistoricalData && (
+                        <button
+                          onClick={() => {
+                            setCurrentView("historical_elab_exporter");
+                            setActiveMenu(null);
+                          }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                            currentView === "historical_elab_exporter"
+                              ? "bg-indigo-50 text-indigo-700 font-bold"
+                              : "text-gray-600 hover:bg-gray-50"
+                          }`}
+                        >
+                          <Download className="w-4 h-4" />
+                          Exp. Hist. (Elab)
+                        </button>
+                      )}
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -1133,7 +1141,7 @@ export default function App() {
           <ProductionScheduler isAdmin={permissions.editScheduler} />
         )}
         {currentView === "admin" && <AdminPanel userProfile={userProfile} />}
-        {currentView === "energy" && <EnergyReport />}
+        {currentView === "energy" && <EnergyReport permissions={permissions} />}
         {currentView === "profile" && (
           <div className="max-w-2xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
             <div className="flex flex-col items-center mb-8">

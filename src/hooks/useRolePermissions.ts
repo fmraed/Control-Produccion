@@ -42,6 +42,10 @@ const DEFAULT_PERMISSIONS: Record<UserRole, RolePermissions> = {
     ...analyticsDefaultsTrue,
     viewAdmin: true,
     viewPersonnelPayroll: true,
+    viewEnergy: true,
+    editEnergy: true,
+    viewHistoricalData: true,
+    editHistoricalData: true,
   },
   jefe_produccion: {
     viewReports: true,
@@ -57,6 +61,10 @@ const DEFAULT_PERMISSIONS: Record<UserRole, RolePermissions> = {
     ...analyticsDefaultsTrue,
     viewAdmin: false,
     viewPersonnelPayroll: true,
+    viewEnergy: true,
+    editEnergy: true,
+    viewHistoricalData: true,
+    editHistoricalData: true,
   },
   produccion: {
     viewReports: true,
@@ -72,6 +80,10 @@ const DEFAULT_PERMISSIONS: Record<UserRole, RolePermissions> = {
     ...analyticsDefaultsFalse,
     viewAdmin: false,
     viewPersonnelPayroll: false,
+    viewEnergy: true,
+    editEnergy: false,
+    viewHistoricalData: false,
+    editHistoricalData: false,
   },
   calidad: {
     viewReports: true,
@@ -87,6 +99,10 @@ const DEFAULT_PERMISSIONS: Record<UserRole, RolePermissions> = {
     ...analyticsDefaultsFalse,
     viewAdmin: false,
     viewPersonnelPayroll: false,
+    viewEnergy: true,
+    editEnergy: false,
+    viewHistoricalData: false,
+    editHistoricalData: false,
   },
 };
 
@@ -104,6 +120,10 @@ const GUEST_PERMISSIONS: RolePermissions = {
   ...analyticsDefaultsFalse,
   viewAdmin: false,
   viewPersonnelPayroll: false,
+  viewEnergy: false,
+  editEnergy: false,
+  viewHistoricalData: false,
+  editHistoricalData: false,
 };
 
 export function useRolePermissions(role: UserRole | undefined) {

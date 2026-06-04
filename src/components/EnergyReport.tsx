@@ -10,7 +10,7 @@ import {
   onSnapshot,
 } from "firebase/firestore";
 import { db, handleFirestoreError, auth, OperationType } from "../firebase";
-import { ProductionReport } from "../types";
+import { ProductionReport, RolePermissions } from "../types";
 import {
   format,
   startOfMonth,
@@ -76,7 +76,11 @@ interface MonthlyRealEnergy {
   amount: number;
 }
 
-export function EnergyReport() {
+interface EnergyReportProps {
+  permissions?: RolePermissions;
+}
+
+export function EnergyReport({ permissions }: EnergyReportProps = {}) {
   const [selectedMonth, setSelectedMonth] = useState<string>(
     format(new Date(), "yyyy-MM"),
   );
@@ -204,6 +208,10 @@ export function EnergyReport() {
   }, []);
 
   const handleSaveFactors = async () => {
+    if (permissions?.editEnergy === false) {
+      alert("No tiene permisos para modificar los factores de energía.");
+      return;
+    }
     setSavingSettings(true);
     try {
       await setDoc(doc(db, "config", "energyFactors"), editFactors);
@@ -217,6 +225,10 @@ export function EnergyReport() {
   };
 
   const handleSaveRealEnergy = async () => {
+    if (permissions?.editEnergy === false) {
+      alert("No tiene permisos para guardar la factura real de energía.");
+      return;
+    }
     const cleanKwh = Number(editReal.kwh) || 0;
     const cleanAmount = Number(editReal.amount) || 0;
     
@@ -823,13 +835,15 @@ export function EnergyReport() {
               className="pl-9 pr-4 py-2 border border-gray-200 rounded-xl text-sm font-bold text-gray-700 bg-white shadow-sm focus:ring-2 focus:ring-yellow-500"
             />
           </div>
-          <button
-            onClick={() => setShowSettings(!showSettings)}
-            className="p-2 bg-white border border-gray-200 rounded-xl text-gray-600 hover:text-yellow-600 hover:bg-yellow-50 transition-all font-bold"
-            title="Configurar Factores"
-          >
-            <Settings className="w-5 h-5" />
-          </button>
+          {permissions?.editEnergy !== false && (
+            <button
+              onClick={() => setShowSettings(!showSettings)}
+              className="p-2 bg-white border border-gray-200 rounded-xl text-gray-600 hover:text-yellow-600 hover:bg-yellow-50 transition-all font-bold"
+              title="Configurar Factores"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -1821,25 +1835,27 @@ export function EnergyReport() {
                           Consumo Real
                         </h3>
                       </div>
-                      {!isEditingReal ? (
-                        <button
-                          onClick={() => {
-                            setEditReal(realEnergy[selectedMonth] || { kwh: 0, amount: 0 });
-                            setIsEditingReal(true);
-                          }}
-                          className="relative z-20 p-2 bg-gray-800 hover:bg-gray-700 text-gray-300 transition-colors rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                          Editar Factura
-                        </button>
-                      ) : (
-                        <button
-                          onClick={handleSaveRealEnergy}
-                          className="relative z-20 p-2 bg-yellow-500 hover:bg-yellow-600 text-black transition-colors rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer"
-                        >
-                          <Save className="w-3.5 h-3.5" />
-                          Guardar
-                        </button>
+                      {permissions?.editEnergy !== false && (
+                        !isEditingReal ? (
+                          <button
+                            onClick={() => {
+                              setEditReal(realEnergy[selectedMonth] || { kwh: 0, amount: 0 });
+                              setIsEditingReal(true);
+                            }}
+                            className="relative z-20 p-2 bg-gray-800 hover:bg-gray-700 text-gray-300 transition-colors rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                            Editar Factura
+                          </button>
+                        ) : (
+                          <button
+                            onClick={handleSaveRealEnergy}
+                            className="relative z-20 p-2 bg-yellow-500 hover:bg-yellow-600 text-black transition-colors rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer"
+                          >
+                            <Save className="w-3.5 h-3.5" />
+                            Guardar
+                          </button>
+                        )
                       )}
                     </div>
 
