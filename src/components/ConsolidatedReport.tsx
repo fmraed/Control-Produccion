@@ -13,7 +13,7 @@ export function ConsolidatedReport() {
   const { config, getFilteredFlavors, getFilteredSizes, availableBrands, shouldShowReport } = useAppConfig();
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
+  const [selectedPeriod, setSelectedPeriod] = useState<string>(format(new Date(), 'yyyy-MM'));
   const [selectedGestion, setSelectedGestion] = useState<'all' | 'current' | 'previous'>('all');
 
   // Acceder a la config de gestión
@@ -36,6 +36,17 @@ export function ConsolidatedReport() {
 
     return () => unsubscribe();
   }, []);
+
+  const years = useMemo(() => {
+    const uniqueYears = new Set<string>();
+    reports.forEach(r => {
+        const logicalDate = getLogicalDate(r);
+        if (logicalDate) {
+            uniqueYears.add(logicalDate.substring(0, 4));
+        }
+    });
+    return Array.from(uniqueYears).sort().reverse();
+  }, [reports]);
 
   const months = useMemo(() => {
     const uniqueMonths = new Set<string>();
@@ -65,12 +76,21 @@ export function ConsolidatedReport() {
       });
     }
 
-    if (!selectedMonth) return result;
+    if (selectedPeriod === 'all') return result;
+    
+    if (selectedPeriod.startsWith('year_')) {
+        const year = selectedPeriod.replace('year_', '');
+        return result.filter(r => {
+            const logicalDate = getLogicalDate(r);
+            return logicalDate && logicalDate.startsWith(year);
+        });
+    }
+
     return result.filter(r => {
       const logicalDate = getLogicalDate(r);
-      return logicalDate && logicalDate.startsWith(selectedMonth);
+      return logicalDate && logicalDate.startsWith(selectedPeriod);
     });
-  }, [reports, selectedMonth, selectedGestion, managementStartDate, shouldShowReport]);
+  }, [reports, selectedPeriod, selectedGestion, managementStartDate, shouldShowReport]);
 
   // Consolidated data structure
   // { [marca|sabor]: { [tamano]: { packs: number, extraBot: number } } }
@@ -204,12 +224,18 @@ export function ConsolidatedReport() {
           <div className="flex items-center gap-2">
             <Calendar className="w-4 h-4 text-gray-400" />
             <select
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
-              className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2 min-w-[180px]"
+              value={selectedPeriod}
+              onChange={(e) => setSelectedPeriod(e.target.value)}
+              className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2 min-w-[200px]"
             >
+              <option value="all">Todo el historial</option>
+              {years.map(y => (
+                  <option key={`year_${y}`} value={`year_${y}`}>
+                      Año {y}
+                  </option>
+              ))}
               {months.map(m => (
-                <option key={m} value={m}>
+                <option key={`month_${m}`} value={m}>
                   {format(parseISO(`${m}-01`), 'MMMM yyyy', { locale: es }).replace(/^\w/, c => c.toUpperCase())}
                 </option>
               ))}

@@ -46,6 +46,7 @@ import { SyrupReport } from "./components/SyrupReport";
 import { GoalFulfillment } from "./components/GoalFulfillment";
 import { StockControl } from "./components/StockControl";
 import { InsumosControlReport } from "./components/InsumosControlReport";
+import { SuppliesProjection } from "./components/SuppliesProjection";
 import { PhysicalInventoryReport } from "./components/PhysicalInventoryReport";
 import { HistoricalReport } from "./components/HistoricalReport";
 import { HistoricalImporter } from "./components/HistoricalImporter";
@@ -100,6 +101,7 @@ export default function App() {
     | "goal_fulfillment"
     | "stock_control"
     | "insumos_control"
+    | "supplies_projection"
     | "inventario_excel"
     | "historical_report"
     | "historical_importer"
@@ -116,7 +118,7 @@ export default function App() {
   >(undefined);
   const [paretoLine, setParetoLine] = useState<string>("");
   const [paretoMonth, setParetoMonth] = useState<string>("");
-  const [activeMenu, setActiveMenu] = useState<"data" | "reports" | null>(null);
+  const [activeMenu, setActiveMenu] = useState<"data" | "reports" | "insumos" | null>(null);
 
   // Persistent Dashboard Filters
   const [dbFilters, setDbFilters] = useState({
@@ -191,7 +193,8 @@ export default function App() {
         live: permissions.viewLiveMonitor,
         management_summary: permissions.viewManagementSummary,
         management_comparison: permissions.viewManagementSummary,
-        insumos_control: permissions.viewManagementSummary,
+        insumos_control: permissions.viewInsumos,
+        supplies_projection: permissions.viewInsumos,
         inventario_excel: permissions.viewManagementSummary,
         consolidated: permissions.viewConsolidated,
         waste: permissions.viewWaste,
@@ -543,6 +546,7 @@ export default function App() {
             {currentView === "syrup" && "Balance de Jarabes"}
             {currentView === "goal_fulfillment" && "Cumplimiento de Objetivos"}
             {currentView === "stock_control" && "Control de Stock y Salidas"}
+            {currentView === "supplies_projection" && "Cobertura de Insumos"}
             {currentView === "historical_report" && "Histórico"}
             {currentView === "historical_importer" &&
               "Importación Histórica (Envasado)"}
@@ -619,7 +623,6 @@ export default function App() {
                       "management_summary",
                       "stock_control",
                       "historical_report",
-                      "insumos_control",
                       "inventario_excel",
                     ].includes(currentView)
                       ? "bg-indigo-600 text-white shadow-md shadow-indigo-200"
@@ -656,23 +659,6 @@ export default function App() {
                         >
                           <Activity className="w-4 h-4" />
                           Resumen Gerencial
-                        </button>
-                      )}
-
-                      {permissions.viewManagementSummary !== false && (
-                        <button
-                          onClick={() => {
-                            setCurrentView("insumos_control");
-                            setActiveMenu(null);
-                          }}
-                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                            currentView === "insumos_control"
-                              ? "bg-indigo-50 text-indigo-700 font-bold"
-                              : "text-gray-600 hover:bg-gray-50"
-                          }`}
-                        >
-                          <FlaskConical className="w-4 h-4" />
-                          Control de Insumos
                         </button>
                       )}
 
@@ -952,6 +938,75 @@ export default function App() {
               </div>
             )}
 
+            {permissions.viewInsumos && (
+              <div className="relative">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveMenu(activeMenu === "insumos" ? null : "insumos");
+                  }}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${
+                    [
+                      "insumos_control",
+                      "supplies_projection",
+                    ].includes(currentView)
+                      ? "bg-amber-600 text-white shadow-md shadow-amber-200"
+                      : "text-gray-600 hover:bg-gray-100"
+                  }`}
+                >
+                  <FlaskConical className="w-4 h-4" />
+                  <span className="hidden sm:inline">Insumos</span>
+                  <ChevronDown
+                    className={`w-3 h-3 transition-transform duration-200 ${
+                      activeMenu === "insumos" ? "rotate-180" : ""
+                    }`}
+                  />
+                </button>
+
+                <AnimatePresence>
+                  {activeMenu === "insumos" && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      transition={{ duration: 0.15, ease: "easeOut" }}
+                      className="absolute top-full left-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-30 overflow-hidden"
+                    >
+                      <button
+                        onClick={() => {
+                          setCurrentView("insumos_control");
+                          setActiveMenu(null);
+                        }}
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                          currentView === "insumos_control"
+                            ? "bg-amber-50 text-amber-700 font-bold"
+                            : "text-gray-600 hover:bg-gray-50"
+                        }`}
+                      >
+                        <FlaskConical className="w-4 h-4 text-amber-600" />
+                        Control de Insumos
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setCurrentView("supplies_projection");
+                          setActiveMenu(null);
+                        }}
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                          currentView === "supplies_projection"
+                            ? "bg-amber-50 text-amber-700 font-bold"
+                            : "text-gray-600 hover:bg-gray-50"
+                        }`}
+                      >
+                        <Database className="w-4 h-4 text-amber-600" />
+                        Proyección de Abastecimiento
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+
             {/* SECCIÓN 2: GESTIÓN Y PERSONAS */}
             {(permissions.viewReports ||
               permissions.editReports ||
@@ -1118,6 +1173,7 @@ export default function App() {
         {currentView === "goal_fulfillment" && <GoalFulfillment />}
         {currentView === "stock_control" && <StockControl />}
         {currentView === "insumos_control" && <InsumosControlReport />}
+        {currentView === "supplies_projection" && <SuppliesProjection />}
         {currentView === "inventario_excel" && <PhysicalInventoryReport />}
         {currentView === "historical_report" && <HistoricalReport />}
         {currentView === "historical_importer" && <HistoricalImporter />}

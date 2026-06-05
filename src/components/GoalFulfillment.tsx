@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, Fragment } from 'react';
 import { collection, query, where, onSnapshot, getDocs, setDoc, doc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { ProductionReport, MonthlyGoal } from '../types';
-import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, getDay, addDays, subDays } from 'date-fns';
+import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, getDay, addDays, subDays, addMonths } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { BarChart3, Calendar, Search, Edit2, Save, X, RefreshCw, AlertCircle, TrendingUp, Package, ChevronRight, Calculator, Clock, XCircle } from 'lucide-react';
 import { useAppConfig } from '../hooks/useAppConfig';
@@ -30,7 +30,7 @@ export function GoalFulfillment() {
   const [editedGoals, setEditedGoals] = useState<Record<string, number>>({});
   const [isSaving, setIsSaving] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'details' | 'summary'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'summary' | 'planning'>('details');
 
   const isAdmin = auth.currentUser?.email === 'fraed.fordrinks@gmail.com';
 
@@ -41,9 +41,11 @@ export function GoalFulfillment() {
       where('fecha', '<=', `${selectedMonth}-31`) // Simple check, actual filter in useMemo
     );
 
+    const endMonth = format(addMonths(parseISO(`${selectedMonth}-01`), 6), 'yyyy-MM');
     const qGoals = query(
       collection(db, 'monthly_goals'),
-      where('month', '==', selectedMonth)
+      where('month', '>=', selectedMonth),
+      where('month', '<', endMonth)
     );
 
     const unsubReports = onSnapshot(qReports, (snap) => {
@@ -70,6 +72,15 @@ export function GoalFulfillment() {
     }
     return Array.from(new Set(list)).sort().reverse();
   }, []);
+
+  const planningMonths = useMemo(() => {
+    const list = [];
+    const start = parseISO(`${selectedMonth}-01`);
+    for (let i = 0; i < 6; i++) {
+      list.push(format(addMonths(start, i), 'yyyy-MM'));
+    }
+    return list;
+  }, [selectedMonth]);
 
   const filteredReportsByMonth = useMemo(() => {
     return reports.filter(r => {
@@ -165,7 +176,7 @@ export function GoalFulfillment() {
       );
       
       const totalProduced = productReports.reduce((sum, r) => sum + (r.paquetes || 0), 0);
-      const goal = goals.find(g => g.marca === p.marca && g.sabor === p.sabor && g.tamano === p.tamano)?.quantity || 0;
+      const goal = goals.find(g => g.marca === p.marca && g.sabor === p.sabor && g.tamano === p.tamano && g.month === selectedMonth)?.quantity || 0;
       
       // Prioritize explicit calibre defaults, then line defaults
       const standardShiftGoal = (p.tamano && config?.calibreDefaults?.[p.tamano]) 
@@ -351,7 +362,7 @@ export function GoalFulfillment() {
   const handleStartEditing = () => {
     const initialValues: Record<string, number> = {};
     goals.forEach(g => {
-      initialValues[`${g.marca}|${g.sabor}|${g.tamano}`] = g.quantity;
+      initialValues[`${g.marca}|${g.sabor}|${g.tamano}|${g.month}`] = g.quantity;
     });
     setEditedGoals(initialValues);
     setIsEditingGoals(true);
@@ -361,26 +372,28 @@ export function GoalFulfillment() {
     setIsSaving(true);
     try {
       for (const p of activeProducts) {
-        const val = editedGoals[p.key] || 0;
-        const existing = goals.find(g => g.marca === p.marca && g.sabor === p.sabor && g.tamano === p.tamano);
-        
-        if (existing) {
-          if (existing.quantity !== val) {
-            await setDoc(doc(db, 'monthly_goals', existing.id!), {
+        for (const month of planningMonths) {
+          const val = editedGoals[`${p.key}|${month}`] || 0;
+          const existing = goals.find(g => g.marca === p.marca && g.sabor === p.sabor && g.tamano === p.tamano && g.month === month);
+          
+          if (existing) {
+            if (existing.quantity !== val) {
+              await setDoc(doc(db, 'monthly_goals', existing.id!), {
+                quantity: val,
+                updatedAt: new Date().toISOString()
+              }, { merge: true });
+            }
+          } else if (val > 0) {
+            await addDoc(collection(db, 'monthly_goals'), {
+              month: month,
+              marca: p.marca,
+              sabor: p.sabor,
+              tamano: p.tamano,
               quantity: val,
+              createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString()
-            }, { merge: true });
+            });
           }
-        } else if (val > 0) {
-          await addDoc(collection(db, 'monthly_goals'), {
-            month: selectedMonth,
-            marca: p.marca,
-            sabor: p.sabor,
-            tamano: p.tamano,
-            quantity: val,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          });
         }
       }
       setIsEditingGoals(false);
@@ -513,6 +526,16 @@ export function GoalFulfillment() {
         >
           Resumen por Calibre
         </button>
+        <button
+          onClick={() => setActiveTab('planning')}
+          className={`px-6 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${
+            activeTab === 'planning' 
+              ? 'bg-white text-blue-600 shadow-sm' 
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          Planificación
+        </button>
       </div>
 
       {activeTab === 'summary' ? (
@@ -613,6 +636,51 @@ export function GoalFulfillment() {
             </table>
           </div>
         </div>
+      ) : activeTab === 'planning' ? (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-gray-100/80">
+                  <th className="px-6 py-4 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Producto</th>
+                  {planningMonths.map(m => (
+                    <th key={m} className="px-6 py-4 text-[10px] font-black text-blue-700 uppercase tracking-widest border-r border-gray-200 text-center">
+                      {format(parseISO(`${m}-01`), 'MMM yy', { locale: es }).toUpperCase()}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {activeProducts.map(p => (
+                  <tr key={p.key} className="hover:bg-gray-50 transition-colors group">
+                    <td className="px-6 py-4 text-sm font-bold text-gray-900 border-r border-gray-100 whitespace-nowrap">
+                      {p.marca} {p.sabor} <span className="text-gray-400 font-mono text-xs">{p.tamano}cc</span>
+                    </td>
+                    {planningMonths.map(month => {
+                      const existingGoal = goals.find(g => g.marca === p.marca && g.sabor === p.sabor && g.tamano === p.tamano && g.month === month)?.quantity || 0;
+                      return (
+                        <td key={month} className="px-4 py-2 border-r border-gray-100 min-w-[120px] bg-gray-50/30">
+                          {isEditingGoals ? (
+                            <input
+                              type="number"
+                              value={editedGoals[`${p.key}|${month}`] || 0}
+                              onChange={(e) => setEditedGoals({ ...editedGoals, [`${p.key}|${month}`]: parseInt(e.target.value) || 0 })}
+                              className="w-full bg-white border border-blue-200 rounded-lg px-2 py-1.5 text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none text-center"
+                            />
+                          ) : (
+                            <div className="text-center text-sm font-bold text-gray-700">
+                              {existingGoal > 0 ? existingGoal.toLocaleString('es-AR') : '-'}
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ) : (
         /* Main Table (Details) */
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
@@ -651,8 +719,8 @@ export function GoalFulfillment() {
                         {isEditingGoals ? (
                           <input
                             type="number"
-                            value={editedGoals[p.key] || 0}
-                            onChange={(e) => setEditedGoals({ ...editedGoals, [p.key]: parseInt(e.target.value) || 0 })}
+                            value={editedGoals[`${p.key}|${selectedMonth}`] || 0}
+                            onChange={(e) => setEditedGoals({ ...editedGoals, [`${p.key}|${selectedMonth}`]: parseInt(e.target.value) || 0 })}
                             className="w-full bg-white border border-blue-200 rounded-lg px-3 py-1.5 text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none"
                           />
                         ) : (

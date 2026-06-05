@@ -501,28 +501,32 @@ export function AdminPanel() {
           viewScheduler: true, editScheduler: true, viewPersonnel: true, editPersonnel: true,
           viewLiveMonitor: true, viewAnalytics: true, ...analyticsDefaultsTrue, viewAdmin: true,
           viewPersonnelPayroll: true,
-          viewEnergy: true, editEnergy: true, viewHistoricalData: true, editHistoricalData: true
+          viewEnergy: true, editEnergy: true, viewHistoricalData: true, editHistoricalData: true,
+          viewInsumos: true, editInsumos: true
         },
         jefe_produccion: {
           viewReports: true, editReports: true, viewElaboracion: true, editElaboracion: true,
           viewScheduler: true, editScheduler: true, viewPersonnel: true, editPersonnel: true,
           viewLiveMonitor: true, viewAnalytics: true, ...analyticsDefaultsTrue, viewAdmin: false,
           viewPersonnelPayroll: true,
-          viewEnergy: true, editEnergy: true, viewHistoricalData: true, editHistoricalData: true
+          viewEnergy: true, editEnergy: true, viewHistoricalData: true, editHistoricalData: true,
+          viewInsumos: true, editInsumos: true
         },
         produccion: {
           viewReports: true, editReports: true, viewElaboracion: true, editElaboracion: true,
           viewScheduler: true, editScheduler: false, viewPersonnel: true, editPersonnel: true,
           viewLiveMonitor: true, viewAnalytics: false, ...analyticsDefaultsFalse, viewAdmin: false,
           viewPersonnelPayroll: false,
-          viewEnergy: true, editEnergy: false, viewHistoricalData: false, editHistoricalData: false
+          viewEnergy: true, editEnergy: false, viewHistoricalData: false, editHistoricalData: false,
+          viewInsumos: true, editInsumos: false
         },
         calidad: {
           viewReports: true, editReports: false, viewElaboracion: true, editElaboracion: true,
           viewScheduler: true, editScheduler: false, viewPersonnel: true, editPersonnel: true,
           viewLiveMonitor: true, viewAnalytics: false, ...analyticsDefaultsFalse, viewAdmin: false,
           viewPersonnelPayroll: false,
-          viewEnergy: true, editEnergy: false, viewHistoricalData: false, editHistoricalData: false
+          viewEnergy: true, editEnergy: false, viewHistoricalData: false, editHistoricalData: false,
+          viewInsumos: true, editInsumos: false
         }
       };
 

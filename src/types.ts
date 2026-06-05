@@ -142,6 +142,8 @@ export interface RolePermissions {
   editEnergy?: boolean;
   viewHistoricalData?: boolean;
   editHistoricalData?: boolean;
+  viewInsumos: boolean;
+  editInsumos: boolean;
 }
 
 export interface UserProfile {
