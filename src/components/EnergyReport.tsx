@@ -52,6 +52,7 @@ interface EnergyFactors {
   linea3: number;
   admin: number;
   calentamiento: number;
+  fabricOn: number;
   botellas: Record<number, number>;
 }
 
@@ -62,6 +63,7 @@ const DEFAULT_FACTORS: EnergyFactors = {
   linea3: 315.5893661,
   admin: 59.5164196,
   calentamiento: 152.2213702,
+  fabricOn: 0,
   botellas: {
     3000: 0.069076159,
     2250: 0.060167349,
@@ -280,6 +282,8 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
     let calentamientoCount = 0;
     let totalPacks = 0;
 
+    const uniqueShifts = new Map<string, number>();
+
     const botellasCount = {
       3000: 0,
       2250: 0,
@@ -339,6 +343,10 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
       // Calentamiento
       activeLineDays.add(`${r.fecha}-${r.linea}`);
 
+      // Unique shifts for Fabric_On
+      const shiftKey = `${r.fecha}-${r.turno || `${r.entraTurno}-${r.saleTurno}`}`;
+      uniqueShifts.set(shiftKey, Math.max(uniqueShifts.get(shiftKey) || 0, hours));
+
       // Botellas y Paquetes
       const t = r.tamano || 0;
       if (botellasCount.hasOwnProperty(t)) {
@@ -350,6 +358,8 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
     });
 
     calentamientoCount = activeLineDays.size;
+    let fabricOnHours = 0;
+    uniqueShifts.forEach((h) => (fabricOnHours += h));
 
     const kwhIntercept = factors.intercept * totalHours;
     const kwhAdmin = factors.admin * adminHours;
@@ -357,6 +367,7 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
     const kwhLinea2 = factors.linea2 * linea2Hours;
     const kwhLinea3 = factors.linea3 * linea3Hours;
     const kwhCalentamiento = factors.calentamiento * calentamientoCount;
+    const kwhFabricOn = (factors.fabricOn || 0) * fabricOnHours;
 
     let kwhBotellas = 0;
     Object.keys(botellasCount).forEach((t) => {
@@ -373,6 +384,7 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
       kwhLinea2 +
       kwhLinea3 +
       kwhCalentamiento +
+      kwhFabricOn +
       kwhBotellas;
 
     return {
@@ -382,11 +394,13 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
       kwhLinea2,
       kwhLinea3,
       kwhCalentamiento,
+      kwhFabricOn,
       kwhBotellas,
       totalKwh,
       stats: {
         totalHours,
         adminHours,
+        fabricOnHours,
         linea1Hours,
         linea2Hours,
         linea3Hours,
@@ -422,6 +436,8 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
       let linea2Hours = 0;
       let linea3Hours = 0;
       let calentamientoCount = 0;
+
+      const uniqueShifts = new Map<string, number>();
 
       const botellasCount = {
         3000: 0,
@@ -471,6 +487,9 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
 
         activeLineDays.add(`${r.fecha}-${r.linea}`);
 
+        const shiftKey = `${r.fecha}-${r.turno || `${r.entraTurno}-${r.saleTurno}`}`;
+        uniqueShifts.set(shiftKey, Math.max(uniqueShifts.get(shiftKey) || 0, hours));
+
         const t = r.tamano || 0;
         if (botellasCount.hasOwnProperty(t)) {
           const quantity = r.botellas || (r.paquetes || 0) * (t === 3000 ? 4 : 6);
@@ -480,6 +499,8 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
       });
 
       calentamientoCount = activeLineDays.size;
+      let fabricOnHours = 0;
+      uniqueShifts.forEach((h) => (fabricOnHours += h));
 
       const kwhIntercept = factors.intercept * totalHours;
       const kwhAdmin = factors.admin * adminHours;
@@ -487,6 +508,7 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
       const kwhLinea2 = factors.linea2 * linea2Hours;
       const kwhLinea3 = factors.linea3 * linea3Hours;
       const kwhCalentamiento = factors.calentamiento * calentamientoCount;
+      const kwhFabricOn = (factors.fabricOn || 0) * fabricOnHours;
 
       let kwhBotellas = 0;
       Object.keys(botellasCount).forEach((t) => {
@@ -503,6 +525,7 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
         kwhLinea2 +
         kwhLinea3 +
         kwhCalentamiento +
+        kwhFabricOn +
         kwhBotellas;
 
       return totalKwh;
@@ -722,7 +745,8 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
     // --- MÉTODO 3: Prorrateo Dinámico por Horas de Línea ---
     const rawIntercept = prediction.kwhIntercept;
     const rawAdmin = prediction.kwhAdmin;
-    const fixedOverheadTotal = rawIntercept + rawAdmin;
+    const rawFabricOn = prediction.kwhFabricOn;
+    const fixedOverheadTotal = rawIntercept + rawAdmin + rawFabricOn;
 
     const m3RawResults = sizes.map((size) => {
       const data = calibersData[size];
@@ -808,6 +832,7 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
     prediction.kwhIntercept,
     prediction.kwhAdmin,
     prediction.kwhCalentamiento,
+    prediction.kwhFabricOn,
     estimationEnergyBase,
     realEnergy,
   ]);
@@ -1276,14 +1301,14 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
                               <div className="flex items-center gap-2">
                                 <span className="font-extrabold text-sm text-gray-900">
                                   {item.size === 3000
-                                    ? "Pack 3.0 L (4u)"
+                                    ? "Pack 3.0 L"
                                     : item.size === 2250
-                                      ? "Pack 2.25 L (6u)"
+                                      ? "Pack 2.25 L"
                                       : item.size === 2000
-                                        ? "Pack 2.0 L (6u)"
+                                        ? "Pack 2.0 L"
                                         : item.size === 1500
-                                          ? "Pack 1.5 L (6u)"
-                                          : "Pack 0.5 L (6u)"}
+                                          ? "Pack 1.5 L"
+                                          : "Pack 0.5 L"}
                                 </span>
                                 <span className="text-[10px] text-gray-400 font-bold bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100">
                                   {item.size} ml
@@ -1353,7 +1378,7 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
                 </div>
                 <p className="text-xs text-gray-500 leading-relaxed font-semibold mb-4 text-justify">
                   Calcula el consumo directo según constante física de soplado (por calibre), y distribuye el 
-                  remanente (Base Planta, Horas Líneas, Administración, Calentamientos) de manera proporcional simple 
+                  remanente (Base Planta, Fábrica ON, Horas Líneas, Administración, Calentamientos) de manera proporcional simple 
                   entre los calibres basándose de forma única en la cantidad de packs finales manufacturados. Ideal para estimaciones rápidas que ignoran variables físicas temporales.
                 </p>
                 <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
@@ -1388,7 +1413,7 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
                   </h5>
                 </div>
                 <p className="text-xs text-gray-500 leading-relaxed font-semibold mb-4 text-justify">
-                  Analiza el cronograma real del mes: atribuye las horas operacionales de cada línea únicamente a los calibres que se envasaron en esa línea específica. Prorratea la carga eléctrica constante general (Base Planta y Administración) proporcionalmente a las horas de ocupación activa total de cada calibre.
+                  Analiza el cronograma real del mes: atribuye las horas operacionales de cada línea únicamente a los calibres que se envasaron en esa línea específica. Prorratea la carga eléctrica constante general (Base Planta, Fábrica ON y Administración) proporcionalmente a las horas de ocupación activa total de cada calibre.
                 </p>
                 <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
                   <span className="text-[10px] font-black text-gray-400 uppercase block mb-1">
@@ -1493,7 +1518,24 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
                       intercept: Number(e.target.value),
                     })
                   }
-                  className="w-full px-3 py-2 border rounded-lg"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-yellow-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+                  Fábrica_ON (Base turno act.)
+                </label>
+                <input
+                  type="number"
+                  step="0.0000001"
+                  value={editFactors.fabricOn || 0}
+                  onChange={(e) =>
+                    setEditFactors({
+                      ...editFactors,
+                      fabricOn: Number(e.target.value),
+                    })
+                  }
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-yellow-500 focus:outline-none"
                 />
               </div>
               <div>
@@ -1713,6 +1755,18 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
                             <span className="font-medium text-gray-900">
                               {prediction.stats.adminHours} hs &rarr;{" "}
                               {prediction.kwhAdmin.toLocaleString("es-AR", {
+                                maximumFractionDigits: 0,
+                              })}{" "}
+                              kWh
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center p-2 hover:bg-gray-50 rounded-lg text-sm">
+                            <span className="font-bold text-gray-600">
+                              Fábrica ON (Activa)
+                            </span>
+                            <span className="font-medium text-gray-900">
+                              {Math.round(prediction.stats.fabricOnHours)} hs &rarr;{" "}
+                              {prediction.kwhFabricOn.toLocaleString("es-AR", {
                                 maximumFractionDigits: 0,
                               })}{" "}
                               kWh

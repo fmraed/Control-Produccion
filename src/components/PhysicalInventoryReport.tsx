@@ -79,6 +79,7 @@ export function PhysicalInventoryReport() {
   
   // Tabs and view structures
   const [activeMainTab, setActiveMainTab] = useState<'historial' | 'carga'>('historial');
+  const [hideOtrosCategorias, setHideOtrosCategorias] = useState(true);
   const [historyTab, setHistoryTab] = useState<'desvios' | 'mensual'>('desvios');
   const [analysisPeriod, setAnalysisPeriod] = useState<string>('all');
   const [analysisSearch, setAnalysisSearch] = useState<string>('');
@@ -181,19 +182,26 @@ export function PhysicalInventoryReport() {
       const docsList: any[] = [];
       const loads = snap.docs.map(d => {
         const data = d.data();
+        let items = data.items || [];
+        items = items.map((r: any) => {
+          if (r.tipo && r.tipo.toLowerCase().includes('termocont')) {
+            r.tipo = 'Termocontraible';
+          }
+          return r;
+        });
         docsList.push({
           id: d.id,
           fileName: data.fileName || 'Inventario',
           uploadedAt: data.uploadedAt || '',
           inventoryDate: data.inventoryDate || '',
-          items: data.items || []
+          items: items
         });
         return {
           id: d.id,
           fileName: data.fileName || 'Inventario',
           uploadedAt: data.uploadedAt || '',
           inventoryDate: data.inventoryDate || '',
-          itemsCount: Array.isArray(data.items) ? data.items.length : 0
+          itemsCount: items.length
         };
       });
       // Sort newest upload first
@@ -322,7 +330,8 @@ export function PhysicalInventoryReport() {
           if (!codigo || codigo === '' || codigo.toLowerCase() === 'código' || codigo.toLowerCase() === 'codigo') continue;
 
           const producto = (row[idxProducto] || '').toString().trim() || 'Sin Nombre';
-          const tipo = (row[idxTipo] || '').toString().trim() || 'S/D';
+          let tipo = (row[idxTipo] || '').toString().trim() || 'S/D';
+          if (tipo.toLowerCase().includes('termocont')) tipo = 'Termocontraible';
 
           const parseNum = (val: any): number => {
             if (val === undefined || val === null || val === '') return 0;
@@ -957,6 +966,12 @@ export function PhysicalInventoryReport() {
   // Filtered list of monthly evolution categories
   const filteredMonthlyCategories = useMemo(() => {
     let list = monthlyEvolutionAnalysis.categories;
+    if (hideOtrosCategorias) {
+      list = list.filter(item => {
+        const t = item.tipo.toLowerCase();
+        return !t.includes('otros') && t !== 's/i';
+      });
+    }
     if (mensualSearch.trim() !== '') {
       const q = mensualSearch.toLowerCase();
       list = list.filter(item => 
@@ -977,7 +992,7 @@ export function PhysicalInventoryReport() {
       }
       return sortMonthlyAsc ? result : -result;
     });
-  }, [monthlyEvolutionAnalysis.categories, mensualSearch, sortMonthlyField, sortMonthlyAsc]);
+  }, [monthlyEvolutionAnalysis.categories, mensualSearch, sortMonthlyField, sortMonthlyAsc, hideOtrosCategorias]);
 
   // Filtered list of monthly evolution groups
   const filteredMonthlyGroups = useMemo(() => {
@@ -1397,17 +1412,32 @@ export function PhysicalInventoryReport() {
             </div>
 
             {/* Typography Configuration for enhanced readability */}
-            <div className="flex items-center gap-2 self-start md:self-auto bg-slate-50 border border-slate-200/60 rounded-xl px-3 py-1.5 shrink-0 shadow-xs">
-              <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Tipografía / Letra:</span>
-              <select
-                value={prefFont}
-                onChange={(e) => setPrefFont(e.target.value as any)}
-                className="bg-white border border-slate-200 rounded-lg text-xs font-extrabold text-gray-700 py-1 px-2.5 h-7 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              >
-                <option value="sans">Interfaz Limpia (Inter Web)</option>
-                <option value="display">Moderna (Outfit Display)</option>
-                <option value="mono">Técnica (JetBrains Mono)</option>
-              </select>
+            <div className="flex flex-wrap items-center gap-4 self-start md:self-auto shrink-0 border border-slate-200/60 rounded-xl bg-slate-50 p-1.5 px-3">
+              <div className="flex items-center gap-2 border-r border-slate-200 pr-3 mr-1">
+                <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Ajuste de Vista:</span>
+                <button
+                  onClick={() => setHideOtrosCategorias(!hideOtrosCategorias)}
+                  className={`text-[10px] font-bold uppercase transition-all px-2 py-1 rounded-md ${
+                    hideOtrosCategorias 
+                      ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200' 
+                      : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-100'
+                  }`}
+                >
+                  {hideOtrosCategorias ? 'Mostrar Todos' : 'Ocultar S/I y Otros'}
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Tipografía / Letra:</span>
+                <select
+                  value={prefFont}
+                  onChange={(e) => setPrefFont(e.target.value as any)}
+                  className="bg-white border border-slate-200 rounded-lg text-xs font-extrabold text-gray-700 py-1 px-2.5 h-7 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                >
+                  <option value="sans">Interfaz Limpia (Inter Web)</option>
+                  <option value="display">Moderna (Outfit Display)</option>
+                  <option value="mono">Técnica (JetBrains Mono)</option>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -1551,7 +1581,11 @@ export function PhysicalInventoryReport() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50 text-xs font-semibold text-gray-700 tabular-nums">
-                          {desviosAnalysis.categories.map((cat) => (
+                          {desviosAnalysis.categories.filter(cat => {
+                            if (!hideOtrosCategorias) return true;
+                            const t = cat.tipo.toLowerCase();
+                            return !t.includes('otros') && t !== 's/i';
+                          }).map((cat) => (
                             <tr key={cat.tipo} className="hover:bg-slate-50/50">
                               <td className="py-2.5">
                                 <span className="font-extrabold text-gray-900">{cat.tipo}</span>
@@ -1560,9 +1594,9 @@ export function PhysicalInventoryReport() {
                               <td className="py-2.5 text-right font-black">
                                 <span className={
                                   cat.desmioAcumulado < 0 || cat.desvioAcumulado < 0
-                                    ? 'text-red-650 text-red-600' 
+                                    ? 'text-emerald-600 font-bold' 
                                     : cat.desvioAcumulado > 0 
-                                      ? 'text-emerald-600 font-extrabold' 
+                                      ? 'text-red-600 font-extrabold' 
                                       : 'text-gray-500'
                                 }>
                                   {cat.desvioAcumulado > 0 ? `+${cat.desvioAcumulado.toLocaleString('es-AR')}` : cat.desvioAcumulado.toLocaleString('es-AR')}
@@ -1571,12 +1605,12 @@ export function PhysicalInventoryReport() {
                               <td className="py-2.5 text-right font-black">
                                 <span className={
                                   cat.porcentajeDesvio < 0 
-                                    ? 'text-red-600 font-bold' 
+                                    ? 'text-emerald-600 font-bold' 
                                     : cat.porcentajeDesvio > 0 
-                                      ? 'text-emerald-605 text-emerald-600 font-bold' 
+                                      ? 'text-red-600 font-bold' 
                                       : 'text-gray-500'
                                 }>
-                                  {cat.porcentajeDesvio > 0 ? `+${cat.porcentajeDesvio.toFixed(1)}%` : `${cat.porcentajeDesvio.toFixed(1)}%`}
+                                  {cat.porcentajeDesvio > 0 ? `+${cat.porcentajeDesvio.toFixed(2)}%` : `${cat.porcentajeDesvio.toFixed(2)}%`}
                                 </span>
                               </td>
                             </tr>
@@ -1689,10 +1723,10 @@ export function PhysicalInventoryReport() {
                               </td>
                               <td className="py-2.5 text-right font-black">
                                 <span className={
-                                  art.desvioAcumulado < 0 
-                                    ? 'text-red-650 text-red-600 font-bold' 
+                                  art.desvioAcumulado < 0
+                                    ? 'text-emerald-600 font-bold' 
                                     : art.desvioAcumulado > 0 
-                                      ? 'text-emerald-600 font-extrabold' 
+                                      ? 'text-red-600 font-extrabold' 
                                       : 'text-gray-500'
                                 }>
                                   {art.desvioAcumulado > 0 ? `+${art.desvioAcumulado.toLocaleString('es-AR')}` : art.desvioAcumulado.toLocaleString('es-AR')}
@@ -1701,12 +1735,12 @@ export function PhysicalInventoryReport() {
                               <td className="py-2.5 text-right font-black">
                                 <span className={
                                   art.porcentajeDesvio < 0 
-                                    ? 'text-red-600 font-bold' 
+                                    ? 'text-emerald-600 font-bold' 
                                     : art.porcentajeDesvio > 0 
-                                      ? 'text-emerald-605 text-emerald-600 font-bold' 
+                                      ? 'text-red-600 font-bold' 
                                       : 'text-gray-500'
                                 }>
-                                  {art.porcentajeDesvio > 0 ? `+${art.porcentajeDesvio.toFixed(1)}%` : `${art.porcentajeDesvio.toFixed(1)}%`}
+                                  {art.porcentajeDesvio > 0 ? `+${art.porcentajeDesvio.toFixed(2)}%` : `${art.porcentajeDesvio.toFixed(2)}%`}
                                 </span>
                               </td>
                               <td className="py-2.5 text-right font-black text-slate-800">
@@ -1880,7 +1914,7 @@ export function PhysicalInventoryReport() {
                             filteredMonthlyArticles.map(art => (
                               <tr key={art.codigo} className="hover:bg-slate-50/50">
                                 <td className="py-3.5 px-2 pr-2 truncate" title={art.producto}>
-                                  <div className="font-extrabold text-xs md:text-sm text-gray-900 truncate max-w-[200px]" title={art.producto}>{art.producto}</div>
+                                  <div className="font-extrabold text-sm md:text-base text-gray-900 truncate max-w-[200px]" title={art.producto}>{art.producto}</div>
                                   <span className="font-mono text-[10px] md:text-xs text-slate-500 block font-semibold">{art.codigo}</span>
                                 </td>
                                 <td className="py-3.5 px-2">
@@ -1901,11 +1935,11 @@ export function PhysicalInventoryReport() {
                                   return (
                                     <td key={monthKey} className="py-3.5 px-1.5 text-center font-mono">
                                       <span 
-                                        className={`inline-block w-full py-1.5 px-2 rounded-md text-xs md:text-[13px] font-black tracking-wide ${
+                                        className={`inline-block w-full py-2 px-2.5 rounded-md text-sm md:text-base font-black tracking-wide ${
                                           mData.porcentaje < 0 
-                                            ? 'text-red-800 bg-red-100/90 text-red-900' 
+                                            ? 'text-emerald-800 bg-emerald-100/90 text-emerald-900' 
                                             : mData.porcentaje > 0 
-                                              ? 'text-emerald-800 bg-emerald-100/90 text-emerald-900' 
+                                              ? 'text-red-800 bg-red-100/90 text-red-900' 
                                               : 'text-gray-600 bg-gray-100/80 font-bold'
                                         }`}
                                         title={`Desvío: ${mData.desvio > 0 ? '+' : ''}${mData.desvio.toLocaleString('es-AR')} | Base: ${
@@ -1934,7 +1968,7 @@ export function PhysicalInventoryReport() {
                           ) : (
                             filteredMonthlyCategories.map(cat => (
                               <tr key={cat.tipo} className="hover:bg-slate-50/50">
-                                <td className="py-4 px-2 font-black text-xs md:text-sm text-gray-900">
+                                <td className="py-4 px-2 font-black text-sm md:text-base text-gray-900">
                                   {cat.tipo}
                                 </td>
                                 {monthlyEvolutionAnalysis.sortedMonths.map(monthKey => {
@@ -1950,11 +1984,11 @@ export function PhysicalInventoryReport() {
                                   return (
                                     <td key={monthKey} className="py-4 px-1.5 text-center font-mono">
                                       <span 
-                                        className={`inline-block w-full py-1.5 px-2 rounded-md text-xs md:text-[13px] font-black tracking-wide ${
+                                        className={`inline-block w-full py-2 px-2.5 rounded-md text-sm md:text-base font-black tracking-wide ${
                                           mData.porcentaje < 0 
-                                            ? 'text-red-800 bg-red-100/90 text-red-900' 
+                                            ? 'text-emerald-800 bg-emerald-100/90 text-emerald-900' 
                                             : mData.porcentaje > 0 
-                                              ? 'text-emerald-800 bg-emerald-100/90 text-emerald-900' 
+                                              ? 'text-red-800 bg-red-100/90 text-red-900' 
                                               : 'text-gray-600 bg-gray-100/80 font-bold'
                                         }`}
                                         title={`Desvío: ${mData.desvio > 0 ? '+' : ''}${mData.desvio.toLocaleString('es-AR')} | Base: ${
@@ -1985,7 +2019,7 @@ export function PhysicalInventoryReport() {
                             filteredMonthlyGroups.map(grp => (
                               <tr key={grp.producto} className="hover:bg-slate-50/50">
                                 <td className="py-3.5 px-2 pr-2 truncate">
-                                  <div className="font-extrabold text-xs md:text-sm text-gray-900 truncate max-w-[200px]" title={grp.producto}>{grp.producto}</div>
+                                  <div className="font-extrabold text-sm md:text-base text-gray-900 truncate max-w-[200px]" title={grp.producto}>{grp.producto}</div>
                                   <span className="font-mono text-[10px] md:text-xs text-indigo-505 text-indigo-500 block font-semibold">Consolidado</span>
                                 </td>
                                 <td className="py-3.5 px-2">
@@ -2006,11 +2040,11 @@ export function PhysicalInventoryReport() {
                                   return (
                                     <td key={monthKey} className="py-3.5 px-1.5 text-center font-mono">
                                       <span 
-                                        className={`inline-block w-full py-1.5 px-2 rounded-md text-xs md:text-[13px] font-black tracking-wide ${
+                                        className={`inline-block w-full py-2 px-2.5 rounded-md text-sm md:text-base font-black tracking-wide ${
                                           mData.porcentaje < 0 
-                                            ? 'text-red-800 bg-red-100/90 text-red-900' 
+                                            ? 'text-emerald-800 bg-emerald-100/90' 
                                             : mData.porcentaje > 0 
-                                              ? 'text-emerald-800 bg-emerald-100/90 text-emerald-900' 
+                                              ? 'text-red-800 bg-red-100/90' 
                                               : 'text-gray-600 bg-gray-100/80'
                                         }`}
                                         title={`Desvío: ${mData.desvio > 0 ? '+' : ''}${mData.desvio.toLocaleString('es-AR')} | Base: ${
