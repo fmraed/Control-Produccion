@@ -1090,7 +1090,7 @@ export function InsumosControlReport() {
       const monthlyRequired = monthlyGroupedRequirements[groupKey] || 0;
       
       // We can just query effective stock using the first member of the group (or the insumo itself if no group)
-      const representativeInsumo = groupKey.split(' / ')[0];
+      const representativeInsumo = groupKey.startsWith("Etiqueta ") ? groupKey : groupKey.split(' / ')[0];
       const stock = getEffectiveInsumoStock(representativeInsumo);
       
       const isMet = stock >= required;
