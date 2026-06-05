@@ -78,12 +78,25 @@ export function SuppliesProjection() {
 
     const unsubGoals = onSnapshot(qGoals, (snap) => {
       setGoals(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as MonthlyGoal)));
-      const unsubStock = onSnapshot(doc(db, 'config', 'sql_last_insumos_stock'), (docSnap) => {
-        if (docSnap.exists() && docSnap.data().data) setStockData(docSnap.data().data);
+    });
+
+    fetch('/api/sql/insumosStock')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.data) {
+          const mappedStock = data.data.map((item: any) => ({
+            insumo: item.nombre_articulo,
+            amount: item.stock_final
+          }));
+          setStockData(mappedStock);
+        }
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error('Error fetching insumos stock', err);
         setLoading(false);
       });
-      return () => unsubStock();
-    });
+
     return () => unsubGoals();
   }, [planningMonths]);
 
