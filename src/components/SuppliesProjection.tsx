@@ -18,6 +18,7 @@ export function SuppliesProjection() {
   const { config } = useAppConfig();
   const [goals, setGoals] = useState<MonthlyGoal[]>([]);
   const [stockData, setStockData] = useState<any[]>([]);
+  const [insumoMappings, setInsumoMappings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'proyeccion' | 'consumo'>('proyeccion');
 
@@ -80,12 +81,17 @@ export function SuppliesProjection() {
       setGoals(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as MonthlyGoal)));
     });
 
+    const unsubInsumos = onSnapshot(doc(db, 'config', 'sql_insumo_mappings'), (docSnap) => {                
+        if (docSnap.exists()) setInsumoMappings(docSnap.data() as Record<string, string>);
+    });
+
     fetch('/api/sql/insumosStock')
       .then(res => res.json())
       .then(data => {
         if (data.success && data.data) {
           const mappedStock = data.data.map((item: any) => ({
             insumo: item.nombre_articulo,
+            codigo: item.codigo_articulo || '',
             amount: item.stock_final
           }));
           setStockData(mappedStock);
@@ -97,7 +103,7 @@ export function SuppliesProjection() {
         setLoading(false);
       });
 
-    return () => unsubGoals();
+    return () => { unsubGoals(); unsubInsumos(); };
   }, [planningMonths]);
 
   const combinedData = useMemo(() => {
@@ -152,6 +158,11 @@ export function SuppliesProjection() {
 
     const projectionResults = items.map(item => {
         const initialStock = stockData.reduce((acc, s) => {
+            const mappedCode = insumoMappings[item.name];
+            if (mappedCode && s.codigo && s.codigo.trim().toLowerCase() === mappedCode.trim().toLowerCase()) {
+                return acc + (s.amount || s.STOCK || 0);
+            }
+            // Fallback to name matching
             const stockName = (s.insumo || s.NAME || '').toLowerCase();
             const itemName = item.name.toLowerCase();
             if (stockName.includes(itemName) || itemName.includes(stockName)) {
