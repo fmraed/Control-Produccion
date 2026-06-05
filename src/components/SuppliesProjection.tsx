@@ -133,11 +133,19 @@ export function SuppliesProjection() {
         });
     });
 
-    const projectionResults = Object.values(finalItems).map(item => {
-        let initialStock = 0;
-        stockData.forEach((s: any) => {
-            if ((s.insumo && s.insumo.toLowerCase() === item.name.toLowerCase()) || (s.NAME && String(s.NAME).toLowerCase() === item.name.toLowerCase())) initialStock += (s.amount || s.STOCK || 0);
-        });
+    const items = Object.values(finalItems).filter(item => 
+        Object.values(item.monthlyReq).some(val => val > 0)
+    );
+
+    const projectionResults = items.map(item => {
+        const initialStock = stockData.reduce((acc, s) => {
+            const stockName = (s.insumo || s.NAME || '').toLowerCase();
+            const itemName = item.name.toLowerCase();
+            if (stockName.includes(itemName) || itemName.includes(stockName)) {
+                return acc + (s.amount || s.STOCK || 0);
+            }
+            return acc;
+        }, 0);
 
         const stockEvolution = [initialStock];
         let currentStock = initialStock;
@@ -181,7 +189,7 @@ export function SuppliesProjection() {
         return { ...item, initialStock, stockEvolution, stockoutMonthIndex, etaDate };
     });
 
-    return { projection: projectionResults.sort((a,b) => (a.stockoutMonthIndex === -1 ? 1 : b.stockoutMonthIndex === -1 ? -1 : a.stockoutMonthIndex - b.stockoutMonthIndex)), items: Object.values(finalItems) };
+    return { projection: projectionResults.sort((a,b) => (a.stockoutMonthIndex === -1 ? 1 : b.stockoutMonthIndex === -1 ? -1 : a.stockoutMonthIndex - b.stockoutMonthIndex)), items: items };
   }, [config, goals, planningMonths, stockData, findPreformaForProduct, findTermoForProduct, findStretchForProduct, findTapaForProduct, getPackingCategory]);
 
   if (loading) return <div className="flex justify-center p-12 animate-pulse text-blue-600">Cargando datos...</div>;
@@ -200,30 +208,35 @@ export function SuppliesProjection() {
       </div>
 
       {activeTab === 'proyeccion' ? (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-            <table className="w-full text-left">
-            <thead className="bg-gray-100">
-                <tr>
-                <th className="px-6 py-4 text-xs font-black text-gray-500 uppercase tracking-widest border-r">Insumo</th>
-                <th className="px-6 py-4 text-xs font-black text-gray-600 uppercase tracking-widest text-right">Inv. Hoy</th>
-                <th className="px-6 py-4 text-xs font-black text-gray-600 uppercase tracking-widest text-right">ETA Quiebre</th>
-                {planningMonths.map(m => <th key={m} className="px-2 py-4 text-[10px] font-black text-blue-700 uppercase tracking-widest text-center">{format(parseISO(`${m}-01`), 'MMM yy', { locale: es })}</th>)}
-                </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-                {combinedData.projection.map((item, idx) => (
-                <tr key={idx} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 text-sm font-bold text-gray-900 border-r text-xs">{item.name}</td>
-                    <td className="px-6 py-4 text-sm font-black text-gray-800 text-right">{Intl.NumberFormat('es-AR').format(Math.round(item.initialStock))}</td>
-                    <td className="px-6 py-4 text-sm text-right">{item.etaDate ? <span className="text-red-700 font-black">{format(item.etaDate, 'd MMM', { locale: es })}</span> : <span className="text-emerald-600 font-black">OK</span>}</td>
-                    {planningMonths.map((m, i) => {
-                        const val = item.stockEvolution[i + 1];
-                        return <td key={m} className={`text-center text-xs font-bold ${val < 0 ? 'bg-red-50 text-red-700' : 'text-gray-600'}`}>{Intl.NumberFormat('es-AR').format(Math.round(val))}</td>
-                    })}
-                </tr>
-                ))}
-            </tbody>
-            </table>
+        <div className="space-y-6">
+            {Object.keys(combinedData.items.reduce((acc, i) => { if(!acc[i.category]) acc[i.category] = []; acc[i.category].push(i); return acc; }, {} as Record<string, any[]>)).map(cat => (
+                <div key={cat} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                    <h3 className="text-lg font-black text-amber-900 p-6 pb-0">{cat}</h3>
+                    <table className="w-full text-left">
+                    <thead className="bg-gray-100">
+                        <tr>
+                        <th className="px-6 py-4 text-xs font-black text-gray-500 uppercase tracking-widest border-r">Insumo</th>
+                        <th className="px-6 py-4 text-xs font-black text-gray-600 uppercase tracking-widest text-right">Inv. Hoy</th>
+                        <th className="px-6 py-4 text-xs font-black text-gray-600 uppercase tracking-widest text-right">ETA Quiebre</th>
+                        {planningMonths.map(m => <th key={m} className="px-2 py-4 text-[10px] font-black text-blue-700 uppercase tracking-widest text-center">{format(parseISO(`${m}-01`), 'MMM yy', { locale: es })}</th>)}
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                        {combinedData.projection.filter(item => item.category === cat).map((item, idx) => (
+                        <tr key={idx} className="hover:bg-gray-50">
+                            <td className="px-6 py-4 text-sm font-bold text-gray-900 border-r text-xs">{item.name}</td>
+                            <td className="px-6 py-4 text-sm font-black text-gray-800 text-right">{Intl.NumberFormat('es-AR').format(Math.round(item.initialStock))}</td>
+                            <td className="px-6 py-4 text-sm text-right">{item.etaDate ? <span className="text-red-700 font-black">{format(item.etaDate, 'd MMM', { locale: es })}</span> : <span className="text-emerald-600 font-black">OK</span>}</td>
+                            {planningMonths.map((m, i) => {
+                                const val = item.stockEvolution[i + 1];
+                                return <td key={m} className={`text-center text-xs font-bold ${val < 0 ? 'bg-red-50 text-red-700' : 'text-gray-600'}`}>{Intl.NumberFormat('es-AR').format(Math.round(val))}</td>
+                            })}
+                        </tr>
+                        ))}
+                    </tbody>
+                    </table>
+                </div>
+            ))}
         </div>
       ) : (
         <div className="space-y-6">
