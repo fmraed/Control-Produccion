@@ -159,9 +159,15 @@ export function SuppliesProjection() {
     const projectionResults = items.map(item => {
         const initialStock = stockData.reduce((acc, s) => {
             const mappedCode = insumoMappings[item.name];
-            if (mappedCode && s.codigo && s.codigo.trim().toLowerCase() === mappedCode.trim().toLowerCase()) {
-                return acc + (s.amount || s.STOCK || 0);
+            
+            // If mapping exists, strict code matching
+            if (mappedCode) {
+                if (s.codigo && s.codigo.trim().toLowerCase() === mappedCode.trim().toLowerCase()) {
+                    return acc + (s.amount || s.STOCK || 0);
+                }
+                return acc; // Don't allow name matching if mapped code is set
             }
+            
             // Fallback to name matching
             const stockName = (s.insumo || s.NAME || '').toLowerCase();
             const itemName = item.name.toLowerCase();
