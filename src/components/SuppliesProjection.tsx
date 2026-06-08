@@ -19,6 +19,7 @@ export function SuppliesProjection() {
   const [goals, setGoals] = useState<MonthlyGoal[]>([]);
   const [stockData, setStockData] = useState<any[]>([]);
   const [insumoMappings, setInsumoMappings] = useState<Record<string, string>>({});
+  const [etiquetasMappings, setEtiquetasMappings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'proyeccion' | 'consumo'>('proyeccion');
 
@@ -85,6 +86,10 @@ export function SuppliesProjection() {
         if (docSnap.exists()) setInsumoMappings(docSnap.data() as Record<string, string>);
     });
 
+    const unsubEtiquetas = onSnapshot(doc(db, 'config', 'sql_etiquetas_mappings'), (docSnap) => {
+        if (docSnap.exists()) setEtiquetasMappings(docSnap.data() as Record<string, string>);
+    });
+
     fetch('/api/sql/insumosStock')
       .then(res => res.json())
       .then(data => {
@@ -103,7 +108,7 @@ export function SuppliesProjection() {
         setLoading(false);
       });
 
-    return () => { unsubGoals(); unsubInsumos(); };
+    return () => { unsubGoals(); unsubInsumos(); unsubEtiquetas(); };
   }, [planningMonths]);
 
   const combinedData = useMemo(() => {
@@ -156,16 +161,44 @@ export function SuppliesProjection() {
         Object.values(item.monthlyReq).some(val => val > 0)
     );
 
+    const getMappedCodes = (itemName: string): string[] => {
+        // 1. Insumo mappings
+        if (insumoMappings[itemName]) return insumoMappings[itemName].split(',').map(c => c.trim().toLowerCase());
+        
+        // 2. Etiquetas
+        if (itemName.startsWith('Etiqueta ')) {
+            const parts = itemName.replace('Etiqueta ', '').replace('cc', '').split(' / ');
+            if (parts.length === 3) {
+                const key = `${parts[0]}-${parts[1]}-${parts[2]}`;
+                if (etiquetasMappings[key]) return etiquetasMappings[key].split(',').map(c => c.trim().toLowerCase());
+            }
+        }
+
+        // 3. Built-in configs
+        const pref = (config?.preformasConfig || []).find(p => p.name === itemName);
+        if (pref?.sqlCode) return pref.sqlCode.split(',').map(c => c.trim().toLowerCase());
+        
+        const tm = (config?.termoConfig || []).find(t => t.name === itemName);
+        if (tm?.sqlCode) return tm.sqlCode.split(',').map(c => c.trim().toLowerCase());
+        
+        const st = (config?.stretchConfig || []).find(s => s.name === itemName);
+        if (st?.sqlCode) return st.sqlCode.split(',').map(c => c.trim().toLowerCase());
+        
+        const tp = (config?.tapasConfig || []).find(t => t.name === itemName);
+        if (tp?.sqlCode) return tp.sqlCode.split(',').map(c => c.trim().toLowerCase());
+        
+        return [];
+    };
+
     const projectionResults = items.map(item => {
+        const targetCodes = getMappedCodes(item.name);
+
         const initialStock = stockData.reduce((acc, s) => {
-            const mappedCode = insumoMappings[item.name];
-            
-            // If mapping exists, strict code matching
-            if (mappedCode) {
-                if (s.codigo && s.codigo.trim().toLowerCase() === mappedCode.trim().toLowerCase()) {
+            if (targetCodes.length > 0) {
+                if (s.codigo && targetCodes.includes(s.codigo.trim().toLowerCase())) {
                     return acc + (s.amount || s.STOCK || 0);
                 }
-                return acc; // Don't allow name matching if mapped code is set
+                return acc; 
             }
             
             // Fallback to name matching
@@ -220,7 +253,7 @@ export function SuppliesProjection() {
     });
 
     return { projection: projectionResults.sort((a,b) => (a.stockoutMonthIndex === -1 ? 1 : b.stockoutMonthIndex === -1 ? -1 : a.stockoutMonthIndex - b.stockoutMonthIndex)), items: items };
-  }, [config, goals, planningMonths, stockData, findPreformaForProduct, findTermoForProduct, findStretchForProduct, findTapaForProduct, getPackingCategory]);
+  }, [config, goals, planningMonths, stockData, findPreformaForProduct, findTermoForProduct, findStretchForProduct, findTapaForProduct, getPackingCategory, insumoMappings, etiquetasMappings]);
 
   if (loading) return <div className="flex justify-center p-12 animate-pulse text-blue-600">Cargando datos...</div>;
 
