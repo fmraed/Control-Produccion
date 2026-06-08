@@ -618,14 +618,18 @@ export function PhysicalInventoryReport() {
       // Build Reverse Map for Consolidated Groups
       const sqlToInsumoMap: Record<string, string> = {};
       Object.entries(insumoMappings || {}).forEach(([insName, idStr]) => {
-        if (idStr) sqlToInsumoMap[idStr as string] = insName;
+        if (idStr) {
+          (idStr as string).split(',').forEach(id => {
+            if (id.trim()) sqlToInsumoMap[id.trim().toLowerCase()] = insName;
+          });
+        }
       });
 
       if (config) {
-        (config.preformasConfig || []).forEach(p => { if (p.sqlCode) sqlToInsumoMap[p.sqlCode] = p.name; });
-        (config.termoConfig || []).forEach(t => { if (t.sqlCode) sqlToInsumoMap[t.sqlCode] = t.name; });
-        (config.stretchConfig || []).forEach(s => { if (s.sqlCode) sqlToInsumoMap[s.sqlCode] = s.name; });
-        (config.tapaConfig || []).forEach(tp => { if (tp.sqlCode) sqlToInsumoMap[tp.sqlCode] = tp.name; });
+        (config.preformasConfig || []).forEach(p => { if (p.sqlCode) p.sqlCode.split(',').forEach(id => { if (id.trim()) sqlToInsumoMap[id.trim().toLowerCase()] = p.name; }); });
+        (config.termoConfig || []).forEach(t => { if (t.sqlCode) t.sqlCode.split(',').forEach(id => { if (id.trim()) sqlToInsumoMap[id.trim().toLowerCase()] = t.name; }); });
+        (config.stretchConfig || []).forEach(s => { if (s.sqlCode) s.sqlCode.split(',').forEach(id => { if (id.trim()) sqlToInsumoMap[id.trim().toLowerCase()] = s.name; }); });
+        (config.tapaConfig || []).forEach(tp => { if (tp.sqlCode) tp.sqlCode.split(',').forEach(id => { if (id.trim()) sqlToInsumoMap[id.trim().toLowerCase()] = tp.name; }); });
       }
 
       const combinedGroups = config ? [
@@ -647,7 +651,7 @@ export function PhysicalInventoryReport() {
       }> = {};
 
       list.forEach(art => {
-        const insName = sqlToInsumoMap[art.codigo];
+        const insName = sqlToInsumoMap[(art.codigo || '').toString().trim().toLowerCase()];
         let groupKey: string | null = null;
         if (insName) {
           const group = combinedGroups.find(g => g.includes(insName));
@@ -808,14 +812,18 @@ export function PhysicalInventoryReport() {
     // Build Reverse Map for Consolidated Groups
     const sqlToInsumoMap: Record<string, string> = {};
     Object.entries(insumoMappings || {}).forEach(([insName, idStr]) => {
-      if (idStr) sqlToInsumoMap[idStr as string] = insName;
+      if (idStr) {
+        (idStr as string).split(',').forEach(id => {
+          if (id.trim()) sqlToInsumoMap[id.trim().toLowerCase()] = insName;
+        });
+      }
     });
 
     if (config) {
-      (config.preformasConfig || []).forEach(p => { if (p.sqlCode) sqlToInsumoMap[p.sqlCode] = p.name; });
-      (config.termoConfig || []).forEach(t => { if (t.sqlCode) sqlToInsumoMap[t.sqlCode] = t.name; });
-      (config.stretchConfig || []).forEach(s => { if (s.sqlCode) sqlToInsumoMap[s.sqlCode] = s.name; });
-      (config.tapaConfig || []).forEach(tp => { if (tp.sqlCode) sqlToInsumoMap[tp.sqlCode] = tp.name; });
+      (config.preformasConfig || []).forEach(p => { if (p.sqlCode) p.sqlCode.split(',').forEach(id => { if (id.trim()) sqlToInsumoMap[id.trim().toLowerCase()] = p.name; }); });
+      (config.termoConfig || []).forEach(t => { if (t.sqlCode) t.sqlCode.split(',').forEach(id => { if (id.trim()) sqlToInsumoMap[id.trim().toLowerCase()] = t.name; }); });
+      (config.stretchConfig || []).forEach(s => { if (s.sqlCode) s.sqlCode.split(',').forEach(id => { if (id.trim()) sqlToInsumoMap[id.trim().toLowerCase()] = s.name; }); });
+      (config.tapaConfig || []).forEach(tp => { if (tp.sqlCode) tp.sqlCode.split(',').forEach(id => { if (id.trim()) sqlToInsumoMap[id.trim().toLowerCase()] = tp.name; }); });
     }
 
     const combinedGroups = config ? [
@@ -832,7 +840,7 @@ export function PhysicalInventoryReport() {
     }> = {};
 
     Object.values(monthlyArticlesMap).forEach(art => {
-      const insName = sqlToInsumoMap[art.codigo];
+      const insName = sqlToInsumoMap[(art.codigo || '').toString().trim().toLowerCase()];
       let groupKey: string | null = null;
       if (insName) {
         const group = combinedGroups.find(g => g.includes(insName));
@@ -1121,7 +1129,9 @@ export function PhysicalInventoryReport() {
       const sqlToInsumoMap: Record<string, string> = {};
       systemEquivalences.forEach(eq => {
          if (eq.matched && eq.code !== 'S/C') {
-            sqlToInsumoMap[eq.code] = eq.insumoName;
+            (eq.code || '').toString().split(',').forEach(c => {
+               if (c.trim()) sqlToInsumoMap[c.trim().toLowerCase()] = eq.insumoName;
+            });
          }
       });
 
@@ -1131,12 +1141,12 @@ export function PhysicalInventoryReport() {
       list.forEach(row => {
          if (usedIds.has(row.codigo)) return;
          
-         const insumoName = sqlToInsumoMap[row.codigo];
+         const insumoName = sqlToInsumoMap[(row.codigo || '').toString().trim().toLowerCase()];
          if (insumoName) {
             const group = combinedGroups.find(g => g.includes(insumoName));
             if (group) {
                 const groupRows = list.filter(r => {
-                   const rName = sqlToInsumoMap[r.codigo];
+                   const rName = sqlToInsumoMap[(r.codigo || '').toString().trim().toLowerCase()];
                    return rName && group.includes(rName);
                 });
 

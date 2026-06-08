@@ -539,21 +539,27 @@ export function InsumosControlReport() {
       // Also migrate these numbers to simulatedStocks override buffer
       const nextSimulated = { ...simulatedStocks };
       uploadedInventory.forEach(row => {
+        const checkMatch = (sqlCode: string | undefined, rowCode: string) => {
+          if (!sqlCode || !rowCode) return false;
+          const mapCodes = sqlCode.toString().split(',').map(c => c.trim().toLowerCase());
+          return mapCodes.includes(rowCode.toString().trim().toLowerCase());
+        };
+
         // Search mapping for matches to assign simulated equivalents
-        const matchedInsumo = Object.keys(insumoMappings).find(k => insumoMappings[k] === row.codigo);
+        const matchedInsumo = Object.keys(insumoMappings).find(k => checkMatch(insumoMappings[k], row.codigo));
         if (matchedInsumo) {
-          nextSimulated[matchedInsumo] = row.saldoFinalDeposito;
+          nextSimulated[matchedInsumo] = (nextSimulated[matchedInsumo] || 0) + row.saldoFinalDeposito;
         } else {
           // Also check packaging configurations
           if (config) {
-            const pref = (config?.preformasConfig || []).find(p => p.sqlCode === row.codigo);
-            if (pref) nextSimulated[pref.name] = row.saldoFinalDeposito;
-            const tm = (config?.termoConfig || []).find(t => t.sqlCode === row.codigo);
-            if (tm) nextSimulated[tm.name] = row.saldoFinalDeposito;
-            const str = (config?.stretchConfig || []).find(s => s.sqlCode === row.codigo);
-            if (str) nextSimulated[str.name] = row.saldoFinalDeposito;
-            const tp = (config?.tapaConfig || []).find(t => t.sqlCode === row.codigo);
-            if (tp) nextSimulated[tp.name] = row.saldoFinalDeposito;
+            const pref = (config?.preformasConfig || []).find(p => checkMatch(p.sqlCode, row.codigo));
+            if (pref) nextSimulated[pref.name] = (nextSimulated[pref.name] || 0) + row.saldoFinalDeposito;
+            const tm = (config?.termoConfig || []).find(t => checkMatch(t.sqlCode, row.codigo));
+            if (tm) nextSimulated[tm.name] = (nextSimulated[tm.name] || 0) + row.saldoFinalDeposito;
+            const str = (config?.stretchConfig || []).find(s => checkMatch(s.sqlCode, row.codigo));
+            if (str) nextSimulated[str.name] = (nextSimulated[str.name] || 0) + row.saldoFinalDeposito;
+            const tp = (config?.tapaConfig || []).find(t => checkMatch(t.sqlCode, row.codigo));
+            if (tp) nextSimulated[tp.name] = (nextSimulated[tp.name] || 0) + row.saldoFinalDeposito;
           }
         }
       });
@@ -610,12 +616,17 @@ export function InsumosControlReport() {
       }
     }
     if (sqlCode) {
-      const match = stockData.find(s => {
-        const dbCode = (s.codigo_articulo || '').toString().trim().toLowerCase();
-        const mapCode = (sqlCode || '').toString().trim().toLowerCase();
-        return dbCode === mapCode && mapCode !== '';
-      });
-      if (match) return match.stock_almacen;
+      const mapCodes = (sqlCode || '').toString().split(',').map((c: string) => c.trim().toLowerCase()).filter((c: string) => c !== '');
+      if (mapCodes.length > 0) {
+        const total = stockData.reduce((acc, s) => {
+          const dbCode = (s.codigo_articulo || '').toString().trim().toLowerCase();
+          if (mapCodes.includes(dbCode) && dbCode !== '') {
+            return acc + (s.stock_almacen || 0);
+          }
+          return acc;
+        }, 0);
+        return total;
+      }
     }
     return 0; // fallback if no code / no match
   }, [config, simulationMode, simulatedStocks, insumoMappings, etiquetasMappings, stockData]);

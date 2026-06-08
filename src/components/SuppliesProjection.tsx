@@ -10,6 +10,7 @@ import { TrendingDown, Calendar, Database, FlaskConical, BarChart3, Package } fr
 
 interface InsumosGrouped {
   name: string;
+  originalNames: string[];
   category: string;
   monthlyReq: Record<string, number>; 
 }
@@ -147,13 +148,27 @@ export function SuppliesProjection() {
       reqObj[`Etiqueta ${marca} / ${sabor} / ${tamano}cc`] = (reqObj[`Etiqueta ${marca} / ${sabor} / ${tamano}cc`] || 0) + preformasNeeded;
     });
 
+    const combinedGroups = [
+      ...(config?.compatibleInsumoGroups ? Object.values(config.compatibleInsumoGroups) : []),
+      ...(config?.compatiblePackagingGroups ? Object.values(config.compatiblePackagingGroups) : [])
+    ] as string[][];
+
     const finalItems: Record<string, InsumosGrouped> = {};
     planningMonths.forEach(month => {
         Object.keys(requirementsByMonth[month]).forEach(insumo => {
             if (!insumo) return;
-            if (!finalItems[insumo]) finalItems[insumo] = { name: insumo, category: getPackingCategory(insumo), monthlyReq: {} };
-            planningMonths.forEach(m => finalItems[insumo].monthlyReq[m] = finalItems[insumo].monthlyReq[m] || 0);
-            finalItems[insumo].monthlyReq[month] = (finalItems[insumo].monthlyReq[month] || 0) + requirementsByMonth[month][insumo];
+
+            let groupKey = insumo;
+            let groupNames = [insumo];
+            const groupMatch = combinedGroups.find(g => g.includes(insumo));
+            if (groupMatch) {
+                groupKey = groupMatch.join(' / ');
+                groupNames = groupMatch;
+            }
+
+            if (!finalItems[groupKey]) finalItems[groupKey] = { name: groupKey, originalNames: groupNames, category: getPackingCategory(insumo), monthlyReq: {} };
+            planningMonths.forEach(m => finalItems[groupKey].monthlyReq[m] = finalItems[groupKey].monthlyReq[m] || 0);
+            finalItems[groupKey].monthlyReq[month] = (finalItems[groupKey].monthlyReq[month] || 0) + requirementsByMonth[month][insumo];
         });
     });
 
@@ -161,37 +176,40 @@ export function SuppliesProjection() {
         Object.values(item.monthlyReq).some(val => val > 0)
     );
 
-    const getMappedCodes = (itemName: string): string[] => {
-        // 1. Insumo mappings
-        if (insumoMappings[itemName]) return insumoMappings[itemName].split(',').map(c => c.trim().toLowerCase());
-        
-        // 2. Etiquetas
-        if (itemName.startsWith('Etiqueta ')) {
-            const parts = itemName.replace('Etiqueta ', '').replace('cc', '').split(' / ');
-            if (parts.length === 3) {
-                const key = `${parts[0]}-${parts[1]}-${parts[2]}`;
-                if (etiquetasMappings[key]) return etiquetasMappings[key].split(',').map(c => c.trim().toLowerCase());
+    const getMappedCodes = (originalNames: string[]): string[] => {
+        let allCodes: string[] = [];
+        originalNames.forEach(itemName => {
+            // 1. Insumo mappings
+            if (insumoMappings[itemName]) allCodes.push(...insumoMappings[itemName].split(',').map(c => c.trim().toLowerCase()));
+            
+            // 2. Etiquetas
+            if (itemName.startsWith('Etiqueta ')) {
+                const parts = itemName.replace('Etiqueta ', '').replace('cc', '').split(' / ');
+                if (parts.length === 3) {
+                    const key = `${parts[0]}-${parts[1]}-${parts[2]}`;
+                    if (etiquetasMappings[key]) allCodes.push(...etiquetasMappings[key].split(',').map(c => c.trim().toLowerCase()));
+                }
             }
-        }
 
-        // 3. Built-in configs
-        const pref = (config?.preformasConfig || []).find(p => p.name === itemName);
-        if (pref?.sqlCode) return pref.sqlCode.split(',').map(c => c.trim().toLowerCase());
+            // 3. Built-in configs
+            const pref = (config?.preformasConfig || []).find(p => p.name === itemName);
+            if (pref?.sqlCode) allCodes.push(...pref.sqlCode.split(',').map(c => c.trim().toLowerCase()));
+            
+            const tm = (config?.termoConfig || []).find(t => t.name === itemName);
+            if (tm?.sqlCode) allCodes.push(...tm.sqlCode.split(',').map(c => c.trim().toLowerCase()));
+            
+            const st = (config?.stretchConfig || []).find(s => s.name === itemName);
+            if (st?.sqlCode) allCodes.push(...st.sqlCode.split(',').map(c => c.trim().toLowerCase()));
+            
+            const tp = (config?.tapaConfig || []).find(t => t.name === itemName);
+            if (tp?.sqlCode) allCodes.push(...tp.sqlCode.split(',').map(c => c.trim().toLowerCase()));
+        });
         
-        const tm = (config?.termoConfig || []).find(t => t.name === itemName);
-        if (tm?.sqlCode) return tm.sqlCode.split(',').map(c => c.trim().toLowerCase());
-        
-        const st = (config?.stretchConfig || []).find(s => s.name === itemName);
-        if (st?.sqlCode) return st.sqlCode.split(',').map(c => c.trim().toLowerCase());
-        
-        const tp = (config?.tapasConfig || []).find(t => t.name === itemName);
-        if (tp?.sqlCode) return tp.sqlCode.split(',').map(c => c.trim().toLowerCase());
-        
-        return [];
+        return Array.from(new Set(allCodes));
     };
 
     const projectionResults = items.map(item => {
-        const targetCodes = getMappedCodes(item.name);
+        const targetCodes = getMappedCodes(item.originalNames);
 
         const initialStock = stockData.reduce((acc, s) => {
             if (targetCodes.length > 0) {
@@ -203,8 +221,12 @@ export function SuppliesProjection() {
             
             // Fallback to name matching
             const stockName = (s.insumo || s.NAME || '').toLowerCase();
-            const itemName = item.name.toLowerCase();
-            if (stockName.includes(itemName) || itemName.includes(stockName)) {
+            const hasNameMatch = item.originalNames.some(itemName => {
+                const lowerItem = itemName.toLowerCase();
+                return stockName.includes(lowerItem) || lowerItem.includes(stockName);
+            });
+            
+            if (hasNameMatch) {
                 return acc + (s.amount || s.STOCK || 0);
             }
             return acc;
