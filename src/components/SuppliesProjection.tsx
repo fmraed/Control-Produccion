@@ -23,6 +23,8 @@ export function SuppliesProjection() {
   const [etiquetasMappings, setEtiquetasMappings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'proyeccion' | 'consumo'>('proyeccion');
+  const [sortConfig, setSortConfig] = useState<{ field: string, asc: boolean }>({ field: 'etaDate', asc: true });
+  const [sortConfigConsumo, setSortConfigConsumo] = useState<{ field: string, asc: boolean }>({ field: 'name', asc: true });
 
   const planningMonths = useMemo(() => {
     const list = [];
@@ -277,6 +279,57 @@ export function SuppliesProjection() {
     return { projection: projectionResults.sort((a,b) => (a.stockoutMonthIndex === -1 ? 1 : b.stockoutMonthIndex === -1 ? -1 : a.stockoutMonthIndex - b.stockoutMonthIndex)), items: items };
   }, [config, goals, planningMonths, stockData, findPreformaForProduct, findTermoForProduct, findStretchForProduct, findTapaForProduct, getPackingCategory, insumoMappings, etiquetasMappings]);
 
+  const handleSort = (field: string) => {
+    if (sortConfig.field === field) setSortConfig({ field, asc: !sortConfig.asc });
+    else setSortConfig({ field, asc: true });
+  };
+
+  const handleSortConsumo = (field: string) => {
+    if (sortConfigConsumo.field === field) setSortConfigConsumo({ field, asc: !sortConfigConsumo.asc });
+    else setSortConfigConsumo({ field, asc: true });
+  };
+
+  const sortedProjection = useMemo(() => {
+    if (!combinedData?.projection) return [];
+    return [...combinedData.projection].sort((a, b) => {
+        let valA, valB;
+        if (sortConfig.field === 'name') {
+            valA = a.name; valB = b.name;
+        } else if (sortConfig.field === 'initialStock') {
+            valA = a.initialStock; valB = b.initialStock;
+        } else if (sortConfig.field === 'etaDate') {
+            valA = a.etaDate ? a.etaDate.getTime() : Infinity;
+            valB = b.etaDate ? b.etaDate.getTime() : Infinity;
+        } else if (sortConfig.field.startsWith('month_')) {
+            const idx = parseInt(sortConfig.field.split('_')[1]);
+            valA = a.stockEvolution[idx];
+            valB = b.stockEvolution[idx];
+        }
+
+        if (valA < valB) return sortConfig.asc ? -1 : 1;
+        if (valA > valB) return sortConfig.asc ? 1 : -1;
+        return 0;
+    });
+  }, [combinedData, sortConfig]);
+
+  const sortedConsumo = useMemo(() => {
+    if (!combinedData?.items) return [];
+    return [...combinedData.items].sort((a, b) => {
+        let valA, valB;
+        if (sortConfigConsumo.field === 'name') {
+            valA = a.name; valB = b.name;
+        } else if (sortConfigConsumo.field.startsWith('month_')) {
+            const m = sortConfigConsumo.field.split('_')[1];
+            valA = a.monthlyReq[m] || 0;
+            valB = b.monthlyReq[m] || 0;
+        }
+
+        if (valA < valB) return sortConfigConsumo.asc ? -1 : 1;
+        if (valA > valB) return sortConfigConsumo.asc ? 1 : -1;
+        return 0;
+    });
+  }, [combinedData, sortConfigConsumo]);
+
   if (loading) return <div className="flex justify-center p-12 animate-pulse text-blue-600">Cargando datos...</div>;
 
   return (
@@ -300,14 +353,24 @@ export function SuppliesProjection() {
                     <table className="w-full text-left">
                     <thead className="bg-gray-100">
                         <tr>
-                        <th className="px-6 py-4 text-xs font-black text-gray-500 uppercase tracking-widest border-r">Insumo</th>
-                        <th className="px-6 py-4 text-xs font-black text-gray-600 uppercase tracking-widest text-right">Inv. Hoy</th>
-                        <th className="px-6 py-4 text-xs font-black text-gray-600 uppercase tracking-widest text-right">ETA Quiebre</th>
-                        {planningMonths.map(m => <th key={m} className="px-2 py-4 text-[10px] font-black text-blue-700 uppercase tracking-widest text-center">{format(parseISO(`${m}-01`), 'MMM yy', { locale: es })}</th>)}
+                        <th className="px-6 py-4 text-xs font-black text-gray-500 uppercase tracking-widest border-r cursor-pointer hover:bg-gray-200 transition-colors" onClick={() => handleSort('name')}>
+                            Insumo {sortConfig.field === 'name' ? (sortConfig.asc ? '▲' : '▼') : ''}
+                        </th>
+                        <th className="px-6 py-4 text-xs font-black text-gray-600 uppercase tracking-widest text-right cursor-pointer hover:bg-gray-200 transition-colors" onClick={() => handleSort('initialStock')}>
+                            Inv. Hoy {sortConfig.field === 'initialStock' ? (sortConfig.asc ? '▲' : '▼') : ''}
+                        </th>
+                        <th className="px-6 py-4 text-xs font-black text-gray-600 uppercase tracking-widest text-right cursor-pointer hover:bg-gray-200 transition-colors" onClick={() => handleSort('etaDate')}>
+                            ETA Quiebre {sortConfig.field === 'etaDate' ? (sortConfig.asc ? '▲' : '▼') : ''}
+                        </th>
+                        {planningMonths.map((m, i) => (
+                            <th key={m} className="px-2 py-4 text-[10px] font-black text-blue-700 uppercase tracking-widest text-center cursor-pointer hover:bg-gray-200 transition-colors" onClick={() => handleSort(`month_${i+1}`)}>
+                                {format(parseISO(`${m}-01`), 'MMM yy', { locale: es })} {sortConfig.field === `month_${i+1}` ? (sortConfig.asc ? '▲' : '▼') : ''}
+                            </th>
+                        ))}
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                        {combinedData.projection.filter(item => item.category === cat).map((item, idx) => (
+                        {sortedProjection.filter(item => item.category === cat).map((item, idx) => (
                         <tr key={idx} className="hover:bg-gray-50">
                             <td className="px-6 py-4 text-sm font-bold text-gray-900 border-r text-xs">{item.name}</td>
                             <td className="px-6 py-4 text-sm font-black text-gray-800 text-right">{Intl.NumberFormat('es-AR').format(Math.round(item.initialStock))}</td>
@@ -330,8 +393,17 @@ export function SuppliesProjection() {
                     <h3 className="text-lg font-black text-amber-900 mb-4">{cat}</h3>
                     <div className="overflow-x-auto">
                         <table className="w-full text-xs">
-                            <thead><tr className="text-gray-500 border-b">{['Insumo', ...planningMonths.map(m => format(parseISO(`${m}-01`), 'MMM yy', { locale: es }))].map(h => <th key={h} className="p-2">{h.toUpperCase()}</th>)}</tr></thead>
-                            <tbody>{combinedData.items.filter(i => i.category === cat).map((item, idx) => (
+                            <thead><tr className="text-gray-500 border-b">
+                                <th className="p-2 cursor-pointer hover:bg-gray-200 transition-colors" onClick={() => handleSortConsumo('name')}>
+                                    INSUMO {sortConfigConsumo.field === 'name' ? (sortConfigConsumo.asc ? '▲' : '▼') : ''}
+                                </th>
+                                {planningMonths.map(m => (
+                                    <th key={m} className="p-2 cursor-pointer hover:bg-gray-200 transition-colors" onClick={() => handleSortConsumo(`month_${m}`)}>
+                                        {format(parseISO(`${m}-01`), 'MMM yy', { locale: es }).toUpperCase()} {sortConfigConsumo.field === `month_${m}` ? (sortConfigConsumo.asc ? '▲' : '▼') : ''}
+                                    </th>
+                                ))}
+                            </tr></thead>
+                            <tbody>{sortedConsumo.filter(i => i.category === cat).map((item, idx) => (
                                 <tr key={idx} className="border-b hover:bg-gray-50">
                                     <td className="p-2 font-bold">{item.name}</td>
                                     {planningMonths.map(m => <td key={m} className="p-2 text-right">{Intl.NumberFormat('es-AR').format(Math.round(item.monthlyReq[m]))}</td>)}
