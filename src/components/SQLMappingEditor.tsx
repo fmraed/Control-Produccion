@@ -142,7 +142,7 @@ export function SQLMappingEditor() {
         setSyrupMappings(cleanedSyrupMappings);
       } else if (activeTab === 'etiquetas') {
         const cleanedEtiquetaMappings: Record<string, string> = {};
-        generatedProductKeys.forEach(key => {
+        generatedEtiquetaKeys.forEach(key => {
           if (etiquetaMappings[key] !== undefined) {
             cleanedEtiquetaMappings[key] = etiquetaMappings[key];
           }
@@ -202,6 +202,30 @@ export function SQLMappingEditor() {
     return keys;
   }, [availableBrands, availableSizes, availableFlavors, config]);
 
+  const generatedEtiquetaKeys = useMemo(() => {
+    const keys: string[] = [];
+    availableBrands.forEach(brand => {
+      availableSizes.forEach(size => {
+        const sizeStr = size.toString();
+        const brandActive = config?.activeProducts?.[brand];
+        const hasBrandConfig = brandActive && Object.keys(brandActive).length > 0;
+        const hasSizeConfig = brandActive && sizeStr in brandActive;
+        const externalForSize = config?.externalProducts?.[brand]?.[sizeStr] || [];
+        
+        const allowedFlavors = hasSizeConfig
+          ? brandActive[sizeStr]
+          : (hasBrandConfig ? [] : (config?.brandFlavorCombinations[brand] || []));
+
+        allowedFlavors.forEach(flavor => {
+          if (config?.enabledFlavors?.[flavor] !== false && !externalForSize.includes(flavor)) {
+            keys.push(`${brand}-${flavor}-${size}`);
+          }
+        });
+      });
+    });
+    return keys;
+  }, [availableBrands, availableSizes, availableFlavors, config]);
+
   const generatedSyrupKeys = useMemo(() => {
     const keys: string[] = [];
     availableBrands.forEach(brand => {
@@ -231,7 +255,7 @@ export function SQLMappingEditor() {
   const activeMappings = activeTab === 'products' ? productMappings : activeTab === 'syrups' ? syrupMappings : activeTab === 'etiquetas' ? etiquetaMappings : insumoMappings;
   
   // Only show keys that are currently active in the configuration
-  const sourceKeysSet = new Set<string>(activeTab === 'products' || activeTab === 'etiquetas' ? generatedProductKeys : activeTab === 'syrups' ? generatedSyrupKeys : generatedInsumoKeys);
+  const sourceKeysSet = new Set<string>(activeTab === 'products' ? generatedProductKeys : activeTab === 'etiquetas' ? generatedEtiquetaKeys : activeTab === 'syrups' ? generatedSyrupKeys : generatedInsumoKeys);
   const sourceKeys = Array.from(sourceKeysSet);
 
   const filteredKeys = sourceKeys.filter(key => 

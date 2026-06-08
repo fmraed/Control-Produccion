@@ -4,7 +4,7 @@ import { db } from '../firebase';
 import { useAppConfig } from '../hooks/useAppConfig';
 import { MonthlyGoal } from '../types';
 import { BOTELLAS_POR_PACK, PACKS_POR_PALETA, WASTE_WEIGHTS } from '../constants';
-import { format, parseISO, addMonths, startOfMonth, addDays } from 'date-fns';
+import { format, parseISO, addMonths, startOfMonth, addDays, differenceInDays } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { TrendingDown, Calendar, Database, FlaskConical, BarChart3, Package } from 'lucide-react';
 
@@ -147,7 +147,11 @@ export function SuppliesProjection() {
       reqObj[findTermoForProduct(tamano, sabor)?.name || ''] = (reqObj[findTermoForProduct(tamano, sabor)?.name || ''] || 0) + termoNeededKg;
       reqObj[findStretchForProduct(tamano, sabor)?.name || ''] = (reqObj[findStretchForProduct(tamano, sabor)?.name || ''] || 0) + stretchNeededKg;
       reqObj[findTapaForProduct(tamano, sabor)?.name || ''] = (reqObj[findTapaForProduct(tamano, sabor)?.name || ''] || 0) + tapasNeeded;
-      reqObj[`Etiqueta ${marca} / ${sabor} / ${tamano}cc`] = (reqObj[`Etiqueta ${marca} / ${sabor} / ${tamano}cc`] || 0) + preformasNeeded;
+
+      const isExternal = config?.externalProducts?.[marca]?.[tamano.toString()]?.includes(sabor);
+      if (!isExternal) {
+        reqObj[`Etiqueta ${marca} / ${sabor} / ${tamano}cc`] = (reqObj[`Etiqueta ${marca} / ${sabor} / ${tamano}cc`] || 0) + preformasNeeded;
+      }
     });
 
     const combinedGroups = [
@@ -374,7 +378,16 @@ export function SuppliesProjection() {
                         <tr key={idx} className="hover:bg-gray-50">
                             <td className="px-6 py-4 text-sm font-bold text-gray-900 border-r text-xs">{item.name}</td>
                             <td className="px-6 py-4 text-sm font-black text-gray-800 text-right">{Intl.NumberFormat('es-AR').format(Math.round(item.initialStock))}</td>
-                            <td className="px-6 py-4 text-sm text-right">{item.etaDate ? <span className="text-red-700 font-black">{format(item.etaDate, 'd MMM', { locale: es })}</span> : <span className="text-emerald-600 font-black">OK</span>}</td>
+                            <td className="px-6 py-4 text-sm text-right">
+                                {item.etaDate ? (() => {
+                                    const diff = differenceInDays(item.etaDate, new Date());
+                                    let textColor = 'text-gray-700';
+                                    if (diff < 15) textColor = 'text-red-700';
+                                    else if (diff <= 30) textColor = 'text-orange-500';
+                                    else if (diff <= 45) textColor = 'text-yellow-500';
+                                    return <span className={`${textColor} font-black`}>{format(item.etaDate, 'd MMM', { locale: es })}</span>;
+                                })() : <span className="text-emerald-600 font-black">OK</span>}
+                            </td>
                             {planningMonths.map((m, i) => {
                                 const val = item.stockEvolution[i + 1];
                                 return <td key={m} className={`text-center text-xs font-bold ${val < 0 ? 'bg-red-50 text-red-700' : 'text-gray-600'}`}>{Intl.NumberFormat('es-AR').format(Math.round(val))}</td>
