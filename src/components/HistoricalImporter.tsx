@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { collection, addDoc, updateDoc, doc, query, where, getDocs } from 'firebase/firestore';
 import { db, auth } from '../firebase';
@@ -94,44 +94,61 @@ export function HistoricalImporter() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [successCount, setSuccessCount] = useState(0);
+  const [skipDuplicateCheck, setSkipDuplicateCheck] = useState(false);
+  const existingRecordsCache = useRef<Record<string, any>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const checkExistingRecords = async (currentMappings: MappingResult[]) => {
+  const checkExistingRecords = async (currentMappings: MappingResult[], skipCheck: boolean) => {
     const updated = [...currentMappings];
+    if (skipCheck) {
+      updated.forEach(m => {
+        if (m.status === 'pending') m.importType = 'new';
+      });
+      setMappings(updated);
+      return;
+    }
+
     const pendingIndexes = updated
       .map((m, idx) => ({ m, idx }))
       .filter(({ m }) => m.status === 'pending');
 
-    const batchSize = 10;
-    for (let i = 0; i < pendingIndexes.length; i += batchSize) {
-      const batch = pendingIndexes.slice(i, i + batchSize);
-      await Promise.all(
-        batch.map(async ({ m, idx }) => {
-          try {
-            const q = query(
-              collection(db, 'production_reports'),
-              where('fecha', '==', m.report.fecha),
-              where('linea', '==', m.report.linea),
-              where('planilla', '==', m.report.planilla),
-              where('sabor', '==', m.report.sabor),
-              where('tamano', '==', m.report.tamano)
-            );
-            const existing = await getDocs(q);
-            updated[idx] = {
-              ...m,
-              importType: existing.empty ? 'new' : 'update'
-            };
-          } catch (err) {
-            console.error("Error checking record in background:", err);
-            updated[idx] = {
-              ...m,
-              importType: 'new'
-            };
-          }
-        })
+    if (pendingIndexes.length === 0) return;
+
+    let minDate = pendingIndexes[0].m.report.fecha;
+    let maxDate = pendingIndexes[0].m.report.fecha;
+    pendingIndexes.forEach(({ m }) => {
+      if (m.report.fecha < minDate) minDate = m.report.fecha;
+      if (m.report.fecha > maxDate) maxDate = m.report.fecha;
+    });
+
+    try {
+      const q = query(
+        collection(db, 'production_reports'),
+        where('fecha', '>=', minDate),
+        where('fecha', '<=', maxDate)
       );
-      setMappings([...updated]);
+      const snap = await getDocs(q);
+      const cache: Record<string, any> = {};
+      snap.docs.forEach(doc => {
+        const data = doc.data();
+        const key = `${data.fecha}-${data.linea}-${data.planilla}-${data.sabor}-${data.tamano}`;
+        cache[key] = { id: doc.id, data };
+      });
+      existingRecordsCache.current = cache;
+
+      updated.forEach(m => {
+        if (m.status === 'pending') {
+          const key = `${m.report.fecha}-${m.report.linea}-${m.report.planilla}-${m.report.sabor}-${m.report.tamano}`;
+          m.importType = cache[key] ? 'update' : 'new';
+        }
+      });
+    } catch (err) {
+      console.error("Error checking records:", err);
+      updated.forEach(m => {
+        if (m.status === 'pending') m.importType = 'new';
+      });
     }
+    setMappings([...updated]);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -421,7 +438,7 @@ export function HistoricalImporter() {
 
         setMappings(newMappings);
         setIsProcessing(false);
-        checkExistingRecords(newMappings);
+        checkExistingRecords(newMappings, skipDuplicateCheck);
       };
       reader.readAsArrayBuffer(file);
     } catch (error) {
@@ -429,6 +446,12 @@ export function HistoricalImporter() {
       setIsProcessing(false);
     }
   };
+
+  useEffect(() => {
+    if (mappings.length > 0) {
+      checkExistingRecords(mappings, skipDuplicateCheck);
+    }
+  }, [skipDuplicateCheck]);
 
   const uploadData = async () => {
     if (mappings.filter(m => m.status === 'pending').length === 0) return;
@@ -443,17 +466,10 @@ export function HistoricalImporter() {
     for (let i = 0; i < total; i++) {
        const m = pending[i];
        try {
-          // Evitar duplicados (opcional: buscar por fecha, turno, linea, planilla)
-          const q = query(
-            collection(db, 'production_reports'),
-            where('fecha', '==', m.report.fecha),
-            where('linea', '==', m.report.linea),
-            where('planilla', '==', m.report.planilla),
-            where('sabor', '==', m.report.sabor),
-            where('tamano', '==', m.report.tamano)
-          );
-          const existing = await getDocs(q);
-          if (existing.empty) {
+          const key = `${m.report.fecha}-${m.report.linea}-${m.report.planilla}-${m.report.sabor}-${m.report.tamano}`;
+          const existingRecord = skipDuplicateCheck ? null : existingRecordsCache.current[key];
+          
+          if (!existingRecord) {
             console.log('Importing new record:', m.report.fecha, m.report.linea, m.report.planilla);
             const reportToImport = {
                ...m.report,
@@ -467,11 +483,10 @@ export function HistoricalImporter() {
                throw new Error(handleFirestoreError(err, OperationType.CREATE, 'production_reports'));
             }
           } else {
-            console.log('Updating existing record:', existing.docs[0].id);
-            const existingDoc = existing.docs[0];
-            const existingData = existingDoc.data();
+            console.log('Updating existing record:', existingRecord.id);
+            const existingData = existingRecord.data;
             try {
-               await updateDoc(doc(db, 'production_reports', existingDoc.id), {
+               await updateDoc(doc(db, 'production_reports', existingRecord.id), {
                  ...m.report,
                  // Preserve immutable fields to satisfy security rules
                  authorId: existingData.authorId,
@@ -479,7 +494,7 @@ export function HistoricalImporter() {
                  updatedAt: new Date().toISOString()
                });
             } catch (err: any) {
-               throw new Error(handleFirestoreError(err, OperationType.UPDATE, 'production_reports/' + existing.docs[0].id));
+               throw new Error(handleFirestoreError(err, OperationType.UPDATE, 'production_reports/' + existingRecord.id));
             }
           }
           successful++;
@@ -601,13 +616,25 @@ export function HistoricalImporter() {
             </div>
 
             {!isUploading && mappings.filter(m => m.status === 'pending').length > 0 && (
-              <button 
-                onClick={uploadData}
-                className="w-full sm:w-auto px-8 py-3 bg-indigo-600 text-white font-black rounded-xl shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
-              >
-                <Save className="w-5 h-5" />
-                Guardar en Base de Datos
-              </button>
+              <div className="flex flex-col sm:flex-row items-center gap-4">
+                <label className="flex items-center gap-2 text-xs text-gray-600 font-bold bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-200 cursor-pointer hover:bg-amber-100 transition-colors">
+                  <input 
+                    type="checkbox" 
+                    checked={skipDuplicateCheck}
+                    onChange={e => setSkipDuplicateCheck(e.target.checked)}
+                    className="rounded text-amber-600 focus:ring-amber-500 w-4 h-4"
+                  />
+                  <span className="text-amber-800">Forzar importación (Ignorar duplicados)</span>
+                </label>
+                <button 
+                  onClick={uploadData}
+                  disabled={mappings.some(m => m.importType === 'checking')}
+                  className="w-full sm:w-auto px-8 py-3 bg-indigo-600 text-white font-black rounded-xl shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
+                >
+                  <Save className="w-5 h-5" />
+                  Guardar en Base de Datos
+                </button>
+              </div>
             )}
 
             {isUploading && (

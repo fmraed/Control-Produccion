@@ -187,6 +187,7 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin, filters, onFilte
     if (!reportToDelete) return;
     try {
       await deleteDoc(doc(db, 'production_reports', reportToDelete));
+      setReports(prev => prev.filter(r => r.id !== reportToDelete));
       setReportToDelete(null);
     } catch (err: any) {
       console.error("Error deleting report:", err);

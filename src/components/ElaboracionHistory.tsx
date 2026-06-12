@@ -153,6 +153,7 @@ export function ElaboracionHistory({
     setIsDeleting(true);
     try {
       await deleteDoc(doc(db, 'elaboracion_reports', reportToDelete));
+      setReports(prev => prev.filter(r => r.id !== reportToDelete));
       setReportToDelete(null);
     } catch (err: any) {
       console.error("Error deleting report:", err);
