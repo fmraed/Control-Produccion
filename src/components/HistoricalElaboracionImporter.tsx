@@ -76,40 +76,50 @@ export function HistoricalElaboracionImporter() {
   const [successCount, setSuccessCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const existingRecordsCache = useRef<Record<string, any>>({});
+
   const checkExistingRecords = async (currentMappings: MappingResult[]) => {
     const updated = [...currentMappings];
-    const pendingIndexes = updated
-      .map((m, idx) => ({ m, idx }))
-      .filter(({ m }) => m.status === 'pending');
+    if (updated.length === 0) return;
 
-    const batchSize = 10;
-    for (let i = 0; i < pendingIndexes.length; i += batchSize) {
-      const batch = pendingIndexes.slice(i, i + batchSize);
-      await Promise.all(
-        batch.map(async ({ m, idx }) => {
-          try {
-            const q = query(
-              collection(db, 'elaboracion_reports'),
-              where('fecha', '==', m.report.fecha),
-              where('linea', '==', m.report.linea),
-              where('turno', '==', m.report.turno),
-              where('sabor', '==', m.report.sabor),
-              where('tamano', '==', m.report.tamano)
-            );
-            const existing = await getDocs(q);
-            updated[idx] = {
-              ...m,
-              importType: existing.empty ? 'new' : 'update'
-            };
-          } catch (err) {
-            console.error("Error checking record in background:", err);
-            updated[idx] = {
-              ...m,
-              importType: 'new'
-            };
-          }
-        })
+    let minDate = updated[0].report.fecha;
+    let maxDate = updated[0].report.fecha;
+
+    updated.forEach(m => {
+      if (m.report.fecha < minDate) minDate = m.report.fecha;
+      if (m.report.fecha > maxDate) maxDate = m.report.fecha;
+    });
+
+    try {
+      const q = query(
+        collection(db, 'elaboracion_reports'),
+        where('fecha', '>=', minDate),
+        where('fecha', '<=', maxDate)
       );
+      const snap = await getDocs(q);
+      const cache: Record<string, any> = {};
+      snap.docs.forEach(doc => {
+        const data = doc.data();
+        const key = `${data.fecha}-${data.linea}-${data.turno}-${data.sabor}-${data.tamano}`;
+        cache[key] = { id: doc.id, data };
+      });
+      existingRecordsCache.current = cache;
+
+      updated.forEach(m => {
+        if (m.status === 'pending') {
+          const key = `${m.report.fecha}-${m.report.linea}-${m.report.turno}-${m.report.sabor}-${m.report.tamano}`;
+          m.importType = cache[key] ? 'update' : 'new';
+        }
+      });
+      setMappings([...updated]);
+    } catch (err) {
+      console.error("Error bulk checking elaboracion records:", err);
+      // Fallback
+      updated.forEach(m => {
+         if (m.status === 'pending') {
+             m.importType = 'new';
+         }
+      });
       setMappings([...updated]);
     }
   };
@@ -301,23 +311,16 @@ export function HistoricalElaboracionImporter() {
     for (let i = 0; i < total; i++) {
        const m = pending[i];
        try {
-          const q = query(
-            collection(db, 'elaboracion_reports'),
-            where('fecha', '==', m.report.fecha),
-            where('linea', '==', m.report.linea),
-            where('turno', '==', m.report.turno),
-            where('sabor', '==', m.report.sabor),
-            where('tamano', '==', m.report.tamano)
-          );
-          const existing = await getDocs(q);
-          if (existing.empty) {
+          const key = `${m.report.fecha}-${m.report.linea}-${m.report.turno}-${m.report.sabor}-${m.report.tamano}`;
+          const existingRecord = existingRecordsCache.current[key];
+
+          if (!existingRecord) {
              await addDoc(collection(db, 'elaboracion_reports'), m.report);
           } else {
-             const existingDoc = existing.docs[0];
-             await updateDoc(doc(db, 'elaboracion_reports', existingDoc.id), {
+             await updateDoc(doc(db, 'elaboracion_reports', existingRecord.id), {
                ...m.report,
-               authorId: existingDoc.data().authorId || m.report.authorId,
-               createdAt: existingDoc.data().createdAt || m.report.createdAt
+               authorId: existingRecord.data.authorId || m.report.authorId,
+               createdAt: existingRecord.data.createdAt || m.report.createdAt
              });
           }
           successful++;

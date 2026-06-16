@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { ProductionReport, ElaboracionReport } from '../types';
 import { FileText, Calendar, Filter, Trash2, BarChart3, Wind } from 'lucide-react';
