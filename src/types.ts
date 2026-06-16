@@ -212,6 +212,7 @@ export interface ProductionPlan {
   tamano: number;
   plannedPacks: number;
   duration?: number; // 0.5, 1, etc.
+  halfShiftPosition?: 'start' | 'end'; // To determine whether the half shift is at the start or end of the shift
   status: 'Draft' | 'Published';
   notes?: string;
   createdAt: string;

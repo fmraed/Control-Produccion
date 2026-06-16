@@ -603,7 +603,12 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
                   {weekDays.map((day, i) => {
                     const dateStr = format(day, 'yyyy-MM-dd');
                     return SHIFTS.map(shift => {
-                      const slotPlans = displayPlans.filter(p => p.date === dateStr && p.shift === shift && p.linea === linea);
+                      const slotPlans = displayPlans.filter(p => p.date === dateStr && p.shift === shift && p.linea === linea)
+                        .sort((a, b) => {
+                          const pA = a.halfShiftPosition === 'end' ? 1 : 0;
+                          const pB = b.halfShiftPosition === 'end' ? 1 : 0;
+                          return pA - pB;
+                        });
                       const shaded = isShiftShaded(day, shift, config?.shiftConfig?.holidays);
                       
                       return (
@@ -706,6 +711,21 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
                                           ) : plan.duration === 0.5 && (
                                             <span className={`text-[11px] font-black px-1.5 py-0.5 rounded shadow-sm border ${isLight ? 'bg-white text-indigo-600 border-indigo-100' : 'bg-black/20 text-white border-white/20'}`}>
                                               1/2
+                                            </span>
+                                          )}
+
+                                          {isAdmin && plan.duration === 0.5 ? (
+                                            <select
+                                              value={plan.halfShiftPosition || 'start'}
+                                              onChange={(e) => handleUpdatePlan(plan.id!, { halfShiftPosition: e.target.value as 'start' | 'end' })}
+                                              className={`text-[11px] font-black px-1.5 py-0.5 rounded shadow-sm focus:ring-0 cursor-pointer border ${isLight ? 'bg-white text-indigo-600 border-indigo-100' : 'bg-black/20 text-white border-white/20'}`}
+                                            >
+                                              <option value="start" className="text-gray-900">Inicio</option>
+                                              <option value="end" className="text-gray-900">Final</option>
+                                            </select>
+                                          ) : (!isAdmin && plan.duration === 0.5 && plan.halfShiftPosition === 'end') && (
+                                            <span className={`text-[11px] font-black px-1.5 py-0.5 rounded shadow-sm border ${isLight ? 'bg-white text-indigo-600 border-indigo-100' : 'bg-black/20 text-white border-white/20'}`}>
+                                              Fin
                                             </span>
                                           )}
                                         </div>
@@ -811,7 +831,12 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
                             <div key={di} className="flex gap-2">
                               {SHIFTS.map(shift => {
                                 const dateStr = format(day, 'yyyy-MM-dd');
-                                const slotPlans = displayPlans.filter(p => p.date === dateStr && p.shift === shift && p.linea === linea);
+                                const slotPlans = displayPlans.filter(p => p.date === dateStr && p.shift === shift && p.linea === linea)
+                                  .sort((a, b) => {
+                                    const pA = a.halfShiftPosition === 'end' ? 1 : 0;
+                                    const pB = b.halfShiftPosition === 'end' ? 1 : 0;
+                                    return pA - pB;
+                                  });
                                 const shaded = isShiftShaded(day, shift, config?.shiftConfig?.holidays);
                                 return (
                                   <div 
@@ -826,7 +851,7 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
                                         return (
                                           <div 
                                             key={plan.id}
-                                            className="h-full flex items-center justify-center relative border-r border-white/10 last:border-r-0 shrink-0"
+                                            className={`h-full flex items-center justify-center relative border-r border-white/10 last:border-r-0 shrink-0 ${plan.duration === 0.5 && plan.halfShiftPosition === 'end' && slotPlans.length === 1 ? 'ml-auto' : ''}`}
                                             style={{ 
                                               backgroundColor: FLAVOR_COLORS[plan.sabor] || '#cbd5e1',
                                               width: `${widthPercent}%`
