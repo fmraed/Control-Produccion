@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { ProductionReport } from '../types';
 import { ArrowLeft, BarChart2 } from 'lucide-react';
@@ -33,7 +33,20 @@ export function ParetoChart({ linea, month, onBack }: ParetoChartProps) {
   const [selectedFormat, setSelectedFormat] = useState<string>('all');
 
   useEffect(() => {
-    const q = query(collection(db, 'production_reports'), orderBy('fecha', 'desc'));
+    const [year, monthStr] = month.split('-');
+    
+    const startDate = new Date(parseInt(year), parseInt(monthStr) - 2, 28);
+    const startStr = format(startDate, 'yyyy-MM-dd');
+    
+    const endDate = new Date(parseInt(year), parseInt(monthStr), 5);
+    const endStr = format(endDate, 'yyyy-MM-dd');
+
+    const q = query(
+      collection(db, 'production_reports'), 
+      where('fecha', '>=', startStr),
+      where('fecha', '<=', endStr),
+      orderBy('fecha', 'desc')
+    );
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const reportsData: ProductionReport[] = [];
@@ -48,7 +61,7 @@ export function ParetoChart({ linea, month, onBack }: ParetoChartProps) {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [month]);
 
   // Filter reports by month and line first to get available formats
   const baseFilteredReports = useMemo(() => {

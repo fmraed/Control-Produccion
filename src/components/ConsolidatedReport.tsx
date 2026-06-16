@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { ProductionReport } from '../types';
 import { FileText, Calendar, Filter, BarChart3, ChevronDown, ChevronUp } from 'lucide-react';
@@ -7,7 +7,7 @@ import { format, parseISO, startOfMonth, endOfMonth, isWithinInterval } from 'da
 import { es } from 'date-fns/locale';
 import { SABORES, TAMANOS } from '../constants';
 import { useAppConfig } from '../hooks/useAppConfig';
-import { getLogicalDate } from '../utils';
+import { getLogicalDate, getHistoricalMonths } from '../utils';
 
 export function ConsolidatedReport() {
   const { config, getFilteredFlavors, getFilteredSizes, availableBrands, shouldShowReport } = useAppConfig();
@@ -20,7 +20,38 @@ export function ConsolidatedReport() {
   const managementStartDate = config?.managementSettings?.managementStartDate || null;
 
   useEffect(() => {
-    const q = query(collection(db, 'production_reports'), orderBy('fecha', 'desc'));
+    let q;
+    
+    if (selectedPeriod === 'all') {
+      q = query(collection(db, 'production_reports'), orderBy('fecha', 'desc'));
+    } else if (selectedPeriod.includes('-')) {
+      const [year, month] = selectedPeriod.split('-');
+      const startDate = new Date(parseInt(year), parseInt(month) - 2, 28);
+      const startStr = format(startDate, 'yyyy-MM-dd');
+      const endDate = new Date(parseInt(year), parseInt(month), 5);
+      const endStr = format(endDate, 'yyyy-MM-dd');
+      
+      q = query(
+        collection(db, 'production_reports'), 
+        where('fecha', '>=', startStr),
+        where('fecha', '<=', endStr),
+        orderBy('fecha', 'desc')
+      );
+    } else {
+      // It's a year
+      const year = parseInt(selectedPeriod);
+      const startDate = new Date(year - 1, 11, 28); // Dec 28 prev year
+      const startStr = format(startDate, 'yyyy-MM-dd');
+      const endDate = new Date(year + 1, 0, 5); // Jan 5 next year
+      const endStr = format(endDate, 'yyyy-MM-dd');
+      
+      q = query(
+        collection(db, 'production_reports'), 
+        where('fecha', '>=', startStr),
+        where('fecha', '<=', endStr),
+        orderBy('fecha', 'desc')
+      );
+    }
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const reportsData: ProductionReport[] = [];
@@ -35,34 +66,17 @@ export function ConsolidatedReport() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [selectedPeriod]);
 
   const years = useMemo(() => {
-    const uniqueYears = new Set<string>();
-    reports.forEach(r => {
-        const logicalDate = getLogicalDate(r);
-        if (logicalDate) {
-            uniqueYears.add(logicalDate.substring(0, 4));
-        }
-    });
+    const historicalMonths = getHistoricalMonths();
+    const uniqueYears = new Set(historicalMonths.map(m => m.split('-')[0]));
     return Array.from(uniqueYears).sort().reverse();
-  }, [reports]);
+  }, []);
 
   const months = useMemo(() => {
-    const uniqueMonths = new Set<string>();
-    reports.forEach(r => {
-      if (shouldShowReport(r)) {
-        const logicalDate = getLogicalDate(r);
-        if (logicalDate) {
-          const date = parseISO(logicalDate);
-          uniqueMonths.add(format(date, 'yyyy-MM'));
-        }
-      }
-    });
-    // Ensure current month is always there if not present
-    uniqueMonths.add(format(new Date(), 'yyyy-MM'));
-    return Array.from(uniqueMonths).sort().reverse();
-  }, [reports, shouldShowReport]);
+    return getHistoricalMonths();
+  }, []);
 
   const filteredReports = useMemo(() => {
     let result = reports.filter(r => shouldShowReport(r));

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { ProductionReport } from '../types';
 import { FileText, Calendar, Filter, Clock, BarChart2, ChevronDown, ChevronRight } from 'lucide-react';
@@ -7,7 +7,7 @@ import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { REPORT_DOWNTIME_CATEGORIES, LINEAS, TAMANOS } from '../constants';
 import { useAppConfig } from '../hooks/useAppConfig';
-import { getLogicalDate } from '../utils';
+import { getLogicalDate, getHistoricalMonths } from '../utils';
 
 const SPLIT_REASONS_MAP: Record<string, string[]> = {
   'REFRIGERIO/ INICIO Y FIN DE TURNO': ['REFRIGERIO', 'INICIO Y FIN DE TURNO'],
@@ -32,7 +32,20 @@ export function DowntimeReport({ onViewPareto }: DowntimeReportProps) {
   };
 
   useEffect(() => {
-    const q = query(collection(db, 'production_reports'), orderBy('fecha', 'desc'));
+    const [year, month] = selectedMonth.split('-');
+    
+    const startDate = new Date(parseInt(year), parseInt(month) - 2, 28);
+    const startStr = format(startDate, 'yyyy-MM-dd');
+    
+    const endDate = new Date(parseInt(year), parseInt(month), 5);
+    const endStr = format(endDate, 'yyyy-MM-dd');
+
+    const q = query(
+      collection(db, 'production_reports'), 
+      where('fecha', '>=', startStr),
+      where('fecha', '<=', endStr),
+      orderBy('fecha', 'desc')
+    );
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const reportsData: ProductionReport[] = [];
@@ -47,22 +60,11 @@ export function DowntimeReport({ onViewPareto }: DowntimeReportProps) {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [selectedMonth]);
 
   const months = useMemo(() => {
-    const uniqueMonths = new Set<string>();
-    reports.forEach(r => {
-      if (shouldShowReport(r)) {
-        const logicalDate = getLogicalDate(r);
-        if (logicalDate) {
-          const date = parseISO(logicalDate);
-          uniqueMonths.add(format(date, 'yyyy-MM'));
-        }
-      }
-    });
-    uniqueMonths.add(format(new Date(), 'yyyy-MM'));
-    return Array.from(uniqueMonths).sort().reverse();
-  }, [reports, shouldShowReport]);
+    return getHistoricalMonths();
+  }, []);
 
   const filteredReports = useMemo(() => {
     if (!selectedMonth) return reports.filter(r => shouldShowReport(r));

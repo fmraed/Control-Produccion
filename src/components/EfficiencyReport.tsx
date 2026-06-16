@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { ProductionReport } from '../types';
 import { Calendar, Activity } from 'lucide-react';
 import { format, parseISO, getDaysInMonth, subHours, startOfWeek, isAfter, differenceInMinutes } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { LINEAS, TAMANOS } from '../constants';
-import { getLogicalDate } from '../utils';
+import { getLogicalDate, getHistoricalMonths } from '../utils';
 import { useAppConfig } from '../hooks/useAppConfig';
 
 type Frequency = 'daily' | 'weekly' | 'monthly';
@@ -23,7 +23,20 @@ export function EfficiencyReport() {
   const filteredLines = availableLines;
 
   useEffect(() => {
-    const q = query(collection(db, 'production_reports'), orderBy('fecha', 'desc'));
+    const [year, monthStr] = selectedMonth.split('-');
+    
+    const startDate = new Date(parseInt(year), parseInt(monthStr) - 2, 28);
+    const startStr = format(startDate, 'yyyy-MM-dd');
+    
+    const endDate = new Date(parseInt(year), parseInt(monthStr), 5);
+    const endStr = format(endDate, 'yyyy-MM-dd');
+
+    const q = query(
+      collection(db, 'production_reports'), 
+      where('fecha', '>=', startStr),
+      where('fecha', '<=', endStr),
+      orderBy('fecha', 'desc')
+    );
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const reportsData: ProductionReport[] = [];
@@ -38,22 +51,11 @@ export function EfficiencyReport() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [selectedMonth]);
 
   const months = useMemo(() => {
-    const uniqueMonths = new Set<string>();
-    reports.forEach(r => {
-      if (shouldShowReport(r)) {
-        const logicalDate = getLogicalDate(r);
-        if (logicalDate) {
-          const date = parseISO(logicalDate);
-          uniqueMonths.add(format(date, 'yyyy-MM'));
-        }
-      }
-    });
-    uniqueMonths.add(format(new Date(), 'yyyy-MM'));
-    return Array.from(uniqueMonths).sort().reverse();
-  }, [reports, shouldShowReport]);
+    return getHistoricalMonths();
+  }, []);
 
   const availableDates = useMemo(() => {
     const uniqueDates = new Set<string>();

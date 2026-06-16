@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { collection, query, orderBy, limit, getDocs, startAfter, doc, deleteDoc, QueryDocumentSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, limit, getDocs, startAfter, doc, deleteDoc, QueryDocumentSnapshot, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { ProductionReport } from '../types';
 import { FileText, Calendar, Clock, Activity, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, Trash2, Settings2, Info, Printer, RefreshCw, Droplets } from 'lucide-react';
@@ -70,10 +70,41 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin, filters, onFilte
 
     try {
       const reportsRef = collection(db, 'production_reports');
-      let q = query(reportsRef, orderBy('fecha', 'desc'), orderBy('createdAt', 'desc'), limit(PAGE_SIZE));
+      let q;
 
-      if (isNextPage && lastDoc) {
-        q = query(reportsRef, orderBy('fecha', 'desc'), orderBy('createdAt', 'desc'), startAfter(lastDoc), limit(PAGE_SIZE));
+      if (filters.selectedMonth) {
+        const [year, month] = filters.selectedMonth.split('-');
+        const startDate = new Date(parseInt(year), parseInt(month) - 2, 28);
+        const startStr = format(startDate, 'yyyy-MM-dd');
+        const endDate = new Date(parseInt(year), parseInt(month), 5);
+        const endStr = format(endDate, 'yyyy-MM-dd');
+
+        q = query(
+          reportsRef,
+          where('fecha', '>=', startStr),
+          where('fecha', '<=', endStr),
+          orderBy('fecha', 'desc'),
+          orderBy('createdAt', 'desc'),
+          limit(PAGE_SIZE)
+        );
+        
+        if (isNextPage && lastDoc) {
+          q = query(
+            reportsRef,
+            where('fecha', '>=', startStr),
+            where('fecha', '<=', endStr),
+            orderBy('fecha', 'desc'),
+            orderBy('createdAt', 'desc'),
+            startAfter(lastDoc),
+            limit(PAGE_SIZE)
+          );
+        }
+      } else {
+        q = query(reportsRef, orderBy('fecha', 'desc'), orderBy('createdAt', 'desc'), limit(PAGE_SIZE));
+
+        if (isNextPage && lastDoc) {
+          q = query(reportsRef, orderBy('fecha', 'desc'), orderBy('createdAt', 'desc'), startAfter(lastDoc), limit(PAGE_SIZE));
+        }
       }
 
       const snapshot = await getDocs(q);
@@ -85,7 +116,12 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin, filters, onFilte
       } as ProductionReport));
 
       if (isNextPage) {
-        setReports(prev => [...prev, ...newReports]);
+        setReports(prev => {
+          // Avoid duplicates
+          const uniqueIds = new Set(prev.map(r => r.id));
+          const toAdd = newReports.filter(r => !uniqueIds.has(r.id));
+          return [...prev, ...toAdd];
+        });
       } else {
         setReports(newReports);
       }
@@ -100,10 +136,17 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin, filters, onFilte
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [lastDoc]);
+  }, [lastDoc, filters.selectedMonth]);
+
+  // Reset pagination when selected month changes
+  useEffect(() => {
+    setLastDoc(null);
+    setHasMore(true);
+    fetchReports(false);
+  }, [filters.selectedMonth]);
 
   useEffect(() => {
-    fetchReports();
+    // Initial fetch handled by the reset effect above
   }, []);
 
   // Filter options

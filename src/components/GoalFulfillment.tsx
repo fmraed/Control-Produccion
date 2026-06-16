@@ -35,17 +35,23 @@ export function GoalFulfillment() {
   const isAdmin = auth.currentUser?.email === 'fraed.fordrinks@gmail.com';
 
   useEffect(() => {
+    const [year, month] = selectedMonth.split('-');
+    const startDate = new Date(parseInt(year), parseInt(month) - 2, 28);
+    const startStr = format(startDate, 'yyyy-MM-dd');
+    const endDate = new Date(parseInt(year), parseInt(month), 5);
+    const endStr = format(endDate, 'yyyy-MM-dd');
+
     const qReports = query(
       collection(db, 'production_reports'),
-      where('fecha', '>=', `${selectedMonth}-01`),
-      where('fecha', '<=', `${selectedMonth}-31`) // Simple check, actual filter in useMemo
+      where('fecha', '>=', startStr),
+      where('fecha', '<=', endStr)
     );
 
-    const endMonth = format(addMonths(parseISO(`${selectedMonth}-01`), 6), 'yyyy-MM');
+    const endMonthForm = format(addMonths(parseISO(`${selectedMonth}-01`), 6), 'yyyy-MM');
     const qGoals = query(
       collection(db, 'monthly_goals'),
       where('month', '>=', selectedMonth),
-      where('month', '<', endMonth)
+      where('month', '<', endMonthForm)
     );
 
     const unsubReports = onSnapshot(qReports, (snap) => {

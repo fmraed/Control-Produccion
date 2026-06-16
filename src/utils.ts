@@ -86,3 +86,19 @@ export function getShiftHours(turno: string, fecha: string): string[] {
   }
   return horas;
 }
+
+export function getHistoricalMonths(startDateStr: string = '2023-01-01'): string[] {
+  const months: string[] = [];
+  const start = new Date(startDateStr);
+  const end = new Date();
+  
+  for (let year = start.getFullYear(); year <= end.getFullYear(); year++) {
+    const startMonth = year === start.getFullYear() ? start.getMonth() + 1 : 1;
+    const endMonth = year === end.getFullYear() ? end.getMonth() + 1 : 12;
+    
+    for (let month = startMonth; month <= endMonth; month++) {
+      months.push(`${year}-${month.toString().padStart(2, '0')}`);
+    }
+  }
+  return months.sort().reverse();
+}

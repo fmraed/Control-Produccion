@@ -5,7 +5,7 @@ import { ProductionReport, MonthlySnapshot, AttendanceRecord, ScheduleAuditLog, 
 import { BarChart3, Calendar, Users, Package, Droplets, Info, Edit2, Save, X, UserCircle2, Milk as BottleIcon, Clock, Lock, Unlock, RefreshCw, AlertTriangle, ListChecks, History as HistoryIcon, Trash2 } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addDays, subDays, differenceInHours, differenceInMinutes } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { getLogicalDate } from '../utils';
+import { getLogicalDate, getHistoricalMonths } from '../utils';
 import { useAppConfig } from '../hooks/useAppConfig';
 
 export function ManagementSummary() {
@@ -54,8 +54,33 @@ export function ManagementSummary() {
   }, [selectedMonth]);
 
   useEffect(() => {
-    const qReports = query(collection(db, 'production_reports'), orderBy('fecha', 'desc'));
-    const qAttendance = query(collection(db, 'attendance_records'), orderBy('date', 'desc'));
+    const [year, month] = selectedMonth.split('-');
+    
+    // We want reports from the selected month. However, because of the "22:00 rule", 
+    // a report for logical month X might have a raw 'fecha' in the first day of month X+1. 
+    // And a report in logical month X could have a raw 'fecha' in the last day of month X-1.
+    // To be safe, we query from the last day of prev month to the first day of next month.
+    
+    const startDate = new Date(parseInt(year), parseInt(month) - 2, 28);
+    const startStr = format(startDate, 'yyyy-MM-dd');
+    
+    const endDate = new Date(parseInt(year), parseInt(month), 5);
+    const endStr = format(endDate, 'yyyy-MM-dd');
+
+    const qReports = query(
+      collection(db, 'production_reports'), 
+      where('fecha', '>=', startStr),
+      where('fecha', '<=', endStr),
+      orderBy('fecha', 'desc')
+    );
+    
+    // Also filter attendance to avoid massive reads
+    const qAttendance = query(
+      collection(db, 'attendance_records'), 
+      where('date', '>=', startStr),
+      where('date', '<=', endStr),
+      orderBy('date', 'desc')
+    );
     
     let reportsLoaded = false;
     let attendanceLoaded = false;
@@ -118,22 +143,11 @@ export function ManagementSummary() {
       unsubscribeAudit();
       unsubscribePlans();
     };
-  }, []);
+  }, [selectedMonth]);
 
   const months = useMemo(() => {
-    const uniqueMonths = new Set<string>();
-    reports.forEach(r => {
-      if (shouldShowReport(r)) {
-        const logicalDate = getLogicalDate(r);
-        if (logicalDate) {
-          const date = parseISO(logicalDate);
-          uniqueMonths.add(format(date, 'yyyy-MM'));
-        }
-      }
-    });
-    uniqueMonths.add(format(new Date(), 'yyyy-MM'));
-    return Array.from(uniqueMonths).sort().reverse();
-  }, [reports, shouldShowReport]);
+    return getHistoricalMonths();
+  }, []);
 
   const filteredReports = useMemo(() => {
     return reports.filter(r => {

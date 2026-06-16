@@ -7,7 +7,7 @@ import { format, parseISO, getDaysInMonth } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { SABORES, TAMANOS, LINEAS } from '../constants';
 import { useAppConfig } from '../hooks/useAppConfig';
-import { getLogicalDate } from '../utils';
+import { getLogicalDate, getHistoricalMonths } from '../utils';
 
 export function WasteReport() {
   const { config, getFilteredSizes, availableLines, availableBrands, shouldShowReport } = useAppConfig();
@@ -18,8 +18,26 @@ export function WasteReport() {
   const [activeTab, setActiveTab] = useState<'general' | 'co2' | 'jarabe' | 'resumen'>('general');
 
   useEffect(() => {
-    const qProd = query(collection(db, 'production_reports'), orderBy('fecha', 'desc'));
-    const qElab = query(collection(db, 'elaboracion_reports'), orderBy('fecha', 'desc'));
+    const [year, month] = selectedMonth.split('-');
+    
+    const startDate = new Date(parseInt(year), parseInt(month) - 2, 28);
+    const startStr = format(startDate, 'yyyy-MM-dd');
+    
+    const endDate = new Date(parseInt(year), parseInt(month), 5);
+    const endStr = format(endDate, 'yyyy-MM-dd');
+
+    const qProd = query(
+      collection(db, 'production_reports'), 
+      where('fecha', '>=', startStr),
+      where('fecha', '<=', endStr),
+      orderBy('fecha', 'desc')
+    );
+    const qElab = query(
+      collection(db, 'elaboracion_reports'), 
+      where('fecha', '>=', startStr),
+      where('fecha', '<=', endStr),
+      orderBy('fecha', 'desc')
+    );
     
     const unsubProd = onSnapshot(qProd, (snapshot) => {
       const reportsData: ProductionReport[] = [];
@@ -47,25 +65,11 @@ export function WasteReport() {
       unsubProd();
       unsubElab();
     };
-  }, []);
+  }, [selectedMonth]);
 
   const months = useMemo(() => {
-    const uniqueMonths = new Set<string>();
-    const addMonth = (r: ProductionReport | ElaboracionReport) => {
-      // For ProductionReport, we check historical filter
-      if ('origin' in r && !shouldShowReport(r as ProductionReport)) return;
-      
-      const logicalDate = getLogicalDate(r);
-      if (logicalDate) {
-        const date = parseISO(logicalDate);
-        uniqueMonths.add(format(date, 'yyyy-MM'));
-      }
-    };
-    reports.forEach(addMonth);
-    elaboracionReports.forEach(addMonth);
-    uniqueMonths.add(format(new Date(), 'yyyy-MM'));
-    return Array.from(uniqueMonths).sort().reverse();
-  }, [reports, elaboracionReports, shouldShowReport]);
+    return getHistoricalMonths();
+  }, []);
 
   const filteredReports = useMemo(() => {
     if (!selectedMonth) return reports.filter(r => shouldShowReport(r));

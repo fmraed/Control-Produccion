@@ -1,12 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
-import { collection, query, orderBy, onSnapshot, doc, setDoc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, setDoc, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { ProductionReport, ElaboracionReport } from '../types';
 import { Beaker, Calendar, BarChart3, TrendingDown, TrendingUp, AlertTriangle } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { SABORES, SABORES_SIN_JARABE, FLAVOR_COLORS } from '../constants';
-import { getLogicalDate } from '../utils';
+import { getLogicalDate, getHistoricalMonths } from '../utils';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
 import { useAppConfig } from '../hooks/useAppConfig';
 
@@ -36,8 +36,26 @@ export function SyrupReport() {
   }, [selectedMonth]);
 
   useEffect(() => {
-    const qProd = query(collection(db, 'production_reports'), orderBy('fecha', 'desc'));
-    const qElab = query(collection(db, 'elaboracion_reports'), orderBy('fecha', 'desc'));
+    const [year, month] = selectedMonth.split('-');
+    
+    const startDate = new Date(parseInt(year), parseInt(month) - 2, 28);
+    const startStr = format(startDate, 'yyyy-MM-dd');
+    
+    const endDate = new Date(parseInt(year), parseInt(month), 5);
+    const endStr = format(endDate, 'yyyy-MM-dd');
+
+    const qProd = query(
+      collection(db, 'production_reports'), 
+      where('fecha', '>=', startStr),
+      where('fecha', '<=', endStr),
+      orderBy('fecha', 'desc')
+    );
+    const qElab = query(
+      collection(db, 'elaboracion_reports'), 
+      where('fecha', '>=', startStr),
+      where('fecha', '<=', endStr),
+      orderBy('fecha', 'desc')
+    );
     
     const unsubProd = onSnapshot(qProd, (snapshot) => {
       const reportsData: ProductionReport[] = [];
@@ -60,24 +78,11 @@ export function SyrupReport() {
       unsubProd();
       unsubElab();
     };
-  }, []);
+  }, [selectedMonth]);
 
   const months = useMemo(() => {
-    const uniqueMonths = new Set<string>();
-    const addMonth = (r: ProductionReport | ElaboracionReport) => {
-      if ('origin' in r && !shouldShowReport(r as ProductionReport)) return;
-
-      const logicalDate = getLogicalDate(r);
-      if (logicalDate) {
-        const date = parseISO(logicalDate);
-        uniqueMonths.add(format(date, 'yyyy-MM'));
-      }
-    };
-    productionReports.forEach(addMonth);
-    elaboracionReports.forEach(addMonth);
-    uniqueMonths.add(format(new Date(), 'yyyy-MM'));
-    return Array.from(uniqueMonths).sort().reverse();
-  }, [productionReports, elaboracionReports, shouldShowReport]);
+    return getHistoricalMonths();
+  }, []);
 
   const filteredProd = useMemo(() => {
     return productionReports.filter(r => {
