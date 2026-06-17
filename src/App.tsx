@@ -396,6 +396,11 @@ export default function App() {
     setCurrentView("dashboard");
   };
 
+  const handleCancelElaboracion = () => {
+    setEditingElabReport(undefined);
+    setCurrentView("elaboracion_history");
+  };
+
   const handleElabSuccess = () => {
     setEditingElabReport(undefined);
     setCurrentView("elaboracion_history");
@@ -1262,7 +1267,7 @@ export default function App() {
         {currentView === "elaboracion" && (
           <ElaboracionForm
             key={editingElabReport?.id || "elaboracion"}
-            onCancel={handleCancel}
+            onCancel={handleCancelElaboracion}
             onSuccess={handleElabSuccess}
             initialData={editingElabReport}
           />
