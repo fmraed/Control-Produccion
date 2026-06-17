@@ -54,6 +54,7 @@ export function StockControl() {
 
   // Selector for the line chart
   const [selectedChartProduct, setSelectedChartProduct] = useState<string>('');
+  const [selectedChartPeriod, setSelectedChartPeriod] = useState<'week' | 'month' | 'all'>('week');
 
   // Daily stock inline editing states
   const [editingDailyKey, setEditingDailyKey] = useState<string | null>(null);
@@ -1085,25 +1086,49 @@ export function StockControl() {
               })()}
 
               {/* Dropdown in case user wants to change manually */}
-              <div>
-                <span className="text-[10px] font-extrabold uppercase text-slate-400 block tracking-wider mb-1.5">Seleccionar Producto:</span>
-                <select
-                  value={selectedChartProduct}
-                  onChange={(e) => setSelectedChartProduct(e.target.value)}
-                  className="w-full rounded-xl border-gray-200 text-sm font-bold bg-slate-50 border p-3 text-slate-705 focus:ring-blue-500 focus:ring focus:border-blue-500 cursor-pointer focus:outline-none"
-                >
-                  {activeProducts.map(p => (
-                    <option key={p.key} value={p.key}>
-                      {p.marca} {p.sabor} {p.tamano}cc
-                    </option>
-                  ))}
-                </select>
+              <div className="space-y-4">
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase text-slate-400 block tracking-wider mb-1.5">Seleccionar Producto:</span>
+                  <select
+                    value={selectedChartProduct}
+                    onChange={(e) => setSelectedChartProduct(e.target.value)}
+                    className="w-full rounded-xl border-gray-200 text-sm font-bold bg-slate-50 border p-3 text-slate-700 focus:ring-blue-500 focus:ring focus:border-blue-500 cursor-pointer focus:outline-none"
+                  >
+                    {activeProducts.map(p => (
+                      <option key={p.key} value={p.key}>
+                        {p.marca} {p.sabor} {p.tamano}cc
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase text-slate-400 block tracking-wider mb-1.5">Período:</span>
+                  <select
+                    value={selectedChartPeriod}
+                    onChange={(e) => setSelectedChartPeriod(e.target.value as any)}
+                    className="w-full rounded-xl border-gray-200 text-sm font-bold bg-slate-50 border p-3 text-slate-700 focus:ring-blue-500 focus:ring focus:border-blue-500 cursor-pointer focus:outline-none"
+                  >
+                    <option value="week">Última Semana</option>
+                    <option value="month">Último Mes</option>
+                    <option value="all">Todo el Historial</option>
+                  </select>
+                </div>
               </div>
 
               {/* stats summary of the trend */}
               {(() => {
                 const chartData = dailyStocksList
-                  .filter(item => item.stocks[selectedChartProduct] !== undefined);
+                  .filter(item => {
+                    if (item.stocks[selectedChartProduct] === undefined) return false;
+                    if (selectedChartPeriod === 'all') return true;
+                    try {
+                      const itemDate = parseISO(item.date);
+                      const cutoffDate = selectedChartPeriod === 'week' ? subDays(new Date(), 7) : subDays(new Date(), 30);
+                      return itemDate >= cutoffDate;
+                    } catch (e) {
+                      return true;
+                    }
+                  });
                 if (chartData.length === 0) return null;
                 const stocks = chartData.map(item => item.stocks[selectedChartProduct] || 0);
                 const maxStock = Math.max(...stocks);
@@ -1139,7 +1164,17 @@ export function StockControl() {
             <div className="lg:col-span-2 flex flex-col justify-center min-h-[400px]">
               {(() => {
                 const chartData = dailyStocksList
-                  .filter(item => item.stocks[selectedChartProduct] !== undefined)
+                  .filter(item => {
+                    if (item.stocks[selectedChartProduct] === undefined) return false;
+                    if (selectedChartPeriod === 'all') return true;
+                    try {
+                      const itemDate = parseISO(item.date);
+                      const cutoffDate = selectedChartPeriod === 'week' ? subDays(new Date(), 7) : subDays(new Date(), 30);
+                      return itemDate >= cutoffDate;
+                    } catch (e) {
+                      return true;
+                    }
+                  })
                   .map(item => {
                     let displayDate = item.date;
                     try {

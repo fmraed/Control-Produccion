@@ -112,7 +112,7 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin, filters, onFilte
       
       const newReports = snapshot.docs.map(doc => ({
         id: doc.id,
-        ...doc.data()
+        ...(doc.data() as any)
       } as ProductionReport));
 
       if (isNextPage) {
