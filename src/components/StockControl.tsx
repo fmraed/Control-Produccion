@@ -1085,6 +1085,25 @@ export function StockControl() {
                       </div>
                     </div>
                   );
+                } else if (selectedChartProduct.startsWith('GENERAL_SIZE_')) {
+                  const targetSize = parseInt(selectedChartProduct.replace('GENERAL_SIZE_', ''), 10);
+                  const currentStockData = activeProducts
+                    .filter(p => !p.isExternal && p.tamano === targetSize)
+                    .reduce((sum, p) => sum + (dataByProduct[p.key]?.currentStock ?? 0), 0);
+                  
+                  return (
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex items-center justify-between">
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-black uppercase text-blue-600 block tracking-wider">GENERAL POR CALIBRE</span>
+                        <span className="text-base font-extrabold text-slate-800 block">Total {targetSize}cc</span>
+                        <span className="text-xs text-slate-400 font-bold font-mono">Total Prod. Local</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[9px] font-bold uppercase text-slate-400 block tracking-wider">STOCK ACTUAL</span>
+                        <span className="text-2xl font-black text-slate-900 block font-mono">{currentStockData.toLocaleString('es-AR')}</span>
+                      </div>
+                    </div>
+                  );
                 }
 
                 const [brand, flavor, size] = selectedChartProduct.split('|');
@@ -1114,12 +1133,21 @@ export function StockControl() {
                     onChange={(e) => setSelectedChartProduct(e.target.value)}
                     className="w-full rounded-xl border-gray-200 text-sm font-bold bg-slate-50 border p-3 text-slate-700 focus:ring-blue-500 focus:ring focus:border-blue-500 cursor-pointer focus:outline-none"
                   >
-                    <option value="GENERAL_LOCAL">TODOS LOS PRODUCTOS (LOCALES)</option>
-                    {activeProducts.map(p => (
-                      <option key={p.key} value={p.key}>
-                        {p.marca} {p.sabor} {p.tamano}cc
-                      </option>
-                    ))}
+                    <optgroup label="Globales">
+                      <option value="GENERAL_LOCAL">TODOS LOS PRODUCTOS (LOCALES)</option>
+                      {availableSizes.map(size => (
+                        <option key={`GENERAL_SIZE_${size}`} value={`GENERAL_SIZE_${size}`}>
+                          TODOS LOS CALIBRES {size}cc
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Específicos">
+                      {activeProducts.map(p => (
+                        <option key={p.key} value={p.key}>
+                          {p.marca} {p.sabor} {p.tamano}cc
+                        </option>
+                      ))}
+                    </optgroup>
                   </select>
                 </div>
                 <div>
@@ -1140,8 +1168,10 @@ export function StockControl() {
               {(() => {
                 const chartData = dailyStocksList
                   .filter(item => {
-                    if (selectedChartProduct !== 'GENERAL_LOCAL' && item.stocks[selectedChartProduct] === undefined) return false;
-                    if (selectedChartProduct === 'GENERAL_LOCAL' && (!item.stocks || Object.keys(item.stocks).length === 0)) return false;
+                    const isGlobal = selectedChartProduct === 'GENERAL_LOCAL' || selectedChartProduct.startsWith('GENERAL_SIZE_');
+                    if (!isGlobal && item.stocks[selectedChartProduct] === undefined) return false;
+                    if (isGlobal && (!item.stocks || Object.keys(item.stocks).length === 0)) return false;
+                    
                     if (selectedChartPeriod === 'all') return true;
                     try {
                       const itemDate = parseISO(item.date);
@@ -1156,6 +1186,11 @@ export function StockControl() {
                   if (selectedChartProduct === 'GENERAL_LOCAL') {
                      return activeProducts
                         .filter(p => !p.isExternal)
+                        .reduce((sum, p) => sum + (item.stocks[p.key] || 0), 0);
+                  } else if (selectedChartProduct.startsWith('GENERAL_SIZE_')) {
+                      const targetSize = parseInt(selectedChartProduct.replace('GENERAL_SIZE_', ''), 10);
+                      return activeProducts
+                        .filter(p => !p.isExternal && p.tamano === targetSize)
                         .reduce((sum, p) => sum + (item.stocks[p.key] || 0), 0);
                   }
                   return item.stocks[selectedChartProduct] || 0;
@@ -1194,8 +1229,9 @@ export function StockControl() {
               {(() => {
                 const chartData = dailyStocksList
                   .filter(item => {
-                    if (selectedChartProduct !== 'GENERAL_LOCAL' && item.stocks[selectedChartProduct] === undefined) return false;
-                    if (selectedChartProduct === 'GENERAL_LOCAL' && (!item.stocks || Object.keys(item.stocks).length === 0)) return false;
+                    const isGlobal = selectedChartProduct === 'GENERAL_LOCAL' || selectedChartProduct.startsWith('GENERAL_SIZE_');
+                    if (!isGlobal && item.stocks[selectedChartProduct] === undefined) return false;
+                    if (isGlobal && (!item.stocks || Object.keys(item.stocks).length === 0)) return false;
                     if (selectedChartPeriod === 'all') return true;
                     try {
                       const itemDate = parseISO(item.date);
@@ -1217,6 +1253,11 @@ export function StockControl() {
                     if (selectedChartProduct === 'GENERAL_LOCAL') {
                       stock = activeProducts
                         .filter(p => !p.isExternal)
+                        .reduce((sum, p) => sum + (item.stocks[p.key] || 0), 0);
+                    } else if (selectedChartProduct.startsWith('GENERAL_SIZE_')) {
+                      const targetSize = parseInt(selectedChartProduct.replace('GENERAL_SIZE_', ''), 10);
+                      stock = activeProducts
+                        .filter(p => !p.isExternal && p.tamano === targetSize)
                         .reduce((sum, p) => sum + (item.stocks[p.key] || 0), 0);
                     } else {
                       stock = item.stocks[selectedChartProduct] || 0;
