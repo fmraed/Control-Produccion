@@ -308,10 +308,10 @@ export function StockControl() {
     });
   }, [config, availableBrands, availableSizes]);
 
-  // Default chart selection to first active product
+  // Default chart selection to general local
   useEffect(() => {
     if (activeProducts.length > 0 && !selectedChartProduct) {
-      setSelectedChartProduct(activeProducts[0].key);
+      setSelectedChartProduct('GENERAL_LOCAL');
     }
   }, [activeProducts, selectedChartProduct]);
 
@@ -1067,6 +1067,26 @@ export function StockControl() {
 
               {/* Selected Product summary display */}
               {selectedChartProduct && (() => {
+                if (selectedChartProduct === 'GENERAL_LOCAL') {
+                  const currentStockData = activeProducts
+                    .filter(p => !p.isExternal)
+                    .reduce((sum, p) => sum + (dataByProduct[p.key]?.currentStock ?? 0), 0);
+                  
+                  return (
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex items-center justify-between">
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-black uppercase text-blue-600 block tracking-wider">GENERAL</span>
+                        <span className="text-base font-extrabold text-slate-800 block">Todos (Locales)</span>
+                        <span className="text-xs text-slate-400 font-bold font-mono">Total Prod. Local</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[9px] font-bold uppercase text-slate-400 block tracking-wider">STOCK ACTUAL</span>
+                        <span className="text-2xl font-black text-slate-900 block font-mono">{currentStockData.toLocaleString('es-AR')}</span>
+                      </div>
+                    </div>
+                  );
+                }
+
                 const [brand, flavor, size] = selectedChartProduct.split('|');
                 const currentStockData = dataByProduct[selectedChartProduct]?.currentStock ?? 0;
                 const unitSize = size ? `${size}cc` : '';
@@ -1094,6 +1114,7 @@ export function StockControl() {
                     onChange={(e) => setSelectedChartProduct(e.target.value)}
                     className="w-full rounded-xl border-gray-200 text-sm font-bold bg-slate-50 border p-3 text-slate-700 focus:ring-blue-500 focus:ring focus:border-blue-500 cursor-pointer focus:outline-none"
                   >
+                    <option value="GENERAL_LOCAL">TODOS LOS PRODUCTOS (LOCALES)</option>
                     {activeProducts.map(p => (
                       <option key={p.key} value={p.key}>
                         {p.marca} {p.sabor} {p.tamano}cc
@@ -1119,7 +1140,8 @@ export function StockControl() {
               {(() => {
                 const chartData = dailyStocksList
                   .filter(item => {
-                    if (item.stocks[selectedChartProduct] === undefined) return false;
+                    if (selectedChartProduct !== 'GENERAL_LOCAL' && item.stocks[selectedChartProduct] === undefined) return false;
+                    if (selectedChartProduct === 'GENERAL_LOCAL' && (!item.stocks || Object.keys(item.stocks).length === 0)) return false;
                     if (selectedChartPeriod === 'all') return true;
                     try {
                       const itemDate = parseISO(item.date);
@@ -1130,7 +1152,14 @@ export function StockControl() {
                     }
                   });
                 if (chartData.length === 0) return null;
-                const stocks = chartData.map(item => item.stocks[selectedChartProduct] || 0);
+                const stocks = chartData.map(item => {
+                  if (selectedChartProduct === 'GENERAL_LOCAL') {
+                     return activeProducts
+                        .filter(p => !p.isExternal)
+                        .reduce((sum, p) => sum + (item.stocks[p.key] || 0), 0);
+                  }
+                  return item.stocks[selectedChartProduct] || 0;
+                });
                 const maxStock = Math.max(...stocks);
                 const minStock = Math.min(...stocks);
                 const avgStock = stocks.reduce((sum, val) => sum + val, 0) / stocks.length;
@@ -1165,7 +1194,8 @@ export function StockControl() {
               {(() => {
                 const chartData = dailyStocksList
                   .filter(item => {
-                    if (item.stocks[selectedChartProduct] === undefined) return false;
+                    if (selectedChartProduct !== 'GENERAL_LOCAL' && item.stocks[selectedChartProduct] === undefined) return false;
+                    if (selectedChartProduct === 'GENERAL_LOCAL' && (!item.stocks || Object.keys(item.stocks).length === 0)) return false;
                     if (selectedChartPeriod === 'all') return true;
                     try {
                       const itemDate = parseISO(item.date);
@@ -1182,10 +1212,20 @@ export function StockControl() {
                     } catch (e) {
                       // ignore
                     }
+                    
+                    let stock = 0;
+                    if (selectedChartProduct === 'GENERAL_LOCAL') {
+                      stock = activeProducts
+                        .filter(p => !p.isExternal)
+                        .reduce((sum, p) => sum + (item.stocks[p.key] || 0), 0);
+                    } else {
+                      stock = item.stocks[selectedChartProduct] || 0;
+                    }
+
                     return {
                       rawDate: item.date,
                       date: displayDate,
-                      stock: item.stocks[selectedChartProduct] || 0
+                      stock: stock
                     };
                   });
 
