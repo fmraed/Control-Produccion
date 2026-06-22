@@ -972,8 +972,8 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
               </button>
             </div>
 
-            <div className="h-[400px] w-full mt-4">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="h-[400px] w-full mt-4 min-w-0 min-h-0">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                 <ComposedChart
                   data={kwhPackData}
                   margin={{ top: 20, right: 20, bottom: 20, left: 20 }}
@@ -1250,8 +1250,8 @@ export function EnergyReport({ permissions }: EnergyReportProps = {}) {
                     </span>
                   </div>
 
-                  <div className="h-[280px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <div className="h-[280px] w-full min-w-0 min-h-0">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                       <ComposedChart
                         data={(estimationMethod === "m3" ? caliberEstimation.m3 : caliberEstimation.m2)
                           .filter((r) => r.packs > 0)

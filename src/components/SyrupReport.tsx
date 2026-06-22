@@ -315,8 +315,8 @@ export function SyrupReport() {
           <BarChart3 className="w-4 h-4" />
           Comparativa Real vs Teórico por Sabor (Litros)
         </h3>
-        <div className="h-[400px]">
-          <ResponsiveContainer width="100%" height="100%">
+        <div className="h-[400px] min-w-0 min-h-0">
+          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
             <BarChart data={syrupStats} layout="vertical" margin={{ left: 40, right: 30 }}>
               <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
               <XAxis type="number" hide />

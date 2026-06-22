@@ -194,8 +194,8 @@ export function ParetoChart({ linea, month, onBack }: ParetoChartProps) {
             No hay paradas registradas para la Línea {linea} en {monthName}.
           </div>
         ) : (
-          <div className="h-[500px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="h-[500px] w-full min-w-0 min-h-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
               <ComposedChart
                 data={chartData}
                 margin={{

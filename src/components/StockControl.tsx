@@ -1258,8 +1258,8 @@ export function StockControl() {
                 };
 
                 return (
-                  <div className="h-96 w-full pr-4">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <div className="h-96 w-full pr-4 min-w-0 min-h-0">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                       <LineChart data={chartData} margin={{ top: 20, right: 10, left: -22, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                         <XAxis 
