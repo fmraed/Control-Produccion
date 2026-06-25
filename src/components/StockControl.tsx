@@ -656,7 +656,16 @@ export function StockControl() {
                   <p className={`text-[9px] font-bold normal-case ${viewingLiveSql ? 'text-amber-600' : 'text-green-600'}`}>
                     {viewingLiveSql 
                       ? 'Datos sincronizados con SQL Server' 
-                      : `Editado por ${dailyStocksInfo?.savedBy || 'Sistema'} (${format(parseISO(dailyStocksInfo?.savedAt || new Date().toISOString()), 'dd/MM/yyyy HH:mm')})`
+                      : `Editado por ${dailyStocksInfo?.savedBy || 'Sistema'} (${(() => {
+                          try {
+                            if (!dailyStocksInfo?.savedAt) return format(new Date(), 'dd/MM/yyyy HH:mm');
+                            const savedAtDate = typeof dailyStocksInfo.savedAt === 'string' ? parseISO(dailyStocksInfo.savedAt) : (dailyStocksInfo.savedAt.toDate ? dailyStocksInfo.savedAt.toDate() : new Date(dailyStocksInfo.savedAt));
+                            if (isNaN(savedAtDate.getTime())) return '-';
+                            return format(savedAtDate, 'dd/MM/yyyy HH:mm');
+                          } catch (e) {
+                            return '-';
+                          }
+                        })()})`
                     }
                   </p>
                 </div>
@@ -819,7 +828,7 @@ export function StockControl() {
                     <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300">Calibre</th>
                     <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300 bg-gray-200/30">Total Pedido Mes</th>
                     <th className="px-4 py-3 text-xs font-black text-gray-700 uppercase tracking-widest border border-gray-300 bg-blue-100/50 text-blue-900">
-                      Stock {selectedDate ? format(parseISO(selectedDate), 'dd/MM/yyyy') : ''}
+                      Stock {selectedDate && !isNaN(parseISO(selectedDate).getTime()) ? format(parseISO(selectedDate), 'dd/MM/yyyy') : ''}
                     </th>
                     <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300 bg-orange-50/50">Por Liberar</th>
                     <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300">Ingresos / Prod.</th>

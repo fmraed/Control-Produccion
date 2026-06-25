@@ -847,7 +847,7 @@ export function WasteReport() {
                   {co2Data.details.length > 0 ? (
                     co2Data.details.map((d, i) => (
                       <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-6 py-3 border-r border-gray-200">{format(parseISO(d.fecha), 'dd/MM/yyyy')}</td>
+                        <td className="px-6 py-3 border-r border-gray-200">{d.fecha && !isNaN(parseISO(d.fecha).getTime()) ? format(parseISO(d.fecha), 'dd/MM/yyyy') : '-'}</td>
                         <td className="px-6 py-3 border-r border-gray-200 font-medium">{d.turno}</td>
                         <td className="px-6 py-3 text-center border-r border-gray-200">{d.teorico.toLocaleString('es-AR')}</td>
                         <td className="px-6 py-3 text-center border-r border-gray-200">{d.real.toLocaleString('es-AR')}</td>
@@ -906,7 +906,7 @@ export function WasteReport() {
                   {jarabeData.details.length > 0 ? (
                     jarabeData.details.map((d, i) => (
                       <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-6 py-3 border-r border-gray-200">{format(parseISO(d.fecha), 'dd/MM/yyyy')}</td>
+                        <td className="px-6 py-3 border-r border-gray-200">{d.fecha && !isNaN(parseISO(d.fecha).getTime()) ? format(parseISO(d.fecha), 'dd/MM/yyyy') : '-'}</td>
                         <td className="px-6 py-3 border-r border-gray-200 font-medium">{d.turno}</td>
                         <td className="px-6 py-3 text-center border-r border-gray-200">{d.teorico.toLocaleString('es-AR')}</td>
                         <td className="px-6 py-3 text-center border-r border-gray-200">{d.real.toLocaleString('es-AR')}</td>

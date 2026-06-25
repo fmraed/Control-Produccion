@@ -379,14 +379,14 @@ export function SuppliesProjection() {
                             <td className="px-6 py-4 text-sm font-bold text-gray-900 border-r text-xs">{item.name}</td>
                             <td className="px-6 py-4 text-sm font-black text-gray-800 text-right">{Intl.NumberFormat('es-AR').format(Math.round(item.initialStock))}</td>
                             <td className="px-6 py-4 text-sm text-right">
-                                {item.etaDate ? (() => {
+                                {item.etaDate && !isNaN(item.etaDate.getTime()) ? (() => {
                                     const diff = differenceInDays(item.etaDate, new Date());
                                     let textColor = 'text-gray-700';
                                     if (diff < 15) textColor = 'text-red-700';
                                     else if (diff <= 30) textColor = 'text-orange-500';
                                     else if (diff <= 45) textColor = 'text-yellow-500';
                                     return <span className={`${textColor} font-black`}>{format(item.etaDate, 'd MMM', { locale: es })}</span>;
-                                })() : <span className="text-emerald-600 font-black">OK</span>}
+                                })() : item.etaDate ? <span className="text-gray-500 font-black">-</span> : <span className="text-emerald-600 font-black">OK</span>}
                             </td>
                             {planningMonths.map((m, i) => {
                                 const val = item.stockEvolution[i + 1];

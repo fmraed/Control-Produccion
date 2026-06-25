@@ -1053,7 +1053,7 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                     <td className="px-6 py-4">
                       <div className="flex flex-col">
                         <span className="text-xs font-bold text-gray-700">{calculateTenure(emp)}</span>
-                        {emp.hireDate && <span className="text-[9px] text-gray-400">Ingreso: {format(parseISO(emp.hireDate), 'dd/MM/yy')}</span>}
+                        {emp.hireDate && !isNaN(parseISO(emp.hireDate).getTime()) && <span className="text-[9px] text-gray-400">Ingreso: {format(parseISO(emp.hireDate), 'dd/MM/yy')}</span>}
                       </div>
                     </td>
                     <td className="px-6 py-4 text-center">
@@ -1925,7 +1925,7 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                             {ranges.slice(0, 3).map((range, idx) => (
                               <div key={idx} className="flex items-center justify-between bg-gray-50 p-2 rounded-lg">
                                 <div className="text-[10px] font-bold text-gray-700">
-                                  {format(parseISO(range.start), 'dd/MM')} al {format(parseISO(range.end), 'dd/MM/yy')}
+                                  {range.start && !isNaN(parseISO(range.start).getTime()) ? format(parseISO(range.start), 'dd/MM') : '-'} al {range.end && !isNaN(parseISO(range.end).getTime()) ? format(parseISO(range.end), 'dd/MM/yy') : '-'}
                                 </div>
                                 <button
                                   onClick={() => {
@@ -2021,7 +2021,7 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                 <tbody className="divide-y divide-gray-100">
                   {attendance.slice(0, 20).map((a) => (
                     <tr key={a.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-6 py-4 text-gray-500">{format(parseISO(a.date), 'dd/MM/yyyy')}</td>
+                      <td className="px-6 py-4 text-gray-500">{a.date && !isNaN(parseISO(a.date).getTime()) ? format(parseISO(a.date), 'dd/MM/yyyy') : '-'}</td>
                       <td className="px-6 py-4">
                         <div className="flex flex-col">
                           <span className="font-bold text-gray-900">{a.employeeName}</span>
@@ -2379,12 +2379,12 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                                 <div className="flex gap-4">
                                   <div>
                                     <span className="text-[9px] text-gray-400 block uppercase font-black leading-none mb-1">Fecha Alta</span>
-                                    <span>{h.hireDate ? format(parseISO(h.hireDate), 'dd/MM/yyyy') : '-'}</span>
+                                    <span>{h.hireDate && !isNaN(parseISO(h.hireDate).getTime()) ? format(parseISO(h.hireDate), 'dd/MM/yyyy') : '-'}</span>
                                   </div>
                                   <div>
                                     <span className="text-[9px] text-gray-400 block uppercase font-black leading-none mb-1">Fecha Baja</span>
                                     <span className={h.terminationDate ? "text-gray-700" : "text-green-600 uppercase tracking-wider text-[10px]"}>
-                                      {h.terminationDate ? format(parseISO(h.terminationDate), 'dd/MM/yyyy') : 'Activo actualmente'}
+                                      {h.terminationDate && !isNaN(parseISO(h.terminationDate).getTime()) ? format(parseISO(h.terminationDate), 'dd/MM/yyyy') : 'Activo actualmente'}
                                     </span>
                                   </div>
                                 </div>
@@ -2651,11 +2651,11 @@ export function PersonnelManagement({ userProfile }: { userProfile: UserProfile 
                           <div className="flex gap-4">
                             <div>
                               <span className="text-[9px] text-gray-400 block uppercase font-black leading-none mb-1">Alta</span>
-                              <span>{hist.hireDate ? format(parseISO(hist.hireDate), 'dd/MM/yyyy') : '-'}</span>
+                              <span>{hist.hireDate && !isNaN(parseISO(hist.hireDate).getTime()) ? format(parseISO(hist.hireDate), 'dd/MM/yyyy') : '-'}</span>
                             </div>
                             <div>
                               <span className="text-[9px] text-gray-400 block uppercase font-black leading-none mb-1">Baja</span>
-                              <span>{hist.terminationDate ? format(parseISO(hist.terminationDate), 'dd/MM/yyyy') : '-'}</span>
+                              <span>{hist.terminationDate && !isNaN(parseISO(hist.terminationDate).getTime()) ? format(parseISO(hist.terminationDate), 'dd/MM/yyyy') : '-'}</span>
                             </div>
                           </div>
                           <button

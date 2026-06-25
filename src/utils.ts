@@ -13,18 +13,13 @@ export function getLogicalDate(report: ProductionReport | ElaboracionReport): st
   if (!report.fecha) return '';
   
   if (report.turno === 'Noche') {
-    const date = parseISO(report.fecha);
-    const startTime = (report as ProductionReport).entraTurno || (report as ElaboracionReport).horaInicio;
-    
-    // If it's a night shift, the logical date is the report date (or previous if it's already the 'next day' date)
-    // To be robust: always treat 'Noche' as the day shift started.
-    // Assuming if entraTurno >= 22:00, the report date is Day X+1, logical is X.
-    // If entraTurno < 06:00, the report date is Day X, logical is X-1? (Or is it sometimes Day X if they don't follow the rule?)                
-    
-    // Simplest robust rule: If 'Noche', treat as previous day *unless* it's already clearly an early morning shift of the same day?
-    // Let's stick to the user's rule: Night shift starts at 22:00.
-    
-    return format(subDays(date, 1), 'yyyy-MM-dd');
+    try {
+      const date = parseISO(report.fecha);
+      if (isNaN(date.getTime())) return report.fecha;
+      return format(subDays(date, 1), 'yyyy-MM-dd');
+    } catch(e) {
+      return report.fecha;
+    }
   }                
 
   return report.fecha;

@@ -24,6 +24,20 @@ export function ConsolidatedReport() {
     
     if (selectedPeriod === 'all') {
       q = query(collection(db, 'production_reports'), orderBy('fecha', 'desc'));
+    } else if (selectedPeriod.startsWith('year_')) {
+      // It's a year
+      const year = parseInt(selectedPeriod.replace('year_', ''), 10);
+      const startDate = new Date(year - 1, 11, 28); // Dec 28 prev year
+      const startStr = format(startDate, 'yyyy-MM-dd');
+      const endDate = new Date(year + 1, 0, 5); // Jan 5 next year
+      const endStr = format(endDate, 'yyyy-MM-dd');
+      
+      q = query(
+        collection(db, 'production_reports'), 
+        where('fecha', '>=', startStr),
+        where('fecha', '<=', endStr),
+        orderBy('fecha', 'desc')
+      );
     } else if (selectedPeriod.includes('-')) {
       const [year, month] = selectedPeriod.split('-');
       const startDate = new Date(parseInt(year), parseInt(month) - 2, 28);
@@ -38,19 +52,7 @@ export function ConsolidatedReport() {
         orderBy('fecha', 'desc')
       );
     } else {
-      // It's a year
-      const year = parseInt(selectedPeriod);
-      const startDate = new Date(year - 1, 11, 28); // Dec 28 prev year
-      const startStr = format(startDate, 'yyyy-MM-dd');
-      const endDate = new Date(year + 1, 0, 5); // Jan 5 next year
-      const endStr = format(endDate, 'yyyy-MM-dd');
-      
-      q = query(
-        collection(db, 'production_reports'), 
-        where('fecha', '>=', startStr),
-        where('fecha', '<=', endStr),
-        orderBy('fecha', 'desc')
-      );
+      q = query(collection(db, 'production_reports'), orderBy('fecha', 'desc'));
     }
     
     const unsubscribe = onSnapshot(q, (snapshot) => {

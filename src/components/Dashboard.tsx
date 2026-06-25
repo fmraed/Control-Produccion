@@ -448,7 +448,7 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin, filters, onFilte
                   <div className="text-sm text-gray-900 flex items-center gap-1" title={showLogicalDate ? `Fecha real de inicio: ${logicalDate}` : ''}>
                     <Calendar className="w-3.5 h-3.5 text-gray-400" />
                     {report.fecha}
-                    {showLogicalDate && (
+                    {showLogicalDate && !isNaN(parseISO(logicalDate).getTime()) && (
                       <span className="text-[10px] text-orange-500 font-medium ml-1" title="Turno noche (inició el día anterior)">
                         ({format(parseISO(logicalDate), 'dd/MM')})
                       </span>

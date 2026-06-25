@@ -367,7 +367,7 @@ export function EfficiencyReport() {
                 onChange={(e) => setSelectedDate(e.target.value)}
                 className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm border p-2 min-w-[160px]"
               >
-                {availableDates.map(d => (
+                {availableDates.filter(d => !isNaN(parseISO(d).getTime())).map(d => (
                   <option key={d} value={d}>
                     {format(parseISO(d), "dd 'de' MMMM yyyy", { locale: es })}
                   </option>
