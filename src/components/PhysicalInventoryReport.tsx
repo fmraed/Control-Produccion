@@ -1879,12 +1879,12 @@ export function PhysicalInventoryReport() {
                   <p className="text-gray-400 text-xs py-12 text-center">No se encontraron datos históricos de inventario para desplegar la evolución mensual.</p>
                 ) : (
                   <div className="overflow-x-auto w-full">
-                    <table className={`w-full text-left border-collapse table-fixed min-w-[750px] ${
+                    <table className={`w-full text-left border-collapse table-fixed min-w-[1100px] ${
                       prefFont === 'sans' ? 'font-sans' : prefFont === 'display' ? 'font-display tracking-[0.015em]' : 'font-mono'
                     }`}>
                       <thead>
                         <tr className="border-b border-gray-100 text-xs md:text-sm font-black uppercase text-indigo-950 select-none">
-                          <th className="py-3 w-[220px] px-3 bg-slate-50/50 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleSortMonthly('elemento')}>
+                          <th className="py-3 w-[600px] px-3 bg-slate-50/50 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleSortMonthly('elemento')}>
                             <div className="flex items-center gap-1.5">
                               Elemento
                               {sortMonthlyField === 'elemento' && <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
@@ -1924,7 +1924,7 @@ export function PhysicalInventoryReport() {
                             filteredMonthlyArticles.map(art => (
                               <tr key={art.codigo} className="hover:bg-slate-50/50">
                                 <td className="py-3.5 px-2 pr-2 truncate" title={art.producto}>
-                                  <div className="font-extrabold text-sm md:text-base text-gray-900 truncate max-w-[200px]" title={art.producto}>{art.producto}</div>
+                                  <div className="font-extrabold text-sm md:text-base text-gray-900 truncate" title={art.producto}>{art.producto}</div>
                                   <span className="font-mono text-[10px] md:text-xs text-slate-500 block font-semibold">{art.codigo}</span>
                                 </td>
                                 <td className="py-3.5 px-2">
@@ -2029,7 +2029,7 @@ export function PhysicalInventoryReport() {
                             filteredMonthlyGroups.map(grp => (
                               <tr key={grp.producto} className="hover:bg-slate-50/50">
                                 <td className="py-3.5 px-2 pr-2 truncate">
-                                  <div className="font-extrabold text-sm md:text-base text-gray-900 truncate max-w-[200px]" title={grp.producto}>{grp.producto}</div>
+                                  <div className="font-extrabold text-sm md:text-base text-gray-900 truncate" title={grp.producto}>{grp.producto}</div>
                                   <span className="font-mono text-[10px] md:text-xs text-indigo-505 text-indigo-500 block font-semibold">Consolidado</span>
                                 </td>
                                 <td className="py-3.5 px-2">
