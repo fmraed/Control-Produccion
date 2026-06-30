@@ -135,8 +135,8 @@ export function GoalFulfillment() {
       const isExternalB = (config?.externalProducts?.[b.marca]?.[b.tamano.toString()] || []).includes(b.sabor);
       
       if (isExternalA !== isExternalB) return isExternalA ? 1 : -1;
-      if (a.marca !== b.marca) return a.marca.localeCompare(b.marca);
       if (a.tamano !== b.tamano) return b.tamano - a.tamano;
+      if (a.marca !== b.marca) return a.marca.localeCompare(b.marca);
       const priorityA = FLAVOR_PRIORITY[a.sabor] || 999;
       const priorityB = FLAVOR_PRIORITY[b.sabor] || 999;
       if (priorityA !== priorityB) return priorityA - priorityB;
@@ -325,10 +325,10 @@ export function GoalFulfillment() {
       products: any[];
     }> = {};
     activeProducts.forEach(p => {
-      const groupKey = `${p.marca} ${p.tamano}`;
+      const groupKey = `${p.tamano} ${p.marca}`;
       if (!groups[groupKey]) {
         groups[groupKey] = {
-          label: `Sub Total ${p.marca} ${p.tamano}`,
+          label: `Sub Total ${p.tamano} ${p.marca}`,
           ordered: 0,
           produced: 0,
           avg: 0,
@@ -694,9 +694,9 @@ export function GoalFulfillment() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-gray-100/80">
+                <th className="px-6 py-4 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Calibre</th>
                 <th className="px-6 py-4 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Marca</th>
                 <th className="px-6 py-4 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Sabor</th>
-                <th className="px-6 py-4 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Calibre</th>
                 <th className="px-6 py-4 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200 bg-gray-200/50">Pedido Mes</th>
                 <th className="px-6 py-4 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Prod Mes</th>
                 <th className="px-6 py-4 text-[10px] font-black text-gray-500 uppercase tracking-widest border-r border-gray-200">Salida Diaria</th>
@@ -711,6 +711,7 @@ export function GoalFulfillment() {
                 <Fragment key={groupKey}>
                   {group.products.map((p: any) => (
                     <tr key={p.key} className="hover:bg-gray-50 transition-colors group">
+                      <td className="px-6 py-4 text-sm font-mono font-bold text-gray-500 border-r border-gray-100">{p.tamano}</td>
                       <td className="px-6 py-4 text-sm font-black text-gray-900 border-r border-gray-100 italic">{p.marca}</td>
                       <td className="px-6 py-4 text-sm font-bold text-gray-600 border-r border-gray-100 uppercase">
                         <div className="flex flex-col">
@@ -720,7 +721,6 @@ export function GoalFulfillment() {
                           )}
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-sm font-mono font-bold text-gray-500 border-r border-gray-100">{p.tamano}</td>
                       <td className="px-6 py-4 border-r border-gray-100 bg-gray-50/50">
                         {isEditingGoals ? (
                           <input

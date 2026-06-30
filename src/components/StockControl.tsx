@@ -299,8 +299,8 @@ export function StockControl() {
 
     return products.sort((a, b) => {
       if (a.isExternal !== b.isExternal) return a.isExternal ? 1 : -1;
-      if (a.marca !== b.marca) return a.marca.localeCompare(b.marca);
       if (a.tamano !== b.tamano) return b.tamano - a.tamano;
+      if (a.marca !== b.marca) return a.marca.localeCompare(b.marca);
       const priorityA = FLAVOR_PRIORITY[a.sabor] || 999;
       const priorityB = FLAVOR_PRIORITY[b.sabor] || 999;
       if (priorityA !== priorityB) return priorityA - priorityB;
@@ -489,14 +489,14 @@ export function StockControl() {
 
     activeProducts.forEach(p => {
       // Custom grouping based on image
-      let groupLabel = `Sub Total ${p.marca} ${p.tamano}`;
-      let groupKey = `${p.marca}-${p.tamano}`;
+      let groupLabel = `Sub Total ${p.tamano} ${p.marca}`;
+      let groupKey = `${p.tamano}-${p.marca}`;
       
       if (p.sabor === 'Sifon') {
-        groupLabel = `Sub Total ${p.marca} ${p.tamano} Sifon`;
-        groupKey = `${p.marca}-${p.tamano}-Sifon`;
+        groupLabel = `Sub Total ${p.tamano} ${p.marca} Sifon`;
+        groupKey = `${p.tamano}-${p.marca}-Sifon`;
       } else if (p.tamano === 1500) {
-        groupLabel = `Sub Total Torasso + Axis 1500`;
+        groupLabel = `Sub Total 1500 Torasso + Axis`;
         groupKey = `1500-Mixed`;
       }
 
@@ -823,9 +823,9 @@ export function StockControl() {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-gray-100/80 border-y border-gray-300">
+                    <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300">Calibre</th>
                     <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300">Marca</th>
                     <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300">Sabor</th>
-                    <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300">Calibre</th>
                     <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300 bg-gray-200/30">Total Pedido Mes</th>
                     <th className="px-4 py-3 text-xs font-black text-gray-700 uppercase tracking-widest border border-gray-300 bg-blue-100/50 text-blue-900">
                       Stock {selectedDate && !isNaN(parseISO(selectedDate).getTime()) ? format(parseISO(selectedDate), 'dd/MM/yyyy') : ''}
@@ -868,6 +868,7 @@ export function StockControl() {
                                 isSelectedChartProductNode ? 'bg-blue-50/80 border-l-4 border-l-blue-600 shadow-sm' : ''
                               }`}
                             >
+                              <td className="px-4 py-3 text-sm font-sans font-bold text-gray-600 border border-gray-200">{p.tamano}</td>
                               <td className="px-4 py-3 text-sm font-black text-gray-900 border border-gray-200 italic">{p.marca}</td>
                               <td className="px-4 py-3 text-sm font-bold text-gray-700 border border-gray-200 uppercase">
                                 <div className="flex flex-col">
@@ -877,7 +878,6 @@ export function StockControl() {
                                   )}
                                 </div>
                               </td>
-                              <td className="px-4 py-3 text-sm font-sans font-bold text-gray-600 border border-gray-200">{p.tamano}</td>
                               <td className="px-4 py-3 text-sm font-bold text-gray-700 border border-gray-200 bg-gray-50/30">
                                 {p.totalOrdered.toLocaleString('es-AR')}
                               </td>

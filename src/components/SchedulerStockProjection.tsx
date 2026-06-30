@@ -143,8 +143,8 @@ export function SchedulerStockProjection({
 
     return products.sort((a, b) => {
       if (a.isExternal !== b.isExternal) return a.isExternal ? 1 : -1;
-      if (a.marca !== b.marca) return a.marca.localeCompare(b.marca);
       if (a.tamano !== b.tamano) return b.tamano - a.tamano;
+      if (a.marca !== b.marca) return a.marca.localeCompare(b.marca);
       return a.sabor.localeCompare(b.sabor);
     });
   }, [config, availableBrands, availableSizes]);
@@ -246,14 +246,14 @@ export function SchedulerStockProjection({
     let gInitialStock = 0;
 
     activeProducts.forEach(p => {
-      let groupLabel = `Sub Total ${p.marca} ${p.tamano}`;
-      let groupKey = `${p.marca}-${p.tamano}`;
+      let groupLabel = `Sub Total ${p.tamano} ${p.marca}`;
+      let groupKey = `${p.tamano}-${p.marca}`;
       
       if (p.sabor === 'Sifon') {
-        groupLabel = `Sub Total ${p.marca} ${p.tamano} Sifon`;
-        groupKey = `${p.marca}-${p.tamano}-Sifon`;
+        groupLabel = `Sub Total ${p.tamano} ${p.marca} Sifon`;
+        groupKey = `${p.tamano}-${p.marca}-Sifon`;
       } else if (p.tamano === 1500) {
-        groupLabel = `Sub Total Torasso + Axis 1500`;
+        groupLabel = `Sub Total 1500 Torasso + Axis`;
         groupKey = `1500-Mixed`;
       }
 
@@ -319,9 +319,9 @@ export function SchedulerStockProjection({
         <table className="w-full text-left border-collapse text-sm">
           <thead>
             <tr className="bg-slate-100 border-y border-slate-300">
+              <th className="px-3 py-3 font-black text-slate-600 uppercase text-xs border border-slate-300">Calibre</th>
               <th className="px-3 py-3 font-black text-slate-600 uppercase text-xs border border-slate-300">Marca</th>
               <th className="px-3 py-3 font-black text-slate-600 uppercase text-xs border border-slate-300">Sabor</th>
-              <th className="px-3 py-3 font-black text-slate-600 uppercase text-xs border border-slate-300">Calibre</th>
               <th className="px-3 py-3 font-black text-slate-600 uppercase text-xs border border-slate-300 bg-slate-200/50">Stock Actual</th>
               <th className="px-3 py-3 font-black text-slate-600 uppercase text-xs border border-slate-300 bg-slate-200/50">Salida Diaria</th>
               {weekDays.map((day) => {
@@ -360,9 +360,9 @@ export function SchedulerStockProjection({
                 <Fragment key={idx}>
                   {group.products.map(p => (
                     <tr key={p.key} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-3 py-2 font-bold text-slate-500 border border-slate-300">{p.tamano}cc</td>
                       <td className="px-3 py-2 font-bold text-slate-700 border border-slate-300">{p.marca}</td>
                       <td className="px-3 py-2 font-bold text-slate-700 border border-slate-300">{p.sabor}</td>
-                      <td className="px-3 py-2 font-bold text-slate-500 border border-slate-300">{p.tamano}cc</td>
                       <td className="px-3 py-2 font-black text-indigo-700 border border-slate-300 bg-slate-50/50 text-right text-base">
                         {p.currentStockWithPending.toLocaleString('es-AR')}
                       </td>

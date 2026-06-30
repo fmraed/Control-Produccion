@@ -74,6 +74,7 @@ export function InsumosControlReport() {
   const [error, setError] = useState<string | null>(null);
   const [insumoMappings, setInsumoMappings] = useState<Record<string, string>>({});
   const [etiquetasMappings, setEtiquetasMappings] = useState<Record<string, string>>({});
+  const [separatedSupplies, setSeparatedSupplies] = useState<Record<string, number>>({});
   const [lastUpdatedCached, setLastUpdatedCached] = useState<string | null>(null);
 
   // Excel Physical Inventory Upload States
@@ -347,6 +348,18 @@ export function InsumosControlReport() {
     fetchMappings()
       .then(() => fetchCachedStock())
       .then(() => fetchStock());
+      
+    const unsubSeparated = onSnapshot(doc(db, 'config', 'separated_supplies'), (docSnap) => {
+        if (docSnap.exists()) {
+            setSeparatedSupplies(docSnap.data() as Record<string, number>);
+        } else {
+            setSeparatedSupplies({});
+        }
+    });
+
+    return () => {
+        unsubSeparated();
+    };
   }, []);
 
   const handleUpdateSimulatedStock = (insumoName: string, value: number) => {
@@ -581,55 +594,59 @@ export function InsumosControlReport() {
 
   // Helper to read raw stock of an insumo (without equivalence)
   const getRawInsumoStock = useCallback((insumoName: string): number => {
+    let rawResult = 0;
+    
     if (simulationMode) {
-      return simulatedStocks[insumoName] || 0;
-    }
-    let sqlCode = insumoMappings[insumoName];
-    if (!sqlCode && config) {
-      if (insumoName.startsWith("Etiqueta ")) {
-        const parts = insumoName.substring(9).split(" / ");
-        if (parts.length >= 3) {
-          const brand = parts[0];
-          const flavor = parts[1];
-          const size = parseInt(parts[2]);
-          const key = `${brand}-${flavor}-${size}`;
-          sqlCode = etiquetasMappings[key];
-        }
-      } else {
-        // Seek in preformasConfig
-        const pref = (config?.preformasConfig || []).find(p => p.name === insumoName);
-        if (pref) sqlCode = pref.sqlCode;
-        else {
-          // Seek in termoConfig
-          const tm = (config?.termoConfig || []).find(t => t.name === insumoName);
-          if (tm) sqlCode = tm.sqlCode;
+      rawResult = simulatedStocks[insumoName] || 0;
+    } else {
+      let sqlCode = insumoMappings[insumoName];
+      if (!sqlCode && config) {
+        if (insumoName.startsWith("Etiqueta ")) {
+          const parts = insumoName.substring(9).split(" / ");
+          if (parts.length >= 3) {
+            const brand = parts[0];
+            const flavor = parts[1];
+            const size = parseInt(parts[2]);
+            const key = `${brand}-${flavor}-${size}`;
+            sqlCode = etiquetasMappings[key];
+          }
+        } else {
+          // Seek in preformasConfig
+          const pref = (config?.preformasConfig || []).find(p => p.name === insumoName);
+          if (pref) sqlCode = pref.sqlCode;
           else {
-            // Seek in stretchConfig
-            const str = (config?.stretchConfig || []).find(s => s.name === insumoName);
-            if (str) sqlCode = str.sqlCode;
+            // Seek in termoConfig
+            const tm = (config?.termoConfig || []).find(t => t.name === insumoName);
+            if (tm) sqlCode = tm.sqlCode;
             else {
-              const tapa = (config?.tapaConfig || []).find(t => t.name === insumoName);
-              if (tapa) sqlCode = tapa.sqlCode;
+              // Seek in stretchConfig
+              const str = (config?.stretchConfig || []).find(s => s.name === insumoName);
+              if (str) sqlCode = str.sqlCode;
+              else {
+                const tapa = (config?.tapaConfig || []).find(t => t.name === insumoName);
+                if (tapa) sqlCode = tapa.sqlCode;
+              }
             }
           }
         }
       }
-    }
-    if (sqlCode) {
-      const mapCodes = (sqlCode || '').toString().split(',').map((c: string) => c.trim().toLowerCase()).filter((c: string) => c !== '');
-      if (mapCodes.length > 0) {
-        const total = stockData.reduce((acc, s) => {
-          const dbCode = (s.codigo_articulo || '').toString().trim().toLowerCase();
-          if (mapCodes.includes(dbCode) && dbCode !== '') {
-            return acc + (s.stock_almacen || 0);
-          }
-          return acc;
-        }, 0);
-        return total;
+      if (sqlCode) {
+        const mapCodes = (sqlCode || '').toString().split(',').map((c: string) => c.trim().toLowerCase()).filter((c: string) => c !== '');
+        if (mapCodes.length > 0) {
+          rawResult = stockData.reduce((acc, s) => {
+            const dbCode = (s.codigo_articulo || '').toString().trim().toLowerCase();
+            if (mapCodes.includes(dbCode) && dbCode !== '') {
+              return acc + (s.stock_almacen || 0);
+            }
+            return acc;
+          }, 0);
+        }
       }
     }
-    return 0; // fallback if no code / no match
-  }, [config, simulationMode, simulatedStocks, insumoMappings, etiquetasMappings, stockData]);
+    
+    const separated = separatedSupplies[insumoName] || 0;
+    return Math.max(0, rawResult - separated);
+  }, [config, simulationMode, simulatedStocks, insumoMappings, etiquetasMappings, stockData, separatedSupplies]);
 
   // Helper to read effective stock considering equivalent groups
   const getEffectiveInsumoStock = useCallback((insumoName: string): number => {

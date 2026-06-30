@@ -1,12 +1,12 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { collection, query, where, onSnapshot, doc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAppConfig } from '../hooks/useAppConfig';
 import { MonthlyGoal } from '../types';
 import { BOTELLAS_POR_PACK, PACKS_POR_PALETA, WASTE_WEIGHTS } from '../constants';
 import { format, parseISO, addMonths, startOfMonth, addDays, differenceInDays } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { TrendingDown, Calendar, Database, FlaskConical, BarChart3, Package } from 'lucide-react';
+import { TrendingDown, Calendar, Database, FlaskConical, BarChart3, Package, X, Plus, Trash2 } from 'lucide-react';
 
 interface InsumosGrouped {
   name: string;
@@ -21,6 +21,8 @@ export function SuppliesProjection() {
   const [stockData, setStockData] = useState<any[]>([]);
   const [insumoMappings, setInsumoMappings] = useState<Record<string, string>>({});
   const [etiquetasMappings, setEtiquetasMappings] = useState<Record<string, string>>({});
+  const [separatedSupplies, setSeparatedSupplies] = useState<Record<string, number>>({});
+  const [showSeparatedModal, setShowSeparatedModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'proyeccion' | 'consumo'>('proyeccion');
   const [sortConfig, setSortConfig] = useState<{ field: string, asc: boolean }>({ field: 'etaDate', asc: true });
@@ -93,6 +95,14 @@ export function SuppliesProjection() {
         if (docSnap.exists()) setEtiquetasMappings(docSnap.data() as Record<string, string>);
     });
 
+    const unsubSeparated = onSnapshot(doc(db, 'config', 'separated_supplies'), (docSnap) => {
+        if (docSnap.exists()) {
+            setSeparatedSupplies(docSnap.data() as Record<string, number>);
+        } else {
+            setSeparatedSupplies({});
+        }
+    });
+
     fetch('/api/sql/insumosStock')
       .then(res => res.json())
       .then(data => {
@@ -111,7 +121,7 @@ export function SuppliesProjection() {
         setLoading(false);
       });
 
-    return () => { unsubGoals(); unsubInsumos(); unsubEtiquetas(); };
+    return () => { unsubGoals(); unsubInsumos(); unsubEtiquetas(); unsubSeparated(); };
   }, [planningMonths]);
 
   const combinedData = useMemo(() => {
@@ -217,7 +227,7 @@ export function SuppliesProjection() {
     const projectionResults = items.map(item => {
         const targetCodes = getMappedCodes(item.originalNames);
 
-        const initialStock = stockData.reduce((acc, s) => {
+        let initialStock = stockData.reduce((acc, s) => {
             if (targetCodes.length > 0) {
                 if (s.codigo && targetCodes.includes(s.codigo.trim().toLowerCase())) {
                     return acc + (s.amount || s.STOCK || 0);
@@ -237,6 +247,17 @@ export function SuppliesProjection() {
             }
             return acc;
         }, 0);
+
+        let separatedAmount = 0;
+        if (separatedSupplies[item.name]) {
+            separatedAmount += separatedSupplies[item.name];
+        } else {
+            item.originalNames.forEach(n => {
+                if (separatedSupplies[n]) separatedAmount += separatedSupplies[n];
+            });
+        }
+        
+        initialStock = Math.max(0, initialStock - separatedAmount);
 
         const stockEvolution = [initialStock];
         let currentStock = initialStock;
@@ -340,12 +361,20 @@ export function SuppliesProjection() {
     <div className="space-y-6">
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
         <h2 className="text-2xl font-black text-gray-900 tracking-tight">Gestión y Proyecciones de Insumos</h2>
-        <div className="flex gap-2 mt-4">
-            {(['proyeccion', 'consumo'] as const).map(tab => (
-                <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg text-sm font-black uppercase tracking-widest transition-all ${activeTab === tab ? 'bg-amber-600 text-white shadow-lg' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                    {tab === 'proyeccion' ? 'Cobertura' : 'Consumo Mensual'}
-                </button>
-            ))}
+        <div className="flex items-center justify-between mt-4">
+            <div className="flex gap-2">
+                {(['proyeccion', 'consumo'] as const).map(tab => (
+                    <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg text-sm font-black uppercase tracking-widest transition-all ${activeTab === tab ? 'bg-amber-600 text-white shadow-lg' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                        {tab === 'proyeccion' ? 'Cobertura' : 'Consumo Mensual'}
+                    </button>
+                ))}
+            </div>
+            <button
+                onClick={() => setShowSeparatedModal(true)}
+                className="px-4 py-2 rounded-lg text-sm font-black uppercase tracking-widest bg-red-50 text-red-700 hover:bg-red-100 transition-colors border border-red-200"
+            >
+                Artículos Separados
+            </button>
         </div>
       </div>
 
@@ -426,6 +455,127 @@ export function SuppliesProjection() {
                     </div>
                 </div>
             ))}
+        </div>
+      )}
+
+      {showSeparatedModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-slate-50">
+              <div>
+                <h3 className="text-xl font-black text-slate-800">Artículos Separados</h3>
+                <p className="text-xs text-slate-500 font-bold mt-1">Gestión de insumos en cuarentena o no aptos.</p>
+              </div>
+              <button 
+                onClick={() => setShowSeparatedModal(false)}
+                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-full transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto flex-1 bg-white">
+              <div className="space-y-6">
+                <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl">
+                  <h4 className="text-sm font-black text-blue-900 mb-3">Agregar artículo separado</h4>
+                  <form 
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      const form = e.target as HTMLFormElement;
+                      const select = form.elements.namedItem('insumo') as HTMLSelectElement;
+                      const input = form.elements.namedItem('amount') as HTMLInputElement;
+                      const insumo = select.value;
+                      const amount = parseFloat(input.value);
+                      
+                      if (insumo && amount > 0) {
+                        const newSupplies = { ...separatedSupplies, [insumo]: (separatedSupplies[insumo] || 0) + amount };
+                        await setDoc(doc(db, 'config', 'separated_supplies'), newSupplies);
+                        form.reset();
+                      }
+                    }}
+                    className="flex flex-col sm:flex-row gap-3"
+                  >
+                    <select 
+                      name="insumo"
+                      required
+                      className="flex-1 rounded-lg border-gray-300 text-sm font-bold shadow-sm focus:ring-blue-500 focus:border-blue-500 border p-2.5"
+                    >
+                      <option value="">Seleccionar insumo...</option>
+                      {[...combinedData.items].sort((a, b) => a.name.localeCompare(b.name)).map(i => (
+                        <option key={i.name} value={i.name}>{i.name}</option>
+                      ))}
+                    </select>
+                    <input 
+                      type="number" 
+                      name="amount"
+                      required
+                      min="0.01"
+                      step="0.01"
+                      placeholder="Cantidad"
+                      className="w-full sm:w-32 rounded-lg border-gray-300 text-sm font-bold shadow-sm focus:ring-blue-500 focus:border-blue-500 border p-2.5 text-right"
+                    />
+                    <button 
+                      type="submit"
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-black flex items-center justify-center gap-2 transition-colors shadow-sm"
+                    >
+                      <Plus className="w-4 h-4" /> Agregar
+                    </button>
+                  </form>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-black text-slate-800 mb-3 uppercase tracking-widest border-b border-slate-100 pb-2">Artículos actualmente separados</h4>
+                  {Object.entries(separatedSupplies).length === 0 ? (
+                    <div className="text-center p-8 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                      <p className="text-slate-500 font-bold text-sm">No hay artículos separados actualmente.</p>
+                    </div>
+                  ) : (
+                    <div className="border border-slate-200 rounded-xl overflow-hidden">
+                      <table className="w-full text-left text-sm">
+                        <thead className="bg-slate-50 border-b border-slate-200">
+                          <tr>
+                            <th className="p-3 font-black text-slate-600 uppercase tracking-widest text-xs">Insumo</th>
+                            <th className="p-3 font-black text-slate-600 uppercase tracking-widest text-xs text-right">Cantidad</th>
+                            <th className="p-3 font-black text-slate-600 uppercase tracking-widest text-xs text-center w-20">Acción</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {Object.entries(separatedSupplies).sort((a, b) => a[0].localeCompare(b[0])).map(([name, amount]) => (
+                            <tr key={name} className="hover:bg-slate-50 transition-colors">
+                              <td className="p-3 font-bold text-slate-800">{name}</td>
+                              <td className="p-3 font-black text-slate-700 text-right font-mono">{Intl.NumberFormat('es-AR').format(amount)}</td>
+                              <td className="p-3 text-center">
+                                <button
+                                  onClick={async () => {
+                                    const newSupplies = { ...separatedSupplies };
+                                    delete newSupplies[name];
+                                    await setDoc(doc(db, 'config', 'separated_supplies'), newSupplies);
+                                  }}
+                                  className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+                                  title="Remover"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-4 border-t border-gray-100 bg-slate-50 flex justify-end">
+              <button 
+                onClick={() => setShowSeparatedModal(false)}
+                className="px-6 py-2.5 bg-slate-800 hover:bg-slate-900 text-white text-sm font-black rounded-xl transition-colors shadow-sm"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
