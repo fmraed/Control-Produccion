@@ -672,12 +672,12 @@ export function InsumosControlReport() {
 
   const isEmpaqueItem = useCallback((insumoName: string) => {
     const lower = insumoName.toLowerCase();
-    if (lower.includes('preforma') || lower.includes('tapa') || lower.includes('etiqueta') || lower.includes('termo') || lower.includes('stretch')) return true;
+    if (lower.includes('preforma') || lower.includes('tapa') || lower.includes('cabezal') || lower.includes('etiqueta') || lower.includes('termo') || lower.includes('stretch')) return true;
     
     // Also check if any part of the name refers to standard packaging types
     const partOfGroup = insumoName.split(' / ').some(part => {
       const pLower = part.toLowerCase();
-      return pLower.includes('preforma') || pLower.includes('tapa') || pLower.includes('etiqueta') || pLower.includes('termo') || pLower.includes('stretch');
+      return pLower.includes('preforma') || pLower.includes('tapa') || pLower.includes('cabezal') || pLower.includes('etiqueta') || pLower.includes('termo') || pLower.includes('stretch');
     });
     if (partOfGroup) return true;
     
@@ -697,6 +697,7 @@ export function InsumosControlReport() {
     const lower = insumoName.toLowerCase();
     if (lower.includes('preforma')) return 'Preformas';
     if (lower.includes('tapa')) return 'Tapas';
+    if (lower.includes('cabezal')) return 'Cabezales Sifón';
     if (lower.includes('termo')) return 'Termocontraíble';
     if (lower.includes('stretch')) return 'Film Stretch';
     if (lower.includes('etiqueta')) return 'Etiquetas';
@@ -1142,7 +1143,7 @@ export function InsumosControlReport() {
                                   (config?.termoConfig || []).some(t => t.name === item.insumoName) ||
                                   (config?.stretchConfig || []).some(s => s.name === item.insumoName) ||
                                   (config?.tapaConfig || []).some(t => t.name === item.insumoName);
-      const isTapaOrLabel = item.insumoName.startsWith('Tapa ') || item.insumoName.startsWith('Etiqueta ') || item.insumoName.startsWith('Tapas ');
+      const isTapaOrLabel = item.insumoName.startsWith('Tapa ') || item.insumoName.startsWith('Cabezal') || item.insumoName.startsWith('Etiqueta ') || item.insumoName.startsWith('Tapas ');
       
       // Check for packaging items that are part of compatiblePackagingGroups
       const isPartOfCompatiblePackagingGroups = config?.compatiblePackagingGroups && Object.values(config.compatiblePackagingGroups as Record<string, string[]>).some(group => group.some(member => item.insumoName.includes(member)));
@@ -1749,7 +1750,7 @@ export function InsumosControlReport() {
                   if (!allList.some(x => x.name === t.name)) allList.push({ name: t.name });
                 });
                 programCrossover.requiredInsumosAgg?.forEach(item => {
-                  const isTapaOrLabel = item.insumoName.startsWith('Tapa ') || item.insumoName.startsWith('Etiqueta ') || item.insumoName.startsWith('Tapas ');
+                  const isTapaOrLabel = item.insumoName.startsWith('Tapa ') || item.insumoName.startsWith('Cabezal') || item.insumoName.startsWith('Etiqueta ') || item.insumoName.startsWith('Tapas ');
                   if (isTapaOrLabel && !allList.some(x => x.name === item.insumoName)) {
                     allList.push({ name: item.insumoName });
                   }

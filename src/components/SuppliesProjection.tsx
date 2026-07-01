@@ -43,6 +43,7 @@ export function SuppliesProjection() {
     const lower = insumoName.toLowerCase();
     if (lower.includes('preforma')) return 'Preformas';
     if (lower.includes('tapa')) return 'Tapas';
+    if (lower.includes('cabezal')) return 'Cabezales Sifón';
     if (lower.includes('termo')) return 'Termocontraíble';
     if (lower.includes('stretch')) return 'Film Stretch';
     if (lower.includes('etiqueta')) return 'Etiquetas';
