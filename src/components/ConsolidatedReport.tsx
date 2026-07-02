@@ -314,7 +314,9 @@ export function ConsolidatedReport() {
                       const cell = consolidatedData.data[key][tamano];
                       const totalForSize = consolidatedData.totalsBySize[tamano] || 0;
                       const percentage = totalForSize > 0 ? (cell.packs / totalForSize) * 100 : 0;
-                      const isActive = getFilteredFlavors(marca, tamano, false).includes(sabor);
+                      const isCurrentlyActive = getFilteredFlavors(marca, tamano, false).includes(sabor);
+                      const hasData = cell.packs > 0 || cell.extraBot > 0;
+                      const isActive = isCurrentlyActive || hasData;
 
                       return (
                         <td key={tamano} colSpan={3} className={`px-0 py-0 border-r border-gray-300 ${isActive ? '' : 'bg-gray-300/80 relative'}`}>
