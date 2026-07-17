@@ -41,6 +41,9 @@ export function SuppliesProjection() {
 
   // Helper functions
   const getPackingCategory = useCallback((insumoName: string) => {
+    if (config?.insumosCategories?.[insumoName]) {
+      return config.insumosCategories[insumoName];
+    }
     const lower = insumoName.toLowerCase();
     if (lower.includes('preforma')) return 'Preformas';
     if (lower.includes('tapa')) return 'Tapas';
@@ -50,7 +53,7 @@ export function SuppliesProjection() {
     if (lower.includes('etiqueta')) return 'Etiquetas';
     if (lower.includes('azúcar') || lower.includes('azucar')) return 'Materia Prima';
     return 'Otros Insumos';
-  }, []);
+  }, [config?.insumosCategories]);
 
   const findPreformaForProduct = useCallback((tam: number, lin: string, sabor: string) => {
     const list = config?.preformasConfig || [];
@@ -232,23 +235,29 @@ export function SuppliesProjection() {
 
     const projectionResults = items.map(item => {
         const targetCodes = getMappedCodes(item.originalNames);
+        let dynamicallyMatchedCodes: string[] = [];
+
+        const normalize = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
         let initialStock = stockData.reduce((acc, s) => {
             if (targetCodes.length > 0) {
                 if (s.codigo && targetCodes.includes(String(s.codigo).trim().toLowerCase())) {
+                    dynamicallyMatchedCodes.push(String(s.codigo).trim().toLowerCase());
                     return acc + (s.amount || s.STOCK || 0);
                 }
                 return acc; 
             }
             
             // Fallback to name matching
-            const stockName = (s.insumo || s.NAME || '').toLowerCase();
+            const stockName = (s.insumo || s.NAME || '');
             const hasNameMatch = item.originalNames.some(itemName => {
-                const lowerItem = itemName.toLowerCase();
-                return stockName.includes(lowerItem) || lowerItem.includes(stockName);
+                const lowerItem = normalize(itemName);
+                const normStockName = normalize(stockName);
+                return normStockName.includes(lowerItem) || lowerItem.includes(normStockName);
             });
             
             if (hasNameMatch) {
+                if (s.codigo) dynamicallyMatchedCodes.push(String(s.codigo).trim().toLowerCase());
                 return acc + (s.amount || s.STOCK || 0);
             }
             return acc;

@@ -196,6 +196,7 @@ export function AdminPanel() {
     categories.add('Tapas');
     categories.add('Termocontraíbles');
     categories.add('Stretch');
+    categories.add('Cabezales Sifón');
     return Array.from(categories).sort();
   }, [config?.insumosCategories]);
 

@@ -82,6 +82,9 @@ export function MotorCompras() {
 
   // Helpers
   const getPackingCategory = useCallback((insumoName: string) => {
+    if (config?.insumosCategories?.[insumoName]) {
+      return config.insumosCategories[insumoName];
+    }
     const lower = insumoName.toLowerCase();
     if (lower.includes('preforma')) return 'Preformas';
     if (lower.includes('tapa')) return 'Tapas';
@@ -91,7 +94,7 @@ export function MotorCompras() {
     if (lower.includes('etiqueta')) return 'Etiquetas';
     if (lower.includes('azúcar') || lower.includes('azucar')) return 'Materia Prima';
     return 'Otros Insumos';
-  }, []);
+  }, [config?.insumosCategories]);
 
   const findPreformaForProduct = useCallback((tam: number, lin: string, sabor: string) => {
     const list = config?.preformasConfig || [];
@@ -277,7 +280,7 @@ export function MotorCompras() {
       let currentBatch = writeBatch(db);
       let opCount = 0;
       
-      // Default indexes based on user feedback (without UM column, or UM ignored)
+      // Default indexes based on original 10-column structure
       let idxMap = {
         req: 0,
         needDate: 1,
@@ -285,9 +288,10 @@ export function MotorCompras() {
         code: 3,
         desc: 4,
         spec: 5,
-        status: 6,
-        reqQty: 7,
-        arrQty: 8
+        unit: 6,
+        status: 7,
+        reqQty: 8,
+        arrQty: 9
       };
       
       let isFirstLine = true;
@@ -295,26 +299,35 @@ export function MotorCompras() {
         const cols = line.split('\t').map(c => c.trim());
         const firstCol = (cols[0] || '').toUpperCase();
         
-        if (isFirstLine && (firstCol.includes('REQ') || firstCol === 'NRO REQ.' || firstCol === 'REQUISICIÓN')) {
-           // Dynamically map columns
-           cols.forEach((col, i) => {
-             const c = col.toUpperCase();
-             if (c.includes('REQ')) idxMap.req = i;
-             else if (c.includes('NECESIDAD')) idxMap.needDate = i;
-             else if (c.includes('EMI')) idxMap.issueDate = i;
-             else if (c.includes('CÓDIGO') || c.includes('CODIGO')) idxMap.code = i;
-             else if (c.includes('DESC')) idxMap.desc = i;
-             else if (c.includes('ESP')) idxMap.spec = i;
-             else if (c.includes('ESTADO')) idxMap.status = i;
-             else if (c.includes('SOLICITADA') || c.includes('SOL')) idxMap.reqQty = i;
-             else if (c.includes('LLEGADA') || c.includes('LLEG')) idxMap.arrQty = i;
-           });
+        if (isFirstLine) {
            isFirstLine = false;
-           continue;
+           
+           if (firstCol.includes('REQ') || firstCol === 'NRO REQ.' || firstCol === 'REQUISICIÓN' || firstCol === 'NRO REQ') {
+             // Dynamically map columns
+             cols.forEach((col, i) => {
+               const c = col.toUpperCase();
+               if (c === 'NRO REQ.' || c === 'NRO REQ' || c === 'REQUISICION' || c === 'REQUISICIÓN' || c.includes('REQ')) idxMap.req = i;
+               if (c.includes('NECESIDAD')) idxMap.needDate = i;
+               if (c.includes('EMI')) idxMap.issueDate = i;
+               if (c.includes('CÓDIGO') || c.includes('CODIGO')) idxMap.code = i;
+               if (c.includes('DESC') || c.includes('MATERIAL')) idxMap.desc = i;
+               if (c.includes('ESP') || c.includes('TEXTO')) idxMap.spec = i;
+               if (c === 'UM' || c === 'U.M.' || c.includes('UNIDAD')) idxMap.unit = i;
+               if (c.includes('ESTADO')) idxMap.status = i;
+               if (c.includes('SOLICITADA') || c.includes('CANT') && c.includes('SOL')) idxMap.reqQty = i;
+               if (c.includes('LLEGADA') || c.includes('ENTREGADA') || (c.includes('CANT') && c.includes('LLEG'))) idxMap.arrQty = i;
+             });
+             continue;
+           } else {
+             // If no headers, guess based on column count
+             if (cols.length === 9) {
+               idxMap = { req: 0, needDate: 1, issueDate: 2, code: 3, desc: 4, spec: 5, unit: -1, status: 6, reqQty: 7, arrQty: 8 };
+             }
+           }
         }
-        isFirstLine = false;
 
         if (cols.length >= 6 && cols[idxMap.req]) {
+           // Si arrQty no se mapeó dinámicamente o está fuera de rango, usa reqQty. Si status no está, asume 'PENDIENTE'
           const transit: InsumosTransit = {
             requisitionNumber: cols[idxMap.req] || '',
             needDate: parseDate(cols[idxMap.needDate] || ''),
@@ -322,7 +335,8 @@ export function MotorCompras() {
             code: cols[idxMap.code] || '',
             description: cols[idxMap.desc] || '',
             specification: cols[idxMap.spec] || '',
-            status: cols[idxMap.status] || '',
+            unit: idxMap.unit !== undefined ? (cols[idxMap.unit] || '') : '',
+            status: cols[idxMap.status] || 'PENDIENTE',
             requestedQuantity: parseNumber(cols[idxMap.reqQty] || ''),
             arrivedQuantity: parseNumber(cols[idxMap.arrQty] || '')
           };
@@ -461,22 +475,28 @@ export function MotorCompras() {
 
     const projectionResults = items.map(item => {
         const targetCodes = getMappedCodes(item.originalNames);
+        let dynamicallyMatchedCodes: string[] = [];
+
+        const normalize = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
         let initialStock = stockData.reduce((acc, s) => {
             if (targetCodes.length > 0) {
                 if (s.codigo && targetCodes.includes(String(s.codigo).trim().toLowerCase())) {
+                    dynamicallyMatchedCodes.push(String(s.codigo).trim().toLowerCase());
                     return acc + s.amount;
                 }
                 return acc; 
             }
             
-            const stockName = (s.insumo || s.NAME || '').toLowerCase();
+            const stockName = (s.insumo || s.NAME || '');
             const hasNameMatch = item.originalNames.some(itemName => {
-                const lowerItem = itemName.toLowerCase();
-                return stockName.includes(lowerItem) || lowerItem.includes(stockName);
+                const lowerItem = normalize(itemName);
+                const normStockName = normalize(stockName);
+                return normStockName.includes(lowerItem) || lowerItem.includes(normStockName);
             });
             
             if (hasNameMatch) {
+                if (s.codigo) dynamicallyMatchedCodes.push(String(s.codigo).trim().toLowerCase());
                 return acc + s.amount;
             }
             return acc;
@@ -493,7 +513,8 @@ export function MotorCompras() {
         
         initialStock = Math.max(0, initialStock - separatedAmount);
 
-        return { ...item, initialStock, targetCodes };
+        const finalTargetCodes = Array.from(new Set([...targetCodes, ...dynamicallyMatchedCodes]));
+        return { ...item, initialStock, targetCodes: finalTargetCodes };
     });
 
     return { projection: projectionResults, items: items };
@@ -547,12 +568,13 @@ export function MotorCompras() {
       let mpTransito = 0;
       transits.forEach(t => {
         if (!t.status || String(t.status).toLowerCase().includes('recibido') || String(t.status).toLowerCase().includes('completado')) return;
-        const tCode = String(t.code || '').toLowerCase().trim();
+        const tCode = String(t.code || '').toLowerCase().trim().replace(/^0+/, '');
         const tDesc = String(t.description || '').toLowerCase();
         let match = false;
-        if (tCode && item.targetCodes && item.targetCodes.includes(tCode)) {
+        const normalize = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+        if (tCode && item.targetCodes && item.targetCodes.some(c => String(c).replace(/^0+/, '') === tCode)) {
           match = true;
-        } else if (item.originalNames.some(n => tDesc.includes(n.toLowerCase()))) {
+        } else if (item.originalNames.some(n => normalize(tDesc).includes(normalize(n)))) {
           match = true;
         }
         if (match) {
@@ -563,7 +585,14 @@ export function MotorCompras() {
       const posicionActual = stockFisico + mpTransito;
       const necesidadTeorica = consumoProyectado - posicionActual;
       const consumoDiario = consumoProyectado / 60;
-      const diasSeguridad = config?.categorySecurityDays?.[item.category] || 0;
+      const getSecurityDays = (cat: string) => {
+        if (!config?.categorySecurityDays) return 0;
+        let targetCat = cat;
+        if (cat === 'Termocontraíble') targetCat = 'Termocontraíbles';
+        if (cat === 'Film Stretch') targetCat = 'Stretch';
+        return config.categorySecurityDays[targetCat] || config.categorySecurityDays[cat] || 0;
+      };
+      const diasSeguridad = getSecurityDays(item.category);
       const criticidad = config?.insumosCriticality?.[item.name] || 1;
       const stockSeguridad = consumoDiario * diasSeguridad * criticidad;
       const necesidadReal = Math.max(0, necesidadTeorica + stockSeguridad);
@@ -737,13 +766,14 @@ export function MotorCompras() {
                       transits.forEach(t => {
                         if (!t.status || String(t.status).toLowerCase().includes('recibido') || String(t.status).toLowerCase().includes('completado')) return;
                         
-                        const tCode = String(t.code || '').toLowerCase().trim();
+                        const tCode = String(t.code || '').toLowerCase().trim().replace(/^0+/, '');
                         const tDesc = String(t.description || '').toLowerCase();
                         
                         let match = false;
-                        if (tCode && item.targetCodes && item.targetCodes.includes(tCode)) {
+                        const normalize = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+                        if (tCode && item.targetCodes && item.targetCodes.some(c => String(c).replace(/^0+/, '') === tCode)) {
                           match = true;
-                        } else if (item.originalNames.some(n => tDesc.includes(n.toLowerCase()))) {
+                        } else if (item.originalNames.some(n => normalize(tDesc).includes(normalize(n)))) {
                           match = true;
                         }
                         
@@ -756,7 +786,14 @@ export function MotorCompras() {
                       const necesidadTeorica = consumoProyectado - posicionActual;
                       
                       const consumoDiario = consumoProyectado / 60;
-                      const diasSeguridad = config?.categorySecurityDays?.[item.category] || 0;
+                      const getSecurityDays = (cat: string) => {
+                        if (!config?.categorySecurityDays) return 0;
+                        let targetCat = cat;
+                        if (cat === 'Termocontraíble') targetCat = 'Termocontraíbles';
+                        if (cat === 'Film Stretch') targetCat = 'Stretch';
+                        return config.categorySecurityDays[targetCat] || config.categorySecurityDays[cat] || 0;
+                      };
+                      const diasSeguridad = getSecurityDays(item.category);
                       const criticidad = config?.insumosCriticality?.[item.name] || 1;
                       const stockSeguridad = consumoDiario * diasSeguridad * criticidad;
                       

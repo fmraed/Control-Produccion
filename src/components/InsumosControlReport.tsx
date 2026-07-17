@@ -695,6 +695,9 @@ export function InsumosControlReport() {
   }, [config]);
 
   const getPackingCategory = useCallback((insumoName: string) => {
+    if (config?.insumosCategories?.[insumoName]) {
+      return config.insumosCategories[insumoName];
+    }
     const lower = insumoName.toLowerCase();
     if (lower.includes('preforma')) return 'Preformas';
     if (lower.includes('tapa')) return 'Tapas';
@@ -703,7 +706,7 @@ export function InsumosControlReport() {
     if (lower.includes('stretch')) return 'Film Stretch';
     if (lower.includes('etiqueta')) return 'Etiquetas';
     return 'Otros Empaques';
-  }, []);
+  }, [config?.insumosCategories]);
 
   // 1. Calculations for Tab 1: Capacity estimation
   const capacityResults = useMemo(() => {
