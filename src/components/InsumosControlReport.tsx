@@ -21,6 +21,7 @@ import {
   Layers,
   Scale,
   ShoppingBag,
+  ShoppingCart,
   Upload,
   FileSpreadsheet,
   Download,
@@ -1674,6 +1675,7 @@ export function InsumosControlReport() {
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
         
         {/* Simulation Sandbox / Stock Panel */}
+        {activeTab !== 'pedidos' && (
         <div className="xl:col-span-1 space-y-4">
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
             <div className="flex items-center justify-between border-b pb-3 mb-4">
@@ -1823,9 +1825,10 @@ export function InsumosControlReport() {
             </div>
           </div>
         </div>
+        )}
 
         {/* Dynamic Calculated Views Content based on active TAB */}
-        <div className="xl:col-span-3 space-y-6">
+        <div className={activeTab === 'pedidos' ? "xl:col-span-4 space-y-6" : "xl:col-span-3 space-y-6"}>
 
           {/* CAPACITY TAB */}
           {activeTab === 'capacity' && (

@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback } from 'react';
 import { collection, query, where, onSnapshot, doc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAppConfig } from '../hooks/useAppConfig';
-import { MonthlyGoal } from '../types';
+import { MonthlyGoal, InsumosTransit } from '../types';
 import { BOTELLAS_POR_PACK, PACKS_POR_PALETA, WASTE_WEIGHTS } from '../constants';
 import { format, parseISO, addMonths, startOfMonth, addDays, differenceInDays } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -27,6 +27,7 @@ export function SuppliesProjection() {
   const [activeTab, setActiveTab] = useState<'proyeccion' | 'consumo'>('proyeccion');
   const [sortConfig, setSortConfig] = useState<{ field: string, asc: boolean }>({ field: 'etaDate', asc: true });
   const [sortConfigConsumo, setSortConfigConsumo] = useState<{ field: string, asc: boolean }>({ field: 'name', asc: true });
+  const [transits, setTransits] = useState<InsumosTransit[]>([]);
 
   const planningMonths = useMemo(() => {
     const list = [];
@@ -54,28 +55,28 @@ export function SuppliesProjection() {
   const findPreformaForProduct = useCallback((tam: number, lin: string, sabor: string) => {
     const list = config?.preformasConfig || [];
     const matchFlavor = (p: any) => !p.flavors || p.flavors.length === 0 || p.flavors.includes(sabor);
-    return list.find(p => p.sizes.includes(tam) && p.line && p.line.toString() === lin.toString() && matchFlavor(p)) ||
-           list.find(p => p.sizes.includes(tam) && !p.line && matchFlavor(p)) ||
-           list.find(p => p.sizes.includes(tam) && matchFlavor(p)) ||
-           list.find(p => p.sizes.includes(tam) && p.line && p.line.toString() === lin.toString()) ||
-           list.find(p => p.sizes.includes(tam));
+    return list.find(p => (p.sizes || []).includes(tam) && p.line && p.line.toString() === lin.toString() && matchFlavor(p)) ||
+           list.find(p => (p.sizes || []).includes(tam) && !p.line && matchFlavor(p)) ||
+           list.find(p => (p.sizes || []).includes(tam) && matchFlavor(p)) ||
+           list.find(p => (p.sizes || []).includes(tam) && p.line && p.line.toString() === lin.toString()) ||
+           list.find(p => (p.sizes || []).includes(tam));
   }, [config]);
 
   const findTermoForProduct = useCallback((tam: number, sabor: string) => {
     const list = config?.termoConfig || [];
     const matchFlavor = (p: any) => !p.flavors || p.flavors.length === 0 || p.flavors.includes(sabor);
-    return list.find(p => p.sizes.includes(tam) && matchFlavor(p)) || list.find(p => p.sizes.includes(tam));
+    return list.find(p => (p.sizes || []).includes(tam) && matchFlavor(p)) || list.find(p => (p.sizes || []).includes(tam));
   }, [config]);
 
   const findStretchForProduct = useCallback((tam: number, sabor: string) => {
     const list = config?.stretchConfig || [];
-    return list.find(p => p.sizes.includes(tam)) || list[0];
+    return list.find(p => (p.sizes || []).includes(tam)) || list[0];
   }, [config]);
 
   const findTapaForProduct = useCallback((tam: number, sabor: string) => {
     const list = config?.tapaConfig || [];
     const matchFlavor = (p: any) => !p.flavors || p.flavors.length === 0 || p.flavors.includes(sabor);
-    return list.find(p => p.sizes.includes(tam) && matchFlavor(p)) || list.find(p => p.sizes.includes(tam));
+    return list.find(p => (p.sizes || []).includes(tam) && matchFlavor(p)) || list.find(p => (p.sizes || []).includes(tam));
   }, [config]);
 
 
@@ -104,6 +105,10 @@ export function SuppliesProjection() {
         }
     });
 
+    const unsubTransits = onSnapshot(query(collection(db, 'insumos_transits')), (snap) => {
+      setTransits(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as InsumosTransit)));
+    });
+
     fetch('/api/sql/insumosStock')
       .then(res => res.json())
       .then(data => {
@@ -122,7 +127,7 @@ export function SuppliesProjection() {
         setLoading(false);
       });
 
-    return () => { unsubGoals(); unsubInsumos(); unsubEtiquetas(); unsubSeparated(); };
+    return () => { unsubGoals(); unsubInsumos(); unsubEtiquetas(); unsubSeparated(); unsubTransits(); };
   }, [planningMonths]);
 
   const combinedData = useMemo(() => {
@@ -133,17 +138,17 @@ export function SuppliesProjection() {
 
     goals.forEach(goal => {
       const { month, marca, sabor, tamano, quantity } = goal;
-      if (!planningMonths.includes(month) || quantity <= 0) return;
+      if (!planningMonths.includes(month) || quantity <= 0 || !tamano || !marca || !sabor) return;
 
       const reqObj = requirementsByMonth[month];
       const botellasPorPack = config?.botellasPorPack?.[tamano] || BOTELLAS_POR_PACK[tamano] || 6;
       const beverageLiters = quantity * botellasPorPack * (tamano / 1000);
       const mixRatio = config.co2Volumes?.[marca]?.[sabor] !== undefined && config.co2Volumes?.[marca]?.[sabor] === 0 ? 1 : 5;
       const syrupLitersNeeded = beverageLiters / mixRatio;
-      const unitsRequired = (config.syrupFormulas?.[marca]?.[sabor]?.liters || 0) > 0 ? (syrupLitersNeeded / config.syrupFormulas[marca][sabor].liters) : 0;
+      const unitsRequired = (config.syrupFormulas?.[marca]?.[sabor]?.liters || 0) > 0 ? (syrupLitersNeeded / config.syrupFormulas?.[marca]?.[sabor]?.liters) : 0;
       
       Object.keys(config.insumosMatrix?.[marca]?.[sabor] || {}).forEach(insName => {
-        const kgPerUnit = config.insumosMatrix[marca][sabor][insName] || 0;
+        const kgPerUnit = config.insumosMatrix?.[marca]?.[sabor]?.[insName] || 0;
         if (kgPerUnit > 0) reqObj[insName] = (reqObj[insName] || 0) + (unitsRequired * kgPerUnit);
       });
 
@@ -197,29 +202,29 @@ export function SuppliesProjection() {
         let allCodes: string[] = [];
         originalNames.forEach(itemName => {
             // 1. Insumo mappings
-            if (insumoMappings[itemName]) allCodes.push(...insumoMappings[itemName].split(',').map(c => c.trim().toLowerCase()));
+            if (insumoMappings[itemName]) allCodes.push(...String(insumoMappings[itemName]).split(',').map(c => c.trim().toLowerCase()));
             
             // 2. Etiquetas
             if (itemName.startsWith('Etiqueta ')) {
                 const parts = itemName.replace('Etiqueta ', '').replace('cc', '').split(' / ');
                 if (parts.length === 3) {
                     const key = `${parts[0]}-${parts[1]}-${parts[2]}`;
-                    if (etiquetasMappings[key]) allCodes.push(...etiquetasMappings[key].split(',').map(c => c.trim().toLowerCase()));
+                    if (etiquetasMappings[key]) allCodes.push(...String(etiquetasMappings[key]).split(',').map(c => c.trim().toLowerCase()));
                 }
             }
 
             // 3. Built-in configs
             const pref = (config?.preformasConfig || []).find(p => p.name === itemName);
-            if (pref?.sqlCode) allCodes.push(...pref.sqlCode.split(',').map(c => c.trim().toLowerCase()));
+            if (pref?.sqlCode) allCodes.push(...String(pref.sqlCode).split(',').map(c => c.trim().toLowerCase()));
             
             const tm = (config?.termoConfig || []).find(t => t.name === itemName);
-            if (tm?.sqlCode) allCodes.push(...tm.sqlCode.split(',').map(c => c.trim().toLowerCase()));
+            if (tm?.sqlCode) allCodes.push(...String(tm.sqlCode).split(',').map(c => c.trim().toLowerCase()));
             
             const st = (config?.stretchConfig || []).find(s => s.name === itemName);
-            if (st?.sqlCode) allCodes.push(...st.sqlCode.split(',').map(c => c.trim().toLowerCase()));
+            if (st?.sqlCode) allCodes.push(...String(st.sqlCode).split(',').map(c => c.trim().toLowerCase()));
             
             const tp = (config?.tapaConfig || []).find(t => t.name === itemName);
-            if (tp?.sqlCode) allCodes.push(...tp.sqlCode.split(',').map(c => c.trim().toLowerCase()));
+            if (tp?.sqlCode) allCodes.push(...String(tp.sqlCode).split(',').map(c => c.trim().toLowerCase()));
         });
         
         return Array.from(new Set(allCodes));
@@ -230,7 +235,7 @@ export function SuppliesProjection() {
 
         let initialStock = stockData.reduce((acc, s) => {
             if (targetCodes.length > 0) {
-                if (s.codigo && targetCodes.includes(s.codigo.trim().toLowerCase())) {
+                if (s.codigo && targetCodes.includes(String(s.codigo).trim().toLowerCase())) {
                     return acc + (s.amount || s.STOCK || 0);
                 }
                 return acc; 
@@ -544,7 +549,7 @@ export function SuppliesProjection() {
                           {Object.entries(separatedSupplies).sort((a, b) => a[0].localeCompare(b[0])).map(([name, amount]) => (
                             <tr key={name} className="hover:bg-slate-50 transition-colors">
                               <td className="p-3 font-bold text-slate-800">{name}</td>
-                              <td className="p-3 font-black text-slate-700 text-right font-mono">{Intl.NumberFormat('es-AR').format(amount)}</td>
+                              <td className="p-3 font-black text-slate-700 text-right font-mono">{Intl.NumberFormat('es-AR').format(amount as number)}</td>
                               <td className="p-3 text-center">
                                 <button
                                   onClick={async () => {

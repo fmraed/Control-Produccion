@@ -70,6 +70,9 @@ interface AppConfig {
   termoConfig?: TermoConfig[];
   stretchConfig?: StretchConfig[];
   tapaConfig?: TapaConfig[];
+  categorySecurityDays?: Record<string, number>;
+  insumosCriticality?: Record<string, number>;
+  insumosPurchaseLots?: Record<string, { size: number; unit: string }>;
   efficiencyExcludedDowntimes: string[];
 }
 
@@ -181,6 +184,20 @@ export function AdminPanel() {
     (config?.tapaConfig || []).forEach(t => items.push(t.name));
     return items;
   }, [config?.preformasConfig, config?.termoConfig, config?.stretchConfig, config?.tapaConfig]);
+
+  const uniqueInsumoCategories = useMemo(() => {
+    if (!config) return [];
+    const categories = new Set<string>();
+    Object.values(config.insumosCategories || {}).forEach(cat => {
+      if (typeof cat === 'string' && cat.trim()) categories.add(cat.trim());
+    });
+    categories.add('Preformas');
+    categories.add('Etiquetas');
+    categories.add('Tapas');
+    categories.add('Termocontraíbles');
+    categories.add('Stretch');
+    return Array.from(categories).sort();
+  }, [config?.insumosCategories]);
 
   useEffect(() => {
     const configRef = doc(db, 'config', 'production');
@@ -653,6 +670,42 @@ export function AdminPanel() {
       insumosCategories: {
         ...(config.insumosCategories || {}),
         [insumo]: category
+      }
+    });
+  };
+
+  const handleUpdateInsumoPurchasing = (insumo: string, field: 'criticality' | 'lotSize' | 'lotUnit', value: any) => {
+    if (!config) return;
+    if (field === 'criticality') {
+      setConfig({
+        ...config,
+        insumosCriticality: {
+          ...(config.insumosCriticality || {}),
+          [insumo]: Number(value) || 1
+        }
+      });
+    } else {
+      const currentLot = config.insumosPurchaseLots?.[insumo] || { size: 1, unit: 'kg' };
+      setConfig({
+        ...config,
+        insumosPurchaseLots: {
+          ...(config.insumosPurchaseLots || {}),
+          [insumo]: {
+            ...currentLot,
+            [field === 'lotSize' ? 'size' : 'unit']: field === 'lotSize' ? (Number(value) || 1) : value
+          }
+        }
+      });
+    }
+  };
+
+  const handleUpdateCategorySecurityDays = (category: string, days: number) => {
+    if (!config) return;
+    setConfig({
+      ...config,
+      categorySecurityDays: {
+        ...(config.categorySecurityDays || {}),
+        [category]: days
       }
     });
   };
@@ -1546,8 +1599,8 @@ export function AdminPanel() {
                   })()}
                 </div>
               </div>
-            </section>
 
+            </section>
             <section className="border-t border-gray-100 pt-8">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
@@ -1734,9 +1787,9 @@ export function AdminPanel() {
                 <p className="text-sm text-gray-500 italic col-span-2 text-center py-4">No hay marcas registradas</p>
               )}
             </div>
-          </section>
 
           {/* Líneas */}
+          </section>
           <section className="bg-gray-50 p-4 rounded-xl border border-gray-200">
             <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Líneas y Personal Requerido</h3>
             <div className="flex gap-2 mb-4">
@@ -1821,9 +1874,9 @@ export function AdminPanel() {
                 <p className="text-sm text-gray-500 italic col-span-2 text-center py-4">No hay líneas registradas</p>
               )}
             </div>
-          </section>
 
           {/* Sabores */}
+          </section>
           <section className="bg-gray-50 p-4 rounded-xl border border-gray-200">
             <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Sabores</h3>
             <div className="flex gap-2 mb-4">
@@ -1884,9 +1937,9 @@ export function AdminPanel() {
                 <p className="text-sm text-gray-500 italic col-span-2 text-center py-4">No hay sabores registrados</p>
               )}
             </div>
-          </section>
 
           {/* Eficiencia Excluidos */}
+          </section>
           <section className="bg-gray-50 p-4 rounded-xl border border-gray-200 lg:col-span-2">
             <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Configuración de Eficiencia (Exclusiones de Paradas)</h3>
             <p className="text-sm text-gray-600 mb-4">Ingrese las razones o categorías de paradas que deben ser excluidas de los cálculos de eficiencia (separadas por coma):</p>
@@ -1900,9 +1953,9 @@ export function AdminPanel() {
               className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
               placeholder="ej: Sin programa, Mantenimiento programado, OTRAS AJENAS A LINEA"
             />
-          </section>
 
           {/* Calibres */}
+          </section>
           <section className="bg-gray-50 p-4 rounded-xl border border-gray-200">
             <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Calibres</h3>
             <div className="flex gap-2 mb-4">
@@ -1963,9 +2016,9 @@ export function AdminPanel() {
                 <p className="text-sm text-gray-500 italic col-span-2 text-center py-4">No hay calibres registrados</p>
               )}
             </div>
-          </section>
 
           {/* Supervisores */}
+          </section>
           <section className="bg-gray-50 p-4 rounded-xl border border-gray-200">
             <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2 flex items-center gap-2">
               <Users className="w-5 h-5 text-blue-600" />
@@ -2029,9 +2082,9 @@ export function AdminPanel() {
                 <p className="text-sm text-gray-500 italic col-span-2 text-center py-4">No hay supervisores registrados</p>
               )}
             </div>
-          </section>
 
           {/* Químicos */}
+          </section>
           <section className="bg-gray-50 p-4 rounded-xl border border-gray-200">
             <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2 flex items-center gap-2">
               <FlaskConical className="w-5 h-5 text-blue-600" />
@@ -2095,9 +2148,9 @@ export function AdminPanel() {
                 <p className="text-sm text-gray-500 italic col-span-2 text-center py-4">No hay químicos registrados</p>
               )}
             </div>
-          </section>
 
           {/* Control de Datos Históricos */}
+          </section>
           <section className="bg-indigo-50 p-6 rounded-xl border border-indigo-100 lg:col-span-2 shadow-sm">
             <h3 className="text-lg font-bold text-indigo-900 mb-4 border-b border-indigo-200 pb-2 flex items-center gap-2">
               <Database className="w-5 h-5 text-indigo-600" />
@@ -2157,9 +2210,9 @@ export function AdminPanel() {
                 </div>
               </div>
             </div>
-          </section>
 
           {/* Corte de Gestión */}
+          </section>
           <section className="bg-emerald-50 p-6 rounded-xl border border-emerald-100 lg:col-span-2 shadow-sm">
             <h3 className="text-lg font-bold text-emerald-900 mb-4 border-b border-emerald-200 pb-2 flex items-center gap-2">
               <Database className="w-5 h-5 text-emerald-600" />
@@ -2367,8 +2420,8 @@ export function AdminPanel() {
               <p className="text-gray-400 font-medium">Selecciona una marca y un calibre para empezar a configurar las combinaciones de sabores.</p>
             </div>
           )}
-        </section>
 
+        </section>
         <section className="mt-12">
           <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Combinaciones Marca - Sabor</h3>
           <p className="text-sm text-gray-500 mb-6">Selecciona qué sabores están permitidos para cada marca.</p>
@@ -2412,8 +2465,8 @@ export function AdminPanel() {
               </p>
             )}
           </div>
-        </section>
 
+        </section>
         <section className="mt-12">
           <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Combinaciones Línea - Calibre</h3>
           <p className="text-sm text-gray-500 mb-6">Selecciona qué calibres están permitidos para cada línea de producción.</p>
@@ -2496,8 +2549,8 @@ export function AdminPanel() {
               );
             })}
           </div>
-        </section>
 
+        </section>
         <section className="mt-12">
           <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Configuración de Paletizado y Empaque</h3>
           <p className="text-sm text-gray-500 mb-6">Define la cantidad de packs por paleta y botellas por pack para cada calibre.</p>
@@ -2822,8 +2875,8 @@ export function AdminPanel() {
                      );
                   })}
                </div>
-              </section>
               
+              </section>
               <section className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                  <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Control de Calidad (Por Liberar)</h3>
                  <p className="text-xs text-gray-500 mb-4">Seleccione qué sabores pasan por Control de Calidad previo a su liberación (ej. Agua).</p>
@@ -2853,8 +2906,8 @@ export function AdminPanel() {
                        );
                     })}
                  </div>
-              </section>
 
+              </section>
               <section className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                  <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Almacenamiento y Logística</h3>
                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
@@ -2904,8 +2957,8 @@ export function AdminPanel() {
                        );
                     })}
                  </div>
-              </section>
 
+              </section>
               <section className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                  <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Volúmenes de CO2</h3>
                  <p className="text-xs text-gray-500 mb-4">Ajuste el volumen de gas según Marca y Sabor. Deje en 0 para sabores como Agua que no llevan CO2.</p>
@@ -2949,8 +3002,8 @@ export function AdminPanel() {
                       </div>
                    ))}
                  </div>
-              </section>
 
+              </section>
               <section className="bg-gray-50 p-4 rounded-xl border border-gray-200 lg:col-span-2">
                  <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Fórmulas de Jarabe (Por Unidad)</h3>
                  <p className="text-xs text-gray-500 mb-4">Defina los litros de jarabe y los kg de emulsión que conforman una "unidad" de jarabe, por Marca y Sabor.</p>
@@ -3028,8 +3081,8 @@ export function AdminPanel() {
                       </div>
                    ))}
                  </div>
-              </section>
 
+              </section>
               <section className="bg-gray-50 p-4 rounded-xl border border-gray-200 lg:col-span-2 overflow-x-auto">
                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 border-b pb-2">
                    <div>
@@ -3063,6 +3116,8 @@ export function AdminPanel() {
                           <tr>
                             <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Insumo</th>
                             <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Categoría</th>
+                            <th className="px-4 py-3 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">Criticidad</th>
+                            <th className="px-4 py-3 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">Presentación (Lote)</th>
                             <th className="px-4 py-3 text-right text-xs font-bold text-gray-600 uppercase tracking-wider">Acciones</th>
                           </tr>
                         </thead>
@@ -3078,8 +3133,36 @@ export function AdminPanel() {
                                   placeholder="Ej: Bases, Jugos, Químicos..."
                                   value={config.insumosCategories?.[insumo] || ''}
                                   onChange={e => handleUpdateInsumoCategory(insumo, e.target.value)}
-                                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs w-full max-w-[200px] focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow"
+                                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs w-full max-w-[150px] focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow"
                                   list="categories-list"
+                                />
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap text-center text-sm text-gray-500">
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  min="1"
+                                  value={config.insumosCriticality?.[insumo] || 1}
+                                  onChange={e => handleUpdateInsumoPurchasing(insumo, 'criticality', e.target.value)}
+                                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-[70px] text-center focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow"
+                                  title="Factor multiplicador (ej. 1.2)"
+                                />
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap text-center text-sm text-gray-500 flex items-center justify-center space-x-1">
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  min="0.1"
+                                  value={config.insumosPurchaseLots?.[insumo]?.size || 1}
+                                  onChange={e => handleUpdateInsumoPurchasing(insumo, 'lotSize', e.target.value)}
+                                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-[70px] text-center focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow"
+                                />
+                                <input
+                                  type="text"
+                                  placeholder="kg, L, un"
+                                  value={config.insumosPurchaseLots?.[insumo]?.unit || 'kg'}
+                                  onChange={e => handleUpdateInsumoPurchasing(insumo, 'lotUnit', e.target.value)}
+                                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-[60px] text-center focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow"
                                 />
                               </td>
                               <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
@@ -3203,6 +3286,41 @@ export function AdminPanel() {
                        </div>
                      );
                    })()}
+                 </div>
+
+                 {/* Configuración de Compras - Días de Margen por Categoría */}
+                 <div className="mb-8">
+                   <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-3">Días de Margen de Seguridad por Categoría</h4>
+                   <div className="overflow-x-auto bg-white border border-gray-200 rounded-lg shadow-sm">
+                     <table className="min-w-full divide-y divide-gray-200 text-sm">
+                       <thead className="bg-gray-50/50">
+                         <tr>
+                           <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Categoría</th>
+                           <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Días de Cobertura de Seguridad</th>
+                         </tr>
+                       </thead>
+                       <tbody className="divide-y divide-gray-200">
+                         {uniqueInsumoCategories.map(cat => (
+                           <tr key={cat} className="hover:bg-gray-50/50 transition-colors">
+                             <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-gray-900">
+                               {cat}
+                             </td>
+                             <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                               <input
+                                 type="number"
+                                 step="1"
+                                 min="0"
+                                 value={config.categorySecurityDays?.[cat] ?? 0}
+                                 onChange={e => handleUpdateCategorySecurityDays(cat, parseInt(e.target.value) || 0)}
+                                 className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs w-24 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow"
+                               />
+                               <span className="ml-2 text-xs text-gray-400">días de consumo promedio</span>
+                             </td>
+                           </tr>
+                         ))}
+                       </tbody>
+                     </table>
+                   </div>
                  </div>
 
                  {/* Insumos Compatibles / Equivalentes */}
@@ -3405,9 +3523,9 @@ export function AdminPanel() {
                      )
                    })}
                  </div>
-              </section>
 
               {/* ENVASES Y MATERIALES DE EMBALAJE */}
+              </section>
               <section className="bg-gray-50 p-6 rounded-xl border border-gray-200 lg:col-span-2 space-y-6">
                  <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 border-b border-gray-200 pb-4">
                    <div>
@@ -3972,7 +4090,6 @@ export function AdminPanel() {
                      </table>
                    </div>
                  </div>
-               </section>
 
                <section className="bg-gray-50 p-4 rounded-xl border border-gray-200 mt-8 lg:col-span-2">
                  <div className="flex justify-between items-center mb-4 border-b pb-2">
@@ -4115,6 +4232,63 @@ export function AdminPanel() {
                      </table>
                    </div>
                  </div>
+                 {/* Parámetros de Compra de Envases */}
+                 <div className="mt-8 mb-4 border-t border-gray-200 pt-6">
+                   <h4 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
+                     <Package className="w-4 h-4 text-indigo-600" />
+                     Parámetros de Compra de Envases
+                   </h4>
+                   <p className="text-xs text-gray-500 mb-4">Configure la criticidad y el lote de compra para preformas, termo, stretch y tapas.</p>
+                   <div className="overflow-x-auto bg-white border border-gray-200 rounded-lg shadow-sm">
+                     <table className="min-w-full divide-y divide-gray-200 text-sm">
+                       <thead className="bg-gray-50/50">
+                         <tr>
+                           <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Envase / Material</th>
+                           <th className="px-4 py-3 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">Criticidad</th>
+                           <th className="px-4 py-3 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">Presentación (Lote)</th>
+                         </tr>
+                       </thead>
+                       <tbody className="divide-y divide-gray-200">
+                         {allPackagingItems.map((item, idx) => (
+                           <tr key={idx} className="hover:bg-gray-50/50 transition-colors">
+                             <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-gray-900">
+                               {item}
+                             </td>
+                             <td className="px-4 py-3 whitespace-nowrap text-center text-sm text-gray-500">
+                               <input
+                                 type="number"
+                                 step="0.1"
+                                 min="1"
+                                 value={config.insumosCriticality?.[item] || 1}
+                                 onChange={e => handleUpdateInsumoPurchasing(item, 'criticality', e.target.value)}
+                                 className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-[70px] text-center focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow"
+                                 title="Factor multiplicador (ej. 1.2)"
+                               />
+                             </td>
+                             <td className="px-4 py-3 whitespace-nowrap text-center text-sm text-gray-500 flex items-center justify-center space-x-1">
+                               <input
+                                 type="number"
+                                 step="0.1"
+                                 min="0.1"
+                                 value={config.insumosPurchaseLots?.[item]?.size || 1}
+                                 onChange={e => handleUpdateInsumoPurchasing(item, 'lotSize', e.target.value)}
+                                 className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-[70px] text-center focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow"
+                               />
+                               <input
+                                 type="text"
+                                 placeholder="kg, L, un"
+                                 value={config.insumosPurchaseLots?.[item]?.unit || 'kg'}
+                                 onChange={e => handleUpdateInsumoPurchasing(item, 'lotUnit', e.target.value)}
+                                 className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-[60px] text-center focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow"
+                               />
+                             </td>
+                           </tr>
+                         ))}
+                       </tbody>
+                     </table>
+                   </div>
+                 </div>
+               </section>
               </section>
           </div>
         </div>

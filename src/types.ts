@@ -286,3 +286,17 @@ export interface ProductionPlanV2 {
   authorName?: string;
 }
 
+
+export interface InsumosTransit {
+  id?: string;
+  requisitionNumber: string;
+  needDate: string; // YYYY-MM-DD
+  issueDate: string; // YYYY-MM-DD
+  code: string;
+  description: string;
+  specification: string;
+  unit: string;
+  status: string;
+  requestedQuantity: number;
+  arrivedQuantity: number;
+}

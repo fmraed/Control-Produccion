@@ -248,6 +248,20 @@ service cloud.firestore {
              data.authorId is string;
     }
 
+    function isValidInsumosTransit(data) {
+      return hasRequiredFields(['requisitionNumber', 'code', 'description', 'requestedQuantity', 'arrivedQuantity']) &&
+             data.requisitionNumber is string &&
+             data.code is string &&
+             data.description is string &&
+             data.requestedQuantity is number &&
+             data.arrivedQuantity is number &&
+             isValidOptionalString('status', 0, 100) &&
+             isValidOptionalString('needDate', 0, 50) &&
+             isValidOptionalString('issueDate', 0, 50) &&
+             isValidOptionalString('specification', 0, 200) &&
+             isValidOptionalString('unit', 0, 50);
+    }
+
     function isValidScheduleAuditLog(data) {
       return hasRequiredFields(['planId', 'action', 'datePlan', 'timestamp', 'authorId']) &&
              data.planId is string &&
@@ -358,6 +372,12 @@ service cloud.firestore {
     match /daily_stocks/{docId} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated();
+    }
+
+    match /insumos_transits/{transitId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidInsumosTransit(request.resource.data);
+      allow delete: if isAuthenticated();
     }
 
     match /production_reports/{reportId} {

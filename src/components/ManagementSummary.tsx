@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { collection, query, orderBy, onSnapshot, doc, setDoc, getDoc, addDoc, where, getDocs } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, setDoc, getDoc, addDoc, deleteDoc, where, getDocs } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { ProductionReport, MonthlySnapshot, AttendanceRecord, ScheduleAuditLog, ProductionPlan } from '../types';
 import { BarChart3, Calendar, Users, Package, Droplets, Info, Edit2, Save, X, UserCircle2, Milk as BottleIcon, Clock, Lock, Unlock, RefreshCw, AlertTriangle, ListChecks, History as HistoryIcon, Trash2 } from 'lucide-react';
@@ -54,6 +54,7 @@ export function ManagementSummary() {
   }, [selectedMonth]);
 
   useEffect(() => {
+    setLoading(true);
     const [year, month] = selectedMonth.split('-');
     
     // We want reports from the selected month. However, because of the "22:00 rule", 
@@ -1207,33 +1208,21 @@ export function ManagementSummary() {
 
   const handleRefreshSnapshot = async () => {
     if (!isAdmin) return;
-    // window.confirm is blocked in iframes, bypassing.
 
     try {
-      // Temporarily clear snapshot to force recalculation
-      const oldSnapshot = snapshot;
-      setSnapshot(null);
-      
-      // Wait for stats to recalculate (it happens on next render)
-      setTimeout(async () => {
-        if (oldSnapshot?.id) {
-          const [year, month] = selectedMonth.split('-');
-          const updatedSnapshot: Omit<MonthlySnapshot, 'id'> = {
-            month,
-            year: parseInt(year),
-            stats, // This will be the recalculated stats
-            configAtTime: config,
-            isClosed: true,
-            createdAt: oldSnapshot.createdAt,
-            updatedAt: new Date().toISOString()
-          };
-          await setDoc(doc(db, 'monthly_snapshots', oldSnapshot.id), updatedSnapshot);
-          setSnapshot({ id: oldSnapshot.id, ...updatedSnapshot } as MonthlySnapshot);
-          alert('Histórico actualizado correctamente.');
-        }
-      }, 500);
+      if (snapshot?.id) {
+        setIsSavingSnapshot(true);
+        // Delete the existing snapshot from Firestore
+        await deleteDoc(doc(db, 'monthly_snapshots', snapshot.id));
+        
+        // Clear local state to force recalculation
+        setSnapshot(null);
+        setIsSavingSnapshot(false);
+        alert('Histórico eliminado. Se recalculará automáticamente según los datos actuales.');
+      }
     } catch (error) {
       console.error("Error refreshing snapshot:", error);
+      setIsSavingSnapshot(false);
     }
   };
 

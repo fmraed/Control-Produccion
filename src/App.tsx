@@ -24,6 +24,7 @@ import {
   Sparkles,
   FlaskConical,
   FileSpreadsheet,
+  ShoppingCart,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Dashboard } from "./components/Dashboard";
@@ -47,6 +48,7 @@ import { GoalFulfillment } from "./components/GoalFulfillment";
 import { StockControl } from "./components/StockControl";
 import { InsumosControlReport } from "./components/InsumosControlReport";
 import { SuppliesProjection } from "./components/SuppliesProjection";
+import { MotorCompras } from "./components/MotorCompras";
 import { PhysicalInventoryReport } from "./components/PhysicalInventoryReport";
 import { HistoricalReport } from "./components/HistoricalReport";
 import { HistoricalImporter } from "./components/HistoricalImporter";
@@ -102,6 +104,7 @@ export default function App() {
     | "stock_control"
     | "insumos_control"
     | "supplies_projection"
+    | "motor_compras"
     | "inventario_excel"
     | "historical_report"
     | "historical_importer"
@@ -195,6 +198,7 @@ export default function App() {
         management_comparison: permissions.viewManagementSummary,
         insumos_control: permissions.viewInsumos,
         supplies_projection: permissions.viewInsumos,
+        motor_compras: permissions.viewInsumos,
         inventario_excel: permissions.viewManagementSummary,
         consolidated: permissions.viewConsolidated,
         waste: permissions.viewWaste,
@@ -1006,6 +1010,21 @@ export default function App() {
                         <Database className="w-4 h-4 text-amber-600" />
                         Proyección de Abastecimiento
                       </button>
+
+                      <button
+                        onClick={() => {
+                          setCurrentView("motor_compras");
+                          setActiveMenu(null);
+                        }}
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                          currentView === "motor_compras"
+                            ? "bg-amber-50 text-amber-700 font-bold"
+                            : "text-gray-600 hover:bg-gray-50"
+                        }`}
+                      >
+                        <ShoppingCart className="w-4 h-4 text-amber-600" />
+                        Motor de Compras
+                      </button>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -1179,6 +1198,7 @@ export default function App() {
         {currentView === "stock_control" && <StockControl />}
         {currentView === "insumos_control" && <InsumosControlReport />}
         {currentView === "supplies_projection" && <SuppliesProjection />}
+        {currentView === "motor_compras" && <MotorCompras />}
         {currentView === "inventario_excel" && <PhysicalInventoryReport />}
         {currentView === "historical_report" && <HistoricalReport />}
         {currentView === "historical_importer" && <HistoricalImporter />}

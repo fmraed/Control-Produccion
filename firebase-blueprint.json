@@ -225,6 +225,24 @@
         "items": { "type": "array" }
       },
       "required": ["id", "fileName", "uploadedAt", "items"]
+    },
+    "InsumosTransit": {
+      "title": "Insumos Transit",
+      "description": "Materials and supplies currently in transit",
+      "type": "object",
+      "properties": {
+        "requisitionNumber": { "type": "string" },
+        "needDate": { "type": "string" },
+        "issueDate": { "type": "string" },
+        "code": { "type": "string" },
+        "description": { "type": "string" },
+        "specification": { "type": "string" },
+        "unit": { "type": "string" },
+        "status": { "type": "string" },
+        "requestedQuantity": { "type": "number" },
+        "arrivedQuantity": { "type": "number" }
+      },
+      "required": ["requisitionNumber", "code", "description", "requestedQuantity", "arrivedQuantity"]
     }
   },
   "firestore": {
@@ -283,6 +301,10 @@
     "energyRecords/{docId}": {
       "schema": { "$ref": "#/entities/MonthlyRealEnergy" },
       "description": "Stores monthly real energy consumption records."
+    },
+    "insumos_transits/{transitId}": {
+      "schema": { "$ref": "#/entities/InsumosTransit" },
+      "description": "Stores materials and supplies currently in transit."
     }
   }
 }
