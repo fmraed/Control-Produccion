@@ -16,6 +16,15 @@ interface InsumosGrouped {
   monthlyReq: Record<string, number>; 
 }
 
+const formatIsoDateStr = (dateStr: string) => {
+  if (!dateStr) return 'S/D';
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  }
+  return dateStr;
+};
+
 export function SuppliesProjection() {
   const { config } = useAppConfig();
   const [goals, setGoals] = useState<MonthlyGoal[]>([]);
@@ -28,6 +37,7 @@ export function SuppliesProjection() {
   const [activeTab, setActiveTab] = useState<'proyeccion' | 'consumo' | 'quiebre'>('proyeccion');
   const [selectedInsumoName, setSelectedInsumoName] = useState<string | null>(null);
   const [includeTransitGlobally, setIncludeTransitGlobally] = useState<boolean>(true);
+  const [chartScaleMonths, setChartScaleMonths] = useState<number>(3);
   const [quiebreSearchQuery, setQuiebreSearchQuery] = useState<string>('');
   const [sortConfig, setSortConfig] = useState<{ field: string, asc: boolean }>({ field: 'etaDate', asc: true });
   const [sortConfigConsumo, setSortConfigConsumo] = useState<{ field: string, asc: boolean }>({ field: 'name', asc: true });
@@ -327,7 +337,7 @@ export function SuppliesProjection() {
     if (!item) return { dailyData: [], events: [], itemTransits: [] };
     
     const dailyData: { date: Date; dateStr: string; stock: number; consumption: number; events: any[] }[] = [];
-    const events: { type: 'initial' | 'quiebre' | 'transit' | 'recovery'; date: Date; label: string; description: string; amount?: number; transitRef?: any }[] = [];
+    const events: { type: 'initial' | 'quiebre' | 'transit' | 'recovery'; date: Date; label: string; description: string; amount?: number; transitRef?: any; isOverdue?: boolean; originalNeedDate?: string }[] = [];
     
     const now = new Date();
     let currentStock = item.initialStock || 0;
@@ -339,6 +349,10 @@ export function SuppliesProjection() {
       description: `Inicia con un stock de ${Math.round(currentStock).toLocaleString('es-AR')} unidades`,
       amount: currentStock
     });
+
+    const todayStr = format(now, 'yyyy-MM-dd');
+    const adjustedTransitDate = addDays(now, 5);
+    const adjustedTransitDateStr = format(adjustedTransitDate, 'yyyy-MM-dd');
 
     // Match transits
     const itemTransits = transits.filter(t => {
@@ -355,12 +369,20 @@ export function SuppliesProjection() {
         match = true;
       }
       return match;
-    }).map(t => ({
-      ...t,
-      qty: (Number(t.requestedQuantity) || 0) - (Number(t.arrivedQuantity) || 0)
-    })).sort((a, b) => {
-      const dateA = a.needDate ? new Date(a.needDate).getTime() : 0;
-      const dateB = b.needDate ? new Date(b.needDate).getTime() : 0;
+    }).map(t => {
+      const qty = (Number(t.requestedQuantity) || 0) - (Number(t.arrivedQuantity) || 0);
+      const isOverdue = t.needDate ? (t.needDate < todayStr) : false;
+      const simulatedNeedDate = isOverdue ? adjustedTransitDateStr : (t.needDate || todayStr);
+      return {
+        ...t,
+        qty,
+        isOverdue,
+        originalNeedDate: t.needDate,
+        simulatedNeedDate
+      };
+    }).sort((a, b) => {
+      const dateA = a.simulatedNeedDate ? new Date(a.simulatedNeedDate).getTime() : 0;
+      const dateB = b.simulatedNeedDate ? new Date(b.simulatedNeedDate).getTime() : 0;
       return dateA - dateB;
     });
 
@@ -383,13 +405,17 @@ export function SuppliesProjection() {
       let transitAdded = 0;
       if (includeTransit) {
         itemTransits.forEach(t => {
-          if (t.needDate === dateStr && t.qty > 0) {
+          if (t.simulatedNeedDate === dateStr && t.qty > 0) {
             transitAdded += t.qty;
             const ev = {
               type: 'transit' as const,
               date: currentDate,
-              label: `Recepción Tránsito`,
-              description: `Ingreso de ${Math.round(t.qty).toLocaleString('es-AR')} un. (Requerimiento ${t.requisitionNumber || 'S/N'})`,
+              isOverdue: t.isOverdue,
+              originalNeedDate: t.originalNeedDate,
+              label: t.isOverdue ? `Tránsito Demorado (Reprogramado)` : `Recepción Tránsito`,
+              description: t.isOverdue 
+                ? `Ingreso de ${Math.round(t.qty).toLocaleString('es-AR')} un. (Vencido original: ${formatIsoDateStr(t.originalNeedDate)}, reprogramado +5 días)`
+                : `Ingreso de ${Math.round(t.qty).toLocaleString('es-AR')} un. (Requerimiento ${t.requisitionNumber || 'S/N'})`,
               amount: t.qty,
               transitRef: t
             };
@@ -467,15 +493,24 @@ export function SuppliesProjection() {
     } else {
       // There are transits!
       transitsList.forEach(t => {
-        if (!t.needDate) return;
-        const transitDate = new Date(t.needDate + 'T12:00:00');
+        if (t.isOverdue) {
+          alerts.push({
+            type: 'warning',
+            message: `Tránsito Vencido (Req: ${t.requisitionNumber || 'S/N'})`,
+            description: `Fecha original planificada: ${formatIsoDateStr(t.originalNeedDate)}. Se simula ingreso demorado en 5 días (${formatIsoDateStr(t.simulatedNeedDate)}).`
+          });
+        }
+
+        const actualNeedDate = t.simulatedNeedDate;
+        if (!actualNeedDate) return;
+        const transitDate = new Date(actualNeedDate + 'T12:00:00');
         
         if (quiebreNoTransit && transitDate > quiebreNoTransit) {
           const diffDays = differenceInDays(transitDate, quiebreNoTransit);
           alerts.push({
             type: 'danger',
             message: `Tránsito tardío (Req: ${t.requisitionNumber || 'S/N'})`,
-            description: `Llega el ${format(transitDate, 'dd/MM/yyyy')}, pero el stock se agota antes, el ${format(quiebreNoTransit, 'dd/MM/yyyy')} (${diffDays} días de quiebre).`
+            description: `Llega el ${formatIsoDateStr(actualNeedDate)}${t.isOverdue ? ' (reprogramado)' : ''}, pero el stock se agota antes, el ${format(quiebreNoTransit, 'dd/MM/yyyy')} (${diffDays} días de quiebre).`
           });
         } else if (quiebreNoTransit) {
           const margin = differenceInDays(quiebreNoTransit, transitDate);
@@ -483,7 +518,7 @@ export function SuppliesProjection() {
             alerts.push({
               type: 'warning',
               message: `Margen crítico (Req: ${t.requisitionNumber || 'S/N'})`,
-              description: `Llega el ${format(transitDate, 'dd/MM/yyyy')}, solo ${margin} días antes del quiebre proyectado (${format(quiebreNoTransit, 'dd/MM/yyyy')}).`
+              description: `Llega el ${formatIsoDateStr(actualNeedDate)}${t.isOverdue ? ' (reprogramado)' : ''}, solo ${margin} días antes del quiebre proyectado (${format(quiebreNoTransit, 'dd/MM/yyyy')}).`
             });
           }
         }
@@ -678,6 +713,12 @@ export function SuppliesProjection() {
 
         const sortedEvents = [...simEvents].sort((a, b) => a.date.getTime() - b.date.getTime());
 
+        const displayedDailyData = dailyData.slice(0, chartScaleMonths * 30 + 1);
+        const maxDate = displayedDailyData[displayedDailyData.length - 1]?.date;
+        const filteredEvents = maxDate 
+          ? sortedEvents.filter(evt => evt.date.getTime() <= maxDate.getTime() + 86400000)
+          : sortedEvents;
+
         return (
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
             {/* Left Column: List of Insumos */}
@@ -770,7 +811,7 @@ export function SuppliesProjection() {
                               </span>
                             )}
                             {hasWarning && (
-                              <span className="p-0.5 rounded text-amber-600" title="Tránsito muy ajustado (margen < 10 días)">
+                              <span className="p-0.5 rounded text-amber-600" title="Tránsito muy ajustado o demorado">
                                 <AlertTriangle className="w-3.5 h-3.5" />
                               </span>
                             )}
@@ -864,17 +905,31 @@ export function SuppliesProjection() {
                   </div>
 
                   <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-                    <div className="flex items-center justify-between mb-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
                       <div className="flex items-center gap-2">
                         <TrendingUp className="w-4 h-4 text-amber-600" />
-                        <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider">Evolución Diaria de Inventario (Proyección a 6 Meses)</h4>
+                        <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider">
+                          Evolución Diaria (Escala: {chartScaleMonths} {chartScaleMonths === 1 ? 'Mes' : 'Meses'})
+                        </h4>
+                      </div>
+                      
+                      <div className="flex bg-gray-100 p-0.5 rounded-lg border border-gray-200">
+                        {([1, 3, 6] as const).map(m => (
+                          <button
+                            key={m}
+                            onClick={() => setChartScaleMonths(m)}
+                            className={`px-3 py-1 rounded-md text-[10px] font-black uppercase tracking-wider transition-all ${chartScaleMonths === m ? 'bg-amber-600 text-white shadow' : 'text-gray-500 hover:text-gray-800'}`}
+                          >
+                            {m} {m === 1 ? 'Mes' : 'Meses'}
+                          </button>
+                        ))}
                       </div>
                     </div>
 
                     <div className="h-[280px] w-full">
                       <ResponsiveContainer width="100%" height="100%">
                         <AreaChart
-                          data={dailyData}
+                          data={displayedDailyData}
                           margin={{ top: 10, right: 10, left: 10, bottom: 0 }}
                         >
                           <defs>
@@ -922,7 +977,7 @@ export function SuppliesProjection() {
                           />
                           <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" strokeWidth={1.5} />
                           
-                          {sortedEvents.map((evt, idx) => {
+                          {filteredEvents.map((evt, idx) => {
                             if (evt.type === 'quiebre') {
                               return (
                                 <ReferenceLine
@@ -938,7 +993,7 @@ export function SuppliesProjection() {
                                 <ReferenceLine
                                   key={`t-${idx}`}
                                   x={format(evt.date, 'yyyy-MM-dd')}
-                                  stroke="#2563eb"
+                                  stroke={evt.isOverdue ? "#f43f5e" : "#2563eb"}
                                   strokeDasharray="3 3"
                                 />
                               );
@@ -953,11 +1008,11 @@ export function SuppliesProjection() {
                   <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
                     <div className="flex items-center gap-2 mb-4">
                       <CalendarDays className="w-4 h-4 text-blue-600" />
-                      <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider">Hitos y Secuencia de Abastecimiento</h4>
+                      <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider">Hitos y Secuencia de Abastecimiento ({chartScaleMonths === 1 ? '1 Mes' : `${chartScaleMonths} Meses`})</h4>
                     </div>
 
                     <div className="relative border-l border-gray-200 ml-3 pl-5 space-y-4">
-                      {sortedEvents.map((evt, idx) => {
+                      {filteredEvents.map((evt, idx) => {
                         let iconBg = 'bg-gray-100 text-gray-600';
                         let titleColor = 'text-gray-900';
 
@@ -967,8 +1022,13 @@ export function SuppliesProjection() {
                           iconBg = 'bg-red-100 text-red-700';
                           titleColor = 'text-red-700';
                         } else if (evt.type === 'transit') {
-                          iconBg = 'bg-blue-100 text-blue-700';
-                          titleColor = 'text-blue-700';
+                          if (evt.isOverdue) {
+                            iconBg = 'bg-rose-100 text-rose-700 border border-rose-200';
+                            titleColor = 'text-rose-700';
+                          } else {
+                            iconBg = 'bg-blue-100 text-blue-700';
+                            titleColor = 'text-blue-700';
+                          }
                         } else if (evt.type === 'recovery') {
                           iconBg = 'bg-emerald-100 text-emerald-700';
                           titleColor = 'text-emerald-700';
@@ -979,21 +1039,28 @@ export function SuppliesProjection() {
                             <span className={`absolute -left-[32px] top-1 flex h-6 w-6 items-center justify-center rounded-full border border-white ${iconBg} shadow-sm`}>
                               {evt.type === 'initial' && <Package className="w-3 h-3" />}
                               {evt.type === 'quiebre' && <AlertCircle className="w-3 h-3" />}
-                              {evt.type === 'transit' && <Clock className="w-3 h-3" />}
+                              {evt.type === 'transit' && (
+                                evt.isOverdue ? <AlertTriangle className="w-3 h-3 text-rose-600" /> : <Clock className="w-3 h-3" />
+                              )}
                               {evt.type === 'recovery' && <CheckCircle2 className="w-3 h-3" />}
                             </span>
 
                             <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 bg-slate-50/50 hover:bg-slate-50 transition-colors p-3 rounded-xl border border-gray-100">
-                              <div>
-                                <h5 className={`text-xs font-black ${titleColor} flex items-center gap-1.5`}>
+                              <div className="space-y-1">
+                                <h5 className={`text-xs font-black ${titleColor} flex items-center gap-1.5 flex-wrap`}>
                                   {evt.label}
                                   {evt.amount !== undefined && evt.type === 'transit' && (
                                     <span className="text-[9px] font-black bg-blue-100 text-blue-800 px-1 rounded">
                                       +{Math.round(evt.amount).toLocaleString('es-AR')} un
                                     </span>
                                   )}
+                                  {evt.isOverdue && (
+                                    <span className="text-[9px] font-black bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded border border-rose-200 animate-pulse">
+                                      Demorado (Original: {formatIsoDateStr(evt.originalNeedDate)})
+                                    </span>
+                                  )}
                                 </h5>
-                                <p className="text-[10px] text-gray-600 font-bold mt-1">
+                                <p className="text-[10px] text-gray-600 font-bold">
                                   {evt.description}
                                 </p>
                               </div>
