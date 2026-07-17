@@ -44,6 +44,7 @@ export function MotorCompras() {
   const [refreshing, setRefreshing] = useState(false);
   const [activeMainTab, setActiveMainTab] = useState<'sugerencias' | 'transitos'>('sugerencias');
   const [comprasSubTab, setComprasSubTab] = useState<'Materia Prima y Otros' | 'Preformas' | 'Etiquetas' | 'Envases y Plásticos'>('Materia Prima y Otros');
+  const [projectionDays, setProjectionDays] = useState<number>(60);
 
   // Transits State
   const [transits, setTransits] = useState<InsumosTransit[]>([]);
@@ -122,6 +123,31 @@ export function MotorCompras() {
     const matchFlavor = (p: any) => !p.flavors || p.flavors.length === 0 || p.flavors.includes(sabor);
     return list.find(p => (p.sizes || []).includes(tam) && matchFlavor(p)) || list.find(p => (p.sizes || []).includes(tam));
   }, [config]);
+
+  const getConsumoProyectadoYDiario = useCallback((item: InsumosGrouped) => {
+    let remainingDays = projectionDays;
+    let totalReq = 0;
+    
+    for (let i = 0; i < planningMonths.length && remainingDays > 0; i++) {
+      const monthStr = planningMonths[i];
+      const monthReq = item.monthlyReq[monthStr] || 0;
+      
+      const [year, month] = monthStr.split('-').map(Number);
+      const daysInMonth = new Date(year, month, 0).getDate();
+      
+      const daysFromThisMonth = Math.min(daysInMonth, remainingDays);
+      const proportion = daysFromThisMonth / daysInMonth;
+      
+      totalReq += monthReq * proportion;
+      remainingDays -= daysFromThisMonth;
+    }
+    
+    const dailyRate = projectionDays > 0 ? totalReq / projectionDays : 0;
+    return {
+      consumoProyectado: totalReq,
+      consumoDiario: dailyRate
+    };
+  }, [projectionDays, planningMonths]);
 
   // Load Database Data
   const fetchData = useCallback(() => {
@@ -560,9 +586,7 @@ export function MotorCompras() {
       if (comprasSubTab === 'Envases y Plásticos') return ['Termocontraíble', 'Film Stretch', 'Tapas', 'Cabezales Sifón'].includes(item.category);
       return !['Preformas', 'Etiquetas', 'Termocontraíble', 'Film Stretch', 'Tapas', 'Cabezales Sifón'].includes(item.category);
     }).map(item => {
-      const month1 = planningMonths[0] || '';
-      const month2 = planningMonths[1] || '';
-      const consumoProyectado = (item.monthlyReq[month1] || 0) + (item.monthlyReq[month2] || 0);
+      const { consumoProyectado, consumoDiario } = getConsumoProyectadoYDiario(item);
       const stockFisico = item.initialStock;
       
       let mpTransito = 0;
@@ -584,7 +608,6 @@ export function MotorCompras() {
 
       const posicionActual = stockFisico + mpTransito;
       const necesidadTeorica = consumoProyectado - posicionActual;
-      const consumoDiario = consumoProyectado / 60;
       const getSecurityDays = (cat: string) => {
         if (!config?.categorySecurityDays) return 0;
         let targetCat = cat;
@@ -604,7 +627,7 @@ export function MotorCompras() {
       return {
         'Insumo': item.name,
         'Categoría': item.category,
-        'Consumo Proyectado (M1+M2)': Math.round(consumoProyectado),
+        [`Consumo Proyectado (${projectionDays} d)`]: Math.round(consumoProyectado),
         'Stock Físico': Math.round(stockFisico),
         'En Tránsito': Math.round(mpTransito),
         'Posición Actual': Math.round(posicionActual),
@@ -719,13 +742,56 @@ export function MotorCompras() {
             </button>
           </div>
 
+          {/* Controlador de Período de Proyección ajustable */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-amber-50 text-amber-700 rounded-xl">
+                <CalendarDays className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-black text-gray-800">Período de Consumo Proyectado</h4>
+                <p className="text-xs text-gray-500 font-bold">Ajusta los días para proyectar consumo y stock de seguridad.</p>
+              </div>
+            </div>
+            
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex gap-1.5 bg-gray-100 p-1 rounded-xl border border-gray-200">
+                {[30, 45, 60, 90, 120].map(days => (
+                  <button
+                    key={days}
+                    type="button"
+                    onClick={() => setProjectionDays(days)}
+                    className={`px-3 py-1.5 text-xs font-black rounded-lg transition-all ${
+                      projectionDays === days
+                        ? 'bg-amber-600 text-white shadow-sm'
+                        : 'text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    {days} días
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm max-w-[130px]">
+                <input
+                  type="number"
+                  min={1}
+                  max={180}
+                  value={projectionDays}
+                  onChange={e => setProjectionDays(Math.max(1, parseInt(e.target.value) || 0))}
+                  className="w-14 text-right text-xs font-black text-gray-800 focus:outline-none"
+                />
+                <span className="text-xs font-bold text-gray-400">días</span>
+              </div>
+            </div>
+          </div>
+
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm border-collapse">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr className="text-xs font-bold text-gray-500 uppercase tracking-wider">
                     <th className="p-4">Insumo</th>
-                    <th className="p-4 text-right">Consumo Proyectado<br/><span className="text-[10px] text-gray-400 lowercase">(Próximos 60 días)</span></th>
+                    <th className="p-4 text-right">Consumo Proyectado<br/><span className="text-[10px] text-gray-400 lowercase">(Próximos {projectionDays} días)</span></th>
                     <th className="p-4 text-right">Stock Físico</th>
                     <th className="p-4 text-right">En Tránsito</th>
                     <th className="p-4 text-right">Posición Actual<br/><span className="text-[10px] text-gray-400 lowercase">(Físico + Tránsito)</span></th>
@@ -757,9 +823,7 @@ export function MotorCompras() {
                     }
 
                     return filteredProjection.map((item, idx) => {
-                      const month1 = planningMonths[0] || '';
-                      const month2 = planningMonths[1] || '';
-                      const consumoProyectado = (item.monthlyReq[month1] || 0) + (item.monthlyReq[month2] || 0);
+                      const { consumoProyectado, consumoDiario } = getConsumoProyectadoYDiario(item);
                       const stockFisico = item.initialStock;
                       
                       let mpTransito = 0;
@@ -785,7 +849,6 @@ export function MotorCompras() {
                       const posicionActual = stockFisico + mpTransito;
                       const necesidadTeorica = consumoProyectado - posicionActual;
                       
-                      const consumoDiario = consumoProyectado / 60;
                       const getSecurityDays = (cat: string) => {
                         if (!config?.categorySecurityDays) return 0;
                         let targetCat = cat;

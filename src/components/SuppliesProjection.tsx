@@ -6,7 +6,8 @@ import { MonthlyGoal, InsumosTransit } from '../types';
 import { BOTELLAS_POR_PACK, PACKS_POR_PALETA, WASTE_WEIGHTS } from '../constants';
 import { format, parseISO, addMonths, startOfMonth, addDays, differenceInDays } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { TrendingDown, Calendar, Database, FlaskConical, BarChart3, Package, X, Plus, Trash2 } from 'lucide-react';
+import { TrendingDown, Calendar, Database, FlaskConical, BarChart3, Package, X, Plus, Trash2, AlertTriangle, CheckCircle2, Clock, ArrowRight, ChevronRight, CalendarDays, TrendingUp, Info, AlertCircle } from 'lucide-react';
+import { ResponsiveContainer, AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine } from 'recharts';
 
 interface InsumosGrouped {
   name: string;
@@ -24,7 +25,10 @@ export function SuppliesProjection() {
   const [separatedSupplies, setSeparatedSupplies] = useState<Record<string, number>>({});
   const [showSeparatedModal, setShowSeparatedModal] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'proyeccion' | 'consumo'>('proyeccion');
+  const [activeTab, setActiveTab] = useState<'proyeccion' | 'consumo' | 'quiebre'>('proyeccion');
+  const [selectedInsumoName, setSelectedInsumoName] = useState<string | null>(null);
+  const [includeTransitGlobally, setIncludeTransitGlobally] = useState<boolean>(true);
+  const [quiebreSearchQuery, setQuiebreSearchQuery] = useState<string>('');
   const [sortConfig, setSortConfig] = useState<{ field: string, asc: boolean }>({ field: 'etaDate', asc: true });
   const [sortConfigConsumo, setSortConfigConsumo] = useState<{ field: string, asc: boolean }>({ field: 'name', asc: true });
   const [transits, setTransits] = useState<InsumosTransit[]>([]);
@@ -313,11 +317,195 @@ export function SuppliesProjection() {
             }
         }
 
-        return { ...item, initialStock, stockEvolution, stockoutMonthIndex, etaDate };
+        return { ...item, initialStock, stockEvolution, stockoutMonthIndex, etaDate, targetCodes };
     });
 
     return { projection: projectionResults.sort((a,b) => (a.stockoutMonthIndex === -1 ? 1 : b.stockoutMonthIndex === -1 ? -1 : a.stockoutMonthIndex - b.stockoutMonthIndex)), items: items };
   }, [config, goals, planningMonths, stockData, findPreformaForProduct, findTermoForProduct, findStretchForProduct, findTapaForProduct, getPackingCategory, insumoMappings, etiquetasMappings]);
+
+  const getDailySimulation = useCallback((item: any, includeTransit: boolean) => {
+    if (!item) return { dailyData: [], events: [], itemTransits: [] };
+    
+    const dailyData: { date: Date; dateStr: string; stock: number; consumption: number; events: any[] }[] = [];
+    const events: { type: 'initial' | 'quiebre' | 'transit' | 'recovery'; date: Date; label: string; description: string; amount?: number; transitRef?: any }[] = [];
+    
+    const now = new Date();
+    let currentStock = item.initialStock || 0;
+    
+    events.push({
+      type: 'initial',
+      date: now,
+      label: 'Inventario Inicial',
+      description: `Inicia con un stock de ${Math.round(currentStock).toLocaleString('es-AR')} unidades`,
+      amount: currentStock
+    });
+
+    // Match transits
+    const itemTransits = transits.filter(t => {
+      if (!t.status || String(t.status).toLowerCase().includes('recibido') || String(t.status).toLowerCase().includes('completado')) return false;
+      
+      const tCode = String(t.code || '').toLowerCase().trim().replace(/^0+/, '');
+      const tDesc = String(t.description || '').toLowerCase();
+      let match = false;
+      const normalize = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+      
+      if (tCode && item.targetCodes && item.targetCodes.some((c: string) => String(c).replace(/^0+/, '') === tCode)) {
+        match = true;
+      } else if (item.originalNames.some((n: string) => normalize(tDesc).includes(normalize(n)))) {
+        match = true;
+      }
+      return match;
+    }).map(t => ({
+      ...t,
+      qty: (Number(t.requestedQuantity) || 0) - (Number(t.arrivedQuantity) || 0)
+    })).sort((a, b) => {
+      const dateA = a.needDate ? new Date(a.needDate).getTime() : 0;
+      const dateB = b.needDate ? new Date(b.needDate).getTime() : 0;
+      return dateA - dateB;
+    });
+
+    let previouslyNegative = currentStock < 0;
+    
+    // Project for 180 days (6 months)
+    for (let dayOffset = 0; dayOffset <= 180; dayOffset++) {
+      const currentDate = addDays(now, dayOffset);
+      const monthKey = format(currentDate, 'yyyy-MM');
+      const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
+      
+      const monthlyReq = item.monthlyReq[monthKey] || 0;
+      const dailyConsumption = monthlyReq / daysInMonth;
+      
+      currentStock -= dailyConsumption;
+      
+      const dayEvents: any[] = [];
+      const dateStr = format(currentDate, 'yyyy-MM-dd');
+      
+      let transitAdded = 0;
+      if (includeTransit) {
+        itemTransits.forEach(t => {
+          if (t.needDate === dateStr && t.qty > 0) {
+            transitAdded += t.qty;
+            const ev = {
+              type: 'transit' as const,
+              date: currentDate,
+              label: `Recepción Tránsito`,
+              description: `Ingreso de ${Math.round(t.qty).toLocaleString('es-AR')} un. (Requerimiento ${t.requisitionNumber || 'S/N'})`,
+              amount: t.qty,
+              transitRef: t
+            };
+            events.push(ev);
+            dayEvents.push(ev);
+          }
+        });
+        currentStock += transitAdded;
+      }
+      
+      // Stock level threshold triggers
+      if (currentStock < 0 && !previouslyNegative) {
+        const ev = {
+          type: 'quiebre' as const,
+          date: currentDate,
+          label: 'Quiebre de Stock',
+          description: `El inventario se agota. Stock proyectado: ${Math.round(currentStock).toLocaleString('es-AR')}`,
+        };
+        events.push(ev);
+        dayEvents.push(ev);
+        previouslyNegative = true;
+      } else if (currentStock >= 0 && previouslyNegative) {
+        const ev = {
+          type: 'recovery' as const,
+          date: currentDate,
+          label: 'Stock Recuperado',
+          description: `El stock se recupera a ${Math.round(currentStock).toLocaleString('es-AR')} unidades`,
+        };
+        events.push(ev);
+        dayEvents.push(ev);
+        previouslyNegative = false;
+      }
+      
+      dailyData.push({
+        date: currentDate,
+        dateStr,
+        stock: Math.round(currentStock),
+        consumption: dailyConsumption,
+        events: dayEvents
+      });
+    }
+    
+    return { dailyData, events, itemTransits };
+  }, [transits]);
+
+  const getItemAlerts = useCallback((item: any) => {
+    if (!item) return { alerts: [], quiebreNoTransit: null, quiebreWithTransit: null, hasTransits: false, transitCount: 0 };
+    
+    // 1. Simulation without transit
+    const simNoTransit = getDailySimulation(item, false);
+    const quiebreNoTransit = simNoTransit.events.find(e => e.type === 'quiebre')?.date || null;
+    
+    // 2. Simulation with transit
+    const simWithTransit = getDailySimulation(item, true);
+    const quiebreWithTransit = simWithTransit.events.find(e => e.type === 'quiebre')?.date || null;
+    
+    const alerts: { type: 'danger' | 'warning' | 'success'; message: string; description: string }[] = [];
+    
+    const transitsList = simNoTransit.itemTransits;
+    
+    if (transitsList.length === 0) {
+      if (quiebreNoTransit) {
+        alerts.push({
+          type: 'danger',
+          message: 'Quiebre inminente sin tránsitos',
+          description: `El stock se agota el ${format(quiebreNoTransit, "dd 'de' MMMM", { locale: es })} y no hay tránsitos programados.`
+        });
+      } else {
+        alerts.push({
+          type: 'success',
+          message: 'Stock seguro',
+          description: 'El insumo se encuentra abastecido para los próximos 6 meses sin necesidad de tránsitos.'
+        });
+      }
+    } else {
+      // There are transits!
+      transitsList.forEach(t => {
+        if (!t.needDate) return;
+        const transitDate = new Date(t.needDate + 'T12:00:00');
+        
+        if (quiebreNoTransit && transitDate > quiebreNoTransit) {
+          const diffDays = differenceInDays(transitDate, quiebreNoTransit);
+          alerts.push({
+            type: 'danger',
+            message: `Tránsito tardío (Req: ${t.requisitionNumber || 'S/N'})`,
+            description: `Llega el ${format(transitDate, 'dd/MM/yyyy')}, pero el stock se agota antes, el ${format(quiebreNoTransit, 'dd/MM/yyyy')} (${diffDays} días de quiebre).`
+          });
+        } else if (quiebreNoTransit) {
+          const margin = differenceInDays(quiebreNoTransit, transitDate);
+          if (margin < 10) {
+            alerts.push({
+              type: 'warning',
+              message: `Margen crítico (Req: ${t.requisitionNumber || 'S/N'})`,
+              description: `Llega el ${format(transitDate, 'dd/MM/yyyy')}, solo ${margin} días antes del quiebre proyectado (${format(quiebreNoTransit, 'dd/MM/yyyy')}).`
+            });
+          }
+        }
+      });
+      
+      if (quiebreWithTransit) {
+        alerts.push({
+          type: 'danger',
+          message: 'Quiebre persistente',
+          description: `El stock se agota el ${format(quiebreWithTransit, 'dd/MM/yyyy')} a pesar de recibir los tránsitos.`
+        });
+      }
+    }
+    
+    return {
+      alerts,
+      quiebreNoTransit,
+      quiebreWithTransit,
+      hasTransits: transitsList.length > 0,
+      transitCount: transitsList.length
+    };
+  }, [getDailySimulation]);
 
   const handleSort = (field: string) => {
     if (sortConfig.field === field) setSortConfig({ field, asc: !sortConfig.asc });
@@ -378,9 +566,9 @@ export function SuppliesProjection() {
         <h2 className="text-2xl font-black text-gray-900 tracking-tight">Gestión y Proyecciones de Insumos</h2>
         <div className="flex items-center justify-between mt-4">
             <div className="flex gap-2">
-                {(['proyeccion', 'consumo'] as const).map(tab => (
+                {(['proyeccion', 'consumo', 'quiebre'] as const).map(tab => (
                     <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg text-sm font-black uppercase tracking-widest transition-all ${activeTab === tab ? 'bg-amber-600 text-white shadow-lg' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                        {tab === 'proyeccion' ? 'Cobertura' : 'Consumo Mensual'}
+                        {tab === 'proyeccion' ? 'Cobertura' : tab === 'consumo' ? 'Consumo Mensual' : 'Análisis de Quiebre (ETA)'}
                     </button>
                 ))}
             </div>
@@ -393,7 +581,7 @@ export function SuppliesProjection() {
         </div>
       </div>
 
-      {activeTab === 'proyeccion' ? (
+      {activeTab === 'proyeccion' && (
         <div className="space-y-6">
             {Object.keys(combinedData.items.reduce((acc, i) => { if(!acc[i.category]) acc[i.category] = []; acc[i.category].push(i); return acc; }, {} as Record<string, any[]>)).map(cat => (
                 <div key={cat} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
@@ -443,7 +631,9 @@ export function SuppliesProjection() {
                 </div>
             ))}
         </div>
-      ) : (
+      )}
+
+      {activeTab === 'consumo' && (
         <div className="space-y-6">
             {Object.keys(combinedData.items.reduce((acc, i) => { if(!acc[i.category]) acc[i.category] = []; acc[i.category].push(i); return acc; }, {} as Record<string, any[]>)).map(cat => (
                 <div key={cat} className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
@@ -472,6 +662,360 @@ export function SuppliesProjection() {
             ))}
         </div>
       )}
+
+      {activeTab === 'quiebre' && (() => {
+        const insumoList = combinedData.projection;
+        
+        const filteredInsumos = insumoList.filter(item => 
+          item.name.toLowerCase().includes(quiebreSearchQuery.toLowerCase()) ||
+          item.category.toLowerCase().includes(quiebreSearchQuery.toLowerCase())
+        );
+
+        const currentItem = filteredInsumos.find(item => item.name === selectedInsumoName) || filteredInsumos[0];
+        
+        const { dailyData, events: simEvents, itemTransits } = getDailySimulation(currentItem, includeTransitGlobally);
+        const alertsInfo = currentItem ? getItemAlerts(currentItem) : { alerts: [], quiebreNoTransit: null, quiebreWithTransit: null, hasTransits: false, transitCount: 0 };
+
+        const sortedEvents = [...simEvents].sort((a, b) => a.date.getTime() - b.date.getTime());
+
+        return (
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+            {/* Left Column: List of Insumos */}
+            <div className="xl:col-span-5 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-[750px]">
+              <div className="p-4 border-b border-gray-100 bg-gray-50/50 space-y-3">
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={quiebreSearchQuery}
+                    onChange={(e) => setQuiebreSearchQuery(e.target.value)}
+                    placeholder="Buscar insumo o categoría..."
+                    className="w-full pl-9 pr-4 py-2 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white font-bold text-gray-800"
+                  />
+                  <div className="absolute left-3 top-2.5 text-gray-400">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+                  {quiebreSearchQuery && (
+                    <button
+                      onClick={() => setQuiebreSearchQuery('')}
+                      className="absolute right-3 top-2 text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+                
+                <div className="flex items-center justify-between py-1 bg-amber-50/50 rounded-lg px-3 border border-amber-100/60">
+                  <div className="flex items-center gap-2">
+                    <Info className="w-4 h-4 text-amber-700" />
+                    <span className="text-[10px] font-black text-amber-900">Considerar Tránsitos en Simulación:</span>
+                  </div>
+                  <button
+                    onClick={() => setIncludeTransitGlobally(!includeTransitGlobally)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${includeTransitGlobally ? 'bg-amber-600' : 'bg-gray-200'}`}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${includeTransitGlobally ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
+                {filteredInsumos.length === 0 ? (
+                  <div className="p-8 text-center text-gray-500 font-bold">No se encontraron insumos.</div>
+                ) : (
+                  filteredInsumos.map((item) => {
+                    const isSelected = currentItem && item.name === currentItem.name;
+                    const itemAlerts = getItemAlerts(item);
+                    const quiebreDate = includeTransitGlobally ? itemAlerts.quiebreWithTransit : itemAlerts.quiebreNoTransit;
+                    const hasDanger = itemAlerts.alerts.some(a => a.type === 'danger');
+                    const hasWarning = itemAlerts.alerts.some(a => a.type === 'warning');
+
+                    return (
+                      <div
+                        key={item.name}
+                        onClick={() => setSelectedInsumoName(item.name)}
+                        className={`p-4 cursor-pointer transition-all flex items-center justify-between border-l-4 ${isSelected ? 'bg-amber-50/40 border-amber-500' : 'hover:bg-gray-50/50 border-transparent'}`}
+                      >
+                        <div className="space-y-1 min-w-0 pr-2">
+                          <div className="font-black text-xs text-gray-950 truncate">{item.name}</div>
+                          <div className="text-[10px] text-gray-500 font-bold">{item.category}</div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[10px] font-black text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
+                              Stock: {Math.round(item.initialStock).toLocaleString('es-AR')} un
+                            </span>
+                            {itemAlerts.transitCount > 0 && (
+                              <span className="text-[10px] font-black text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
+                                {itemAlerts.transitCount} tránsito{itemAlerts.transitCount > 1 ? 's' : ''}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <div className="flex flex-col items-end shrink-0 gap-1">
+                          {quiebreDate ? (
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${hasDanger ? 'bg-red-100 text-red-800' : 'bg-orange-100 text-orange-800'}`}>
+                              ETA: {format(quiebreDate, 'dd/MM/yy')}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-black text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                              🟢 Abastecido
+                            </span>
+                          )}
+
+                          <div className="flex gap-1">
+                            {hasDanger && (
+                              <span className="p-0.5 rounded text-red-600" title="Tránsito Tardío o Sin Tránsito">
+                                <AlertCircle className="w-3.5 h-3.5" />
+                              </span>
+                            )}
+                            {hasWarning && (
+                              <span className="p-0.5 rounded text-amber-600" title="Tránsito muy ajustado (margen < 10 días)">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                              </span>
+                            )}
+                            {!hasDanger && !hasWarning && (
+                              <span className="p-0.5 rounded text-emerald-600">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Right Column: Insumo Details, Dynamic Chart and Timeline */}
+            <div className="xl:col-span-7 space-y-6">
+              {currentItem ? (
+                <>
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div>
+                        <span className="text-[9px] font-black uppercase tracking-widest text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-100">
+                          {currentItem.category}
+                        </span>
+                        <h3 className="text-lg font-black text-gray-950 mt-2">{currentItem.name}</h3>
+                        <p className="text-xs text-gray-500 font-bold mt-1">Análisis de ETA de quiebre y tránsitos programados a 180 días.</p>
+                      </div>
+                      
+                      <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 flex gap-4 shrink-0">
+                        <div className="text-center">
+                          <span className="text-[9px] text-gray-400 font-black block uppercase">STOCK HOY</span>
+                          <span className="text-sm font-black text-slate-800">{Math.round(currentItem.initialStock).toLocaleString('es-AR')}</span>
+                        </div>
+                        <div className="w-[1px] bg-slate-200"></div>
+                        <div className="text-center">
+                          <span className="text-[9px] text-gray-400 font-black block uppercase">TRÁNSITOS</span>
+                          <span className="text-sm font-black text-blue-700">{alertsInfo.transitCount} un.</span>
+                        </div>
+                        <div className="w-[1px] bg-slate-200"></div>
+                        <div className="text-center">
+                          <span className="text-[9px] text-gray-400 font-black block uppercase">ETA QUIEBRE</span>
+                          {includeTransitGlobally ? (
+                            alertsInfo.quiebreWithTransit ? (
+                              <span className="text-sm font-black text-red-600 block">{format(alertsInfo.quiebreWithTransit, 'dd/MM/yyyy')}</span>
+                            ) : (
+                              <span className="text-sm font-black text-emerald-600 block">Sin Quiebre</span>
+                            )
+                          ) : (
+                            alertsInfo.quiebreNoTransit ? (
+                              <span className="text-sm font-black text-orange-600 block">{format(alertsInfo.quiebreNoTransit, 'dd/MM/yyyy')}</span>
+                            ) : (
+                              <span className="text-sm font-black text-emerald-600 block">Sin Quiebre</span>
+                            )
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {alertsInfo.alerts.length > 0 && (
+                      <div className="mt-5 space-y-2 border-t border-gray-100 pt-4">
+                        <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-wider mb-2">Vulnerabilidades de Abastecimiento:</h4>
+                        {alertsInfo.alerts.map((alert, idx) => (
+                          <div
+                            key={idx}
+                            className={`flex items-start gap-3 p-3 rounded-xl border ${
+                              alert.type === 'danger'
+                                ? 'bg-red-50 border-red-100 text-red-800'
+                                : alert.type === 'warning'
+                                ? 'bg-amber-50 border-amber-100 text-amber-800'
+                                : 'bg-emerald-50 border-emerald-100 text-emerald-800'
+                            }`}
+                          >
+                            {alert.type === 'danger' ? (
+                              <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                            ) : alert.type === 'warning' ? (
+                              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                            ) : (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                            )}
+                            <div>
+                              <p className="text-xs font-black">{alert.message}</p>
+                              <p className="text-[10px] text-gray-600 font-bold mt-0.5">{alert.description}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <TrendingUp className="w-4 h-4 text-amber-600" />
+                        <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider">Evolución Diaria de Inventario (Proyección a 6 Meses)</h4>
+                      </div>
+                    </div>
+
+                    <div className="h-[280px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart
+                          data={dailyData}
+                          margin={{ top: 10, right: 10, left: 10, bottom: 0 }}
+                        >
+                          <defs>
+                            <linearGradient id="colorStock" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#d97706" stopOpacity={0.12}/>
+                              <stop offset="95%" stopColor="#d97706" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis
+                            dataKey="dateStr"
+                            tickFormatter={(tick) => format(parseISO(tick), 'dd MMM', { locale: es })}
+                            stroke="#94a3b8"
+                            fontSize={9}
+                            fontFamily="monospace"
+                          />
+                          <YAxis
+                            stroke="#94a3b8"
+                            fontSize={9}
+                            fontFamily="monospace"
+                            tickFormatter={(tick) => Math.round(tick).toLocaleString('es-AR')}
+                          />
+                          <Tooltip
+                            labelFormatter={(label) => format(parseISO(String(label)), "eeee dd 'de' MMMM, yyyy", { locale: es })}
+                            formatter={(value: any, name: any, props: any) => {
+                              const dayEvts = props.payload.events || [];
+                              const formattedVal = Math.round(Number(value)).toLocaleString('es-AR') + ' un.';
+                              if (dayEvts.length > 0) {
+                                return [
+                                  `${formattedVal} (${dayEvts.map((e: any) => e.label).join(', ')})`,
+                                  'Stock'
+                                ];
+                              }
+                              return [formattedVal, 'Stock Proyectado'];
+                            }}
+                            contentStyle={{ background: '#0f172a', border: 'none', borderRadius: '12px', color: '#f8fafc', fontSize: '10px', fontWeight: 'bold' }}
+                          />
+                          <Area
+                            type="monotone"
+                            dataKey="stock"
+                            stroke="#d97706"
+                            strokeWidth={2.5}
+                            fillOpacity={1}
+                            fill="url(#colorStock)"
+                          />
+                          <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" strokeWidth={1.5} />
+                          
+                          {sortedEvents.map((evt, idx) => {
+                            if (evt.type === 'quiebre') {
+                              return (
+                                <ReferenceLine
+                                  key={`q-${idx}`}
+                                  x={format(evt.date, 'yyyy-MM-dd')}
+                                  stroke="#dc2626"
+                                  strokeDasharray="3 3"
+                                />
+                              );
+                            }
+                            if (evt.type === 'transit') {
+                              return (
+                                <ReferenceLine
+                                  key={`t-${idx}`}
+                                  x={format(evt.date, 'yyyy-MM-dd')}
+                                  stroke="#2563eb"
+                                  strokeDasharray="3 3"
+                                />
+                              );
+                            }
+                            return null;
+                          })}
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+                    <div className="flex items-center gap-2 mb-4">
+                      <CalendarDays className="w-4 h-4 text-blue-600" />
+                      <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider">Hitos y Secuencia de Abastecimiento</h4>
+                    </div>
+
+                    <div className="relative border-l border-gray-200 ml-3 pl-5 space-y-4">
+                      {sortedEvents.map((evt, idx) => {
+                        let iconBg = 'bg-gray-100 text-gray-600';
+                        let titleColor = 'text-gray-900';
+
+                        if (evt.type === 'initial') {
+                          iconBg = 'bg-slate-100 text-slate-700';
+                        } else if (evt.type === 'quiebre') {
+                          iconBg = 'bg-red-100 text-red-700';
+                          titleColor = 'text-red-700';
+                        } else if (evt.type === 'transit') {
+                          iconBg = 'bg-blue-100 text-blue-700';
+                          titleColor = 'text-blue-700';
+                        } else if (evt.type === 'recovery') {
+                          iconBg = 'bg-emerald-100 text-emerald-700';
+                          titleColor = 'text-emerald-700';
+                        }
+
+                        return (
+                          <div key={idx} className="relative">
+                            <span className={`absolute -left-[32px] top-1 flex h-6 w-6 items-center justify-center rounded-full border border-white ${iconBg} shadow-sm`}>
+                              {evt.type === 'initial' && <Package className="w-3 h-3" />}
+                              {evt.type === 'quiebre' && <AlertCircle className="w-3 h-3" />}
+                              {evt.type === 'transit' && <Clock className="w-3 h-3" />}
+                              {evt.type === 'recovery' && <CheckCircle2 className="w-3 h-3" />}
+                            </span>
+
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 bg-slate-50/50 hover:bg-slate-50 transition-colors p-3 rounded-xl border border-gray-100">
+                              <div>
+                                <h5 className={`text-xs font-black ${titleColor} flex items-center gap-1.5`}>
+                                  {evt.label}
+                                  {evt.amount !== undefined && evt.type === 'transit' && (
+                                    <span className="text-[9px] font-black bg-blue-100 text-blue-800 px-1 rounded">
+                                      +{Math.round(evt.amount).toLocaleString('es-AR')} un
+                                    </span>
+                                  )}
+                                </h5>
+                                <p className="text-[10px] text-gray-600 font-bold mt-1">
+                                  {evt.description}
+                                </p>
+                              </div>
+                              <span className="text-[10px] font-mono text-gray-400 bg-white border border-gray-100 px-2 py-0.5 rounded self-start md:self-center font-bold">
+                                {format(evt.date, 'dd MMM yyyy', { locale: es })}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-12 text-center text-gray-500 font-bold">
+                  Seleccione un insumo de la lista para iniciar el análisis.
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {showSeparatedModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
