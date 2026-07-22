@@ -49,6 +49,8 @@ export interface ProductionReport {
   authorId: string;
   authorName?: string;
   origin?: 'manual' | 'historical';
+  esCanjeHoras?: boolean;
+  esRecuperacionHoras?: boolean;
   hourlyProduction: HourlyProduction[];
   downtimes: Downtime[];
   // Desperdicios

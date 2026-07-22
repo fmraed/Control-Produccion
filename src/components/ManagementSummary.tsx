@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { collection, query, orderBy, onSnapshot, doc, setDoc, getDoc, addDoc, deleteDoc, where, getDocs } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, setDoc, getDoc, addDoc, deleteDoc, where, getDocs, updateDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { ProductionReport, MonthlySnapshot, AttendanceRecord, ScheduleAuditLog, ProductionPlan } from '../types';
 import { BarChart3, Calendar, Users, Package, Droplets, Info, Edit2, Save, X, UserCircle2, Milk as BottleIcon, Clock, Lock, Unlock, RefreshCw, AlertTriangle, ListChecks, History as HistoryIcon, Trash2 } from 'lucide-react';
@@ -26,6 +26,51 @@ export function ManagementSummary() {
   const [isSavingSnapshot, setIsSavingSnapshot] = useState(false);
 
   const isAdmin = auth.currentUser?.email === 'fraed.fordrinks@gmail.com';
+
+  const handleToggleCanje = async (dateStr: string, shiftStr: string) => {
+    try {
+      const matchingReports = reports.filter(r => getLogicalDate(r) === dateStr && r.turno === shiftStr);
+      const isCurrentlyCanje = matchingReports.length > 0 
+        ? matchingReports.every(r => r.esCanjeHoras || r.esRecuperacionHoras)
+        : false;
+      const newStatus = !isCurrentlyCanje;
+
+      for (const r of matchingReports) {
+        if (r.id) {
+          await updateDoc(doc(db, 'production_reports', r.id), {
+            esCanjeHoras: newStatus,
+            esRecuperacionHoras: newStatus
+          });
+        }
+      }
+
+      const configRef = doc(db, 'config', 'production');
+      const configSnap = await getDoc(configRef);
+      if (configSnap.exists()) {
+        const configData = configSnap.data();
+        const currentShiftCfg = configData.shiftConfig || {};
+        const currentExchanges: { date: string; shift: string; note?: string }[] = currentShiftCfg.exchangeShifts || [];
+        
+        let updatedExchanges = [...currentExchanges];
+        if (newStatus) {
+          if (!updatedExchanges.some(ex => ex.date === dateStr && (ex.shift === shiftStr || ex.shift === 'Todos'))) {
+            updatedExchanges.push({ date: dateStr, shift: shiftStr, note: 'Marcado desde Tablero Gerencial' });
+          }
+        } else {
+          updatedExchanges = updatedExchanges.filter(ex => !(ex.date === dateStr && (ex.shift === shiftStr || ex.shift === 'Todos')));
+        }
+
+        await setDoc(configRef, {
+          shiftConfig: {
+            ...currentShiftCfg,
+            exchangeShifts: updatedExchanges
+          }
+        }, { merge: true });
+      }
+    } catch (err) {
+      console.error("Error toggling canje de horas:", err);
+    }
+  };
 
   useEffect(() => {
     const fetchSnapshot = async () => {
@@ -566,7 +611,15 @@ export function ManagementSummary() {
           plannedCount = 0;
         }
 
-        const totalActualMinutes = reports.reduce((sum, r) => sum + r.duration, 0);
+        const exchangeShifts = (shiftConfig as any).exchangeShifts || [];
+        const isShiftConfiguredAsExchange = exchangeShifts.some(
+          (ex: any) => ex.date === dayStr && (ex.shift === 'Todos' || ex.shift === shift)
+        );
+
+        const nonCanjeReports = isShiftConfiguredAsExchange 
+          ? [] 
+          : reports.filter(r => !r.esCanjeHoras && !r.esRecuperacionHoras);
+        const totalActualMinutes = nonCanjeReports.reduce((sum, r) => sum + r.duration, 0);
         const totalPlannedMinutes = plannedCount * plannedDuration;
         const extraMinutes = Math.max(0, totalActualMinutes - totalPlannedMinutes);
 
@@ -1879,6 +1932,7 @@ export function ManagementSummary() {
                               <th className="px-3 py-1.5 text-center">Real (m)</th>
                               <th className="px-3 py-1.5 text-right">Extra (hs)</th>
                               <th className="px-3 py-1.5 text-center">Tipo</th>
+                              <th className="px-3 py-1.5 text-center">Acción</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-150">
@@ -1897,6 +1951,16 @@ export function ManagementSummary() {
                                   }`}>
                                     {ex.type === 'Feriado' ? 'H' : (ex.type === 'Finde' ? 'F' : 'C')}
                                   </span>
+                                </td>
+                                <td className="px-3 py-1.5 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleCanje(ex.date, ex.shift)}
+                                    className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 transition-colors cursor-pointer"
+                                    title="Marcar este turno como Canje / Recuperación de Horas para que no compute como Extra"
+                                  >
+                                    Canje
+                                  </button>
                                 </td>
                               </tr>
                             ))}

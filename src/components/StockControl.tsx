@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import { collection, query, where, onSnapshot, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { ProductionReport, MonthlyGoal } from '../types';
-import { format, parseISO, startOfMonth, endOfMonth, subDays, addDays, getDate, getDaysInMonth } from 'date-fns';
+import { format, parseISO, startOfMonth, endOfMonth, subDays, addDays, getDate, getDaysInMonth, startOfDay } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { BarChart3, Database, Search, RefreshCw, AlertCircle, TrendingUp, Package, Clock, AlertTriangle, CheckCircle2, Calendar, Save, Sparkles, Info } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
@@ -1177,14 +1177,10 @@ export function StockControl() {
               {(() => {
                 const chartData = dailyStocksList
                   .filter(item => {
-                    const isGlobal = selectedChartProduct === 'GENERAL_LOCAL' || selectedChartProduct.startsWith('GENERAL_SIZE_');
-                    if (!isGlobal && item.stocks[selectedChartProduct] === undefined) return false;
-                    if (isGlobal && (!item.stocks || Object.keys(item.stocks).length === 0)) return false;
-                    
                     if (selectedChartPeriod === 'all') return true;
                     try {
                       const itemDate = parseISO(item.date);
-                      const cutoffDate = selectedChartPeriod === 'week' ? subDays(new Date(), 7) : subDays(new Date(), 30);
+                      const cutoffDate = startOfDay(selectedChartPeriod === 'week' ? subDays(new Date(), 7) : subDays(new Date(), 30));
                       return itemDate >= cutoffDate;
                     } catch (e) {
                       return true;
@@ -1195,18 +1191,18 @@ export function StockControl() {
                   if (selectedChartProduct === 'GENERAL_LOCAL') {
                      return activeProducts
                         .filter(p => !p.isExternal)
-                        .reduce((sum, p) => sum + (item.stocks[p.key] || 0), 0);
+                        .reduce((sum, p) => sum + Number(item.stocks?.[p.key] || 0), 0);
                   } else if (selectedChartProduct.startsWith('GENERAL_SIZE_')) {
                       const targetSize = parseInt(selectedChartProduct.replace('GENERAL_SIZE_', ''), 10);
                       return activeProducts
                         .filter(p => !p.isExternal && p.tamano === targetSize)
-                        .reduce((sum, p) => sum + (item.stocks[p.key] || 0), 0);
+                        .reduce((sum, p) => sum + Number(item.stocks?.[p.key] || 0), 0);
                   }
-                  return item.stocks[selectedChartProduct] || 0;
+                  return Number(item.stocks?.[selectedChartProduct] || 0);
                 });
                 const maxStock = Math.max(...stocks);
                 const minStock = Math.min(...stocks);
-                const avgStock = stocks.reduce((sum, val) => sum + val, 0) / stocks.length;
+                const avgStock = stocks.reduce((sum, val) => sum + val, 0) / (stocks.length || 1);
                 return (
                   <div className="space-y-3 pt-4 border-t border-slate-100">
                     <span className="text-[10px] font-extrabold uppercase text-slate-400 block tracking-wider">Métricas del Período</span>
@@ -1238,22 +1234,20 @@ export function StockControl() {
               {(() => {
                 const chartData = dailyStocksList
                   .filter(item => {
-                    const isGlobal = selectedChartProduct === 'GENERAL_LOCAL' || selectedChartProduct.startsWith('GENERAL_SIZE_');
-                    if (!isGlobal && item.stocks[selectedChartProduct] === undefined) return false;
-                    if (isGlobal && (!item.stocks || Object.keys(item.stocks).length === 0)) return false;
                     if (selectedChartPeriod === 'all') return true;
                     try {
                       const itemDate = parseISO(item.date);
-                      const cutoffDate = selectedChartPeriod === 'week' ? subDays(new Date(), 7) : subDays(new Date(), 30);
+                      const cutoffDate = startOfDay(selectedChartPeriod === 'week' ? subDays(new Date(), 7) : subDays(new Date(), 30));
                       return itemDate >= cutoffDate;
                     } catch (e) {
                       return true;
                     }
                   })
+                  .sort((a, b) => a.date.localeCompare(b.date))
                   .map(item => {
                     let displayDate = item.date;
                     try {
-                      displayDate = format(parseISO(item.date), 'd/MM');
+                      displayDate = format(parseISO(item.date), 'dd/MM');
                     } catch (e) {
                       // ignore
                     }
@@ -1262,20 +1256,20 @@ export function StockControl() {
                     if (selectedChartProduct === 'GENERAL_LOCAL') {
                       stock = activeProducts
                         .filter(p => !p.isExternal)
-                        .reduce((sum, p) => sum + (item.stocks[p.key] || 0), 0);
+                        .reduce((sum, p) => sum + Number(item.stocks?.[p.key] || 0), 0);
                     } else if (selectedChartProduct.startsWith('GENERAL_SIZE_')) {
                       const targetSize = parseInt(selectedChartProduct.replace('GENERAL_SIZE_', ''), 10);
                       stock = activeProducts
                         .filter(p => !p.isExternal && p.tamano === targetSize)
-                        .reduce((sum, p) => sum + (item.stocks[p.key] || 0), 0);
+                        .reduce((sum, p) => sum + Number(item.stocks?.[p.key] || 0), 0);
                     } else {
-                      stock = item.stocks[selectedChartProduct] || 0;
+                      stock = Number(item.stocks?.[selectedChartProduct] || 0);
                     }
 
                     return {
                       rawDate: item.date,
                       date: displayDate,
-                      stock: stock
+                      stock: isNaN(stock) ? 0 : stock
                     };
                   });
 
@@ -1299,7 +1293,7 @@ export function StockControl() {
                       <div className="bg-slate-900 border border-slate-800 text-white p-3 px-4 rounded-xl shadow-2xl text-xs font-sans">
                         <p className="font-bold text-slate-400 mb-1">{payload[0].payload.rawDate}</p>
                         <p className="font-extrabold text-base">
-                          Stock: <span className="text-cyan-400">{payload[0].value.toLocaleString('es-AR')} un.</span>
+                          Stock: <span className="text-cyan-400">{(payload[0].value ?? 0).toLocaleString('es-AR')} un.</span>
                         </p>
                       </div>
                     );
@@ -1310,7 +1304,7 @@ export function StockControl() {
                 return (
                   <div className="h-96 w-full pr-4 min-w-0 min-h-0">
                     <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                      <LineChart data={chartData} margin={{ top: 20, right: 10, left: -22, bottom: 0 }}>
+                      <LineChart data={chartData} margin={{ top: 20, right: 25, left: -10, bottom: 10 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                         <XAxis 
                           dataKey="date" 
@@ -1324,16 +1318,18 @@ export function StockControl() {
                           axisLine={false}
                           tickLine={false}
                           tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}
-                          dx={-10}
+                          dx={-5}
+                          domain={[0, 'auto']}
                         />
                         <Tooltip content={<CustomTooltip />} />
                         <Line 
                           type="monotone" 
                           dataKey="stock" 
                           stroke="#2563eb" 
-                          strokeWidth={4}
+                          strokeWidth={3.5}
                           dot={{ r: 5, stroke: '#2563eb', strokeWidth: 2, fill: '#fff' }}
                           activeDot={{ r: 7, stroke: '#2563eb', strokeWidth: 3, fill: '#fff' }}
+                          connectNulls={true}
                         />
                       </LineChart>
                     </ResponsiveContainer>

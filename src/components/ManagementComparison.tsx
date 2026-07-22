@@ -390,7 +390,16 @@ export function ManagementComparison() {
             plannedCount = 0;
           }
 
-          const totalActualMinutes = reports.reduce((sum, r) => sum + r.duration, 0);
+          const effShiftCfg = getShiftConfigForDate(dayStr);
+          const exchangeShifts = (effShiftCfg as any)?.exchangeShifts || [];
+          const isShiftConfiguredAsExchange = exchangeShifts.some(
+            (ex: any) => ex.date === dayStr && (ex.shift === 'Todos' || ex.shift === shift)
+          );
+
+          const nonCanjeReports = isShiftConfiguredAsExchange 
+            ? [] 
+            : reports.filter(r => !r.esCanjeHoras && !r.esRecuperacionHoras);
+          const totalActualMinutes = nonCanjeReports.reduce((sum, r) => sum + r.duration, 0);
           const totalPlannedMinutes = plannedCount * plannedDuration;
           const extraMinutes = Math.max(0, totalActualMinutes - totalPlannedMinutes);
 

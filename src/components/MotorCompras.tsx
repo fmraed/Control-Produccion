@@ -82,6 +82,25 @@ export function MotorCompras() {
   }, []);
 
   // Helpers
+  const getCalibreFromInsumoName = useCallback((name: string): number => {
+    if (!name) return 0;
+    const ccMatch = name.match(/(\d+)\s*(?:cc|ml)/i);
+    if (ccMatch) return parseInt(ccMatch[1], 10);
+    const lMatch = name.match(/(\d+(?:\.\d+)?)\s*l\b/i);
+    if (lMatch) {
+      const liters = parseFloat(lMatch[1]);
+      if (liters > 0) return Math.round(liters * 1000);
+    }
+    const parts = name.split(/[\/\s_-]+/);
+    for (const part of parts) {
+      const num = parseInt(part.replace(/\D/g, ''), 10);
+      if (!isNaN(num) && (num === 250 || num === 500 || num === 600 || num === 1000 || num === 1250 || num === 1500 || num === 1750 || num === 2000 || num === 2250 || num === 3000)) {
+        return num;
+      }
+    }
+    return 0;
+  }, []);
+
   const getPackingCategory = useCallback((insumoName: string) => {
     if (config?.insumosCategories?.[insumoName]) {
       return config.insumosCategories[insumoName];
@@ -585,6 +604,13 @@ export function MotorCompras() {
       if (comprasSubTab === 'Etiquetas') return item.category === 'Etiquetas';
       if (comprasSubTab === 'Envases y Plásticos') return ['Termocontraíble', 'Film Stretch', 'Tapas', 'Cabezales Sifón'].includes(item.category);
       return !['Preformas', 'Etiquetas', 'Termocontraíble', 'Film Stretch', 'Tapas', 'Cabezales Sifón'].includes(item.category);
+    }).sort((a, b) => {
+      if (comprasSubTab === 'Etiquetas') {
+        const calA = getCalibreFromInsumoName(a.name);
+        const calB = getCalibreFromInsumoName(b.name);
+        if (calA !== calB) return calB - calA;
+      }
+      return a.name.localeCompare(b.name);
     }).map(item => {
       const { consumoProyectado, consumoDiario } = getConsumoProyectadoYDiario(item);
       const stockFisico = item.initialStock;
@@ -623,10 +649,12 @@ export function MotorCompras() {
       const lotSize = Number(lotConf.size) || 1;
       const lotes = Math.ceil(necesidadReal / lotSize);
       const totalComprar = lotes * lotSize;
+      const cal = getCalibreFromInsumoName(item.name);
 
       return {
         'Insumo': item.name,
         'Categoría': item.category,
+        ...(comprasSubTab === 'Etiquetas' ? { 'Calibre': cal > 0 ? `${cal} cc` : 'Sin Calibre' } : {}),
         [`Consumo Proyectado (${projectionDays} d)`]: Math.round(consumoProyectado),
         'Stock Físico': Math.round(stockFisico),
         'En Tránsito': Math.round(mpTransito),
@@ -822,7 +850,7 @@ export function MotorCompras() {
                       );
                     }
 
-                    return filteredProjection.map((item, idx) => {
+                    const renderItemRow = (item: typeof filteredProjection[0], keyStr: string) => {
                       const { consumoProyectado, consumoDiario } = getConsumoProyectadoYDiario(item);
                       const stockFisico = item.initialStock;
                       
@@ -868,7 +896,7 @@ export function MotorCompras() {
                       const totalComprar = lotes * lotSize;
                       
                       return (
-                        <tr key={idx} className="hover:bg-gray-50/80 transition-colors">
+                        <tr key={keyStr} className="hover:bg-gray-50/80 transition-colors">
                           <td className="p-4 font-bold text-gray-800">{item.name}</td>
                           <td className="p-4 text-right font-mono text-gray-600">{Math.round(consumoProyectado).toLocaleString('es-AR')}</td>
                           <td className="p-4 text-right font-mono text-gray-600">{Math.round(stockFisico).toLocaleString('es-AR')}</td>
@@ -898,6 +926,129 @@ export function MotorCompras() {
                           </td>
                         </tr>
                       );
+                    };
+
+                    if (comprasSubTab === 'Etiquetas') {
+                      const groupedByCalibre: Record<number, typeof filteredProjection> = {};
+                      filteredProjection.forEach(item => {
+                        const cal = getCalibreFromInsumoName(item.name);
+                        if (!groupedByCalibre[cal]) groupedByCalibre[cal] = [];
+                        groupedByCalibre[cal].push(item);
+                      });
+
+                      const sortedCalibres = Object.keys(groupedByCalibre)
+                        .map(Number)
+                        .sort((a, b) => b - a); // Order from mayor to menor (e.g. 3000 -> 2250 -> 1500 -> 500 -> 0)
+
+                      return sortedCalibres.flatMap(cal => {
+                        const itemsInCalibre = groupedByCalibre[cal].sort((a, b) => a.name.localeCompare(b.name));
+                        return [
+                          <tr key={`group-calibre-${cal}`} className="bg-indigo-50/90 border-y-2 border-indigo-200">
+                            <td colSpan={10} className="px-4 py-2.5 font-black text-indigo-950 text-xs uppercase tracking-wider bg-indigo-100/70">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 shadow-sm"></span>
+                                <span>Calibre {cal > 0 ? `${cal} cc` : 'Sin Calibre / Genéricos'}</span>
+                                <span className="text-[10px] text-indigo-700 font-bold bg-indigo-200/80 px-2 py-0.5 rounded-full ml-1">
+                                  {itemsInCalibre.length} {itemsInCalibre.length === 1 ? 'insumo' : 'insumos'}
+                                </span>
+                              </div>
+                            </td>
+                          </tr>,
+                          ...itemsInCalibre.map((item, i) => renderItemRow(item, `etiqueta-${cal}-${i}`))
+                        ];
+                      });
+                    }
+
+                    if (comprasSubTab === 'Envases y Plásticos') {
+                      const tapasItems: typeof filteredProjection = [];
+                      const plasticosItems: typeof filteredProjection = [];
+
+                      filteredProjection.forEach(item => {
+                        const cat = item.category || '';
+                        if (cat === 'Tapas' || cat === 'Cabezales Sifón' || cat.toLowerCase().includes('tapa') || item.name.toLowerCase().includes('tapa')) {
+                          tapasItems.push(item);
+                        } else {
+                          plasticosItems.push(item);
+                        }
+                      });
+
+                      tapasItems.sort((a, b) => a.name.localeCompare(b.name));
+                      plasticosItems.sort((a, b) => a.name.localeCompare(b.name));
+
+                      const rows: React.ReactNode[] = [];
+
+                      if (tapasItems.length > 0) {
+                        rows.push(
+                          <tr key="group-tapas" className="bg-amber-50/90 border-y-2 border-amber-200">
+                            <td colSpan={10} className="px-4 py-2.5 font-black text-amber-950 text-xs uppercase tracking-wider bg-amber-100/70">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-amber-600 shadow-sm"></span>
+                                <span>Tapas y Cabezales</span>
+                                <span className="text-[10px] text-amber-800 font-bold bg-amber-200/80 px-2 py-0.5 rounded-full ml-1">
+                                  {tapasItems.length} {tapasItems.length === 1 ? 'insumo' : 'insumos'}
+                                </span>
+                              </div>
+                            </td>
+                          </tr>,
+                          ...tapasItems.map((item, i) => renderItemRow(item, `tapa-${i}`))
+                        );
+                      }
+
+                      if (plasticosItems.length > 0) {
+                        rows.push(
+                          <tr key="group-plasticos" className="bg-emerald-50/90 border-y-2 border-emerald-200">
+                            <td colSpan={10} className="px-4 py-2.5 font-black text-emerald-950 text-xs uppercase tracking-wider bg-emerald-100/70">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 shadow-sm"></span>
+                                <span>Plásticos y Films (Termocontraíble / Stretch)</span>
+                                <span className="text-[10px] text-emerald-800 font-bold bg-emerald-200/80 px-2 py-0.5 rounded-full ml-1">
+                                  {plasticosItems.length} {plasticosItems.length === 1 ? 'insumo' : 'insumos'}
+                                </span>
+                              </div>
+                            </td>
+                          </tr>,
+                          ...plasticosItems.map((item, i) => renderItemRow(item, `plastico-${i}`))
+                        );
+                      }
+
+                      return rows;
+                    }
+
+                    // Materia Prima y Otros (grouped by category)
+                    const groupedByCategory: Record<string, typeof filteredProjection> = {};
+                    filteredProjection.forEach(item => {
+                      const cat = item.category || 'Otros Insumos';
+                      if (!groupedByCategory[cat]) groupedByCategory[cat] = [];
+                      groupedByCategory[cat].push(item);
+                    });
+
+                    const categoryOrder = config?.insumosCategoriesOrder || [];
+
+                    const sortedCategories = Object.keys(groupedByCategory).sort((a, b) => {
+                      const indexA = categoryOrder.indexOf(a);
+                      const indexB = categoryOrder.indexOf(b);
+                      if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+                      if (indexA !== -1) return -1;
+                      if (indexB !== -1) return 1;
+                      return a.localeCompare(b);
+                    });
+
+                    return sortedCategories.flatMap(cat => {
+                      const itemsInCat = groupedByCategory[cat].sort((a, b) => a.name.localeCompare(b.name));
+                      return [
+                        <tr key={`group-mp-cat-${cat}`} className="bg-sky-50/90 border-y-2 border-sky-200">
+                          <td colSpan={10} className="px-4 py-2.5 font-black text-sky-950 text-xs uppercase tracking-wider bg-sky-100/70">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-sky-600 shadow-sm"></span>
+                              <span>Categoría: {cat}</span>
+                              <span className="text-[10px] text-sky-800 font-bold bg-sky-200/80 px-2 py-0.5 rounded-full ml-1">
+                                {itemsInCat.length} {itemsInCat.length === 1 ? 'insumo' : 'insumos'}
+                              </span>
+                            </div>
+                          </td>
+                        </tr>,
+                        ...itemsInCat.map((item, i) => renderItemRow(item, `mp-cat-${cat}-${i}`))
+                      ];
                     });
                   })()}
                 </tbody>

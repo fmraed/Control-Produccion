@@ -42,6 +42,8 @@ export function SuppliesProjection() {
   const [sortConfig, setSortConfig] = useState<{ field: string, asc: boolean }>({ field: 'etaDate', asc: true });
   const [sortConfigConsumo, setSortConfigConsumo] = useState<{ field: string, asc: boolean }>({ field: 'name', asc: true });
   const [transits, setTransits] = useState<InsumosTransit[]>([]);
+  const [excludeJuiceAndSugar, setExcludeJuiceAndSugar] = useState<boolean>(true);
+  const [overdueDelayDays, setOverdueDelayDays] = useState<number>(5);
 
   const planningMonths = useMemo(() => {
     const list = [];
@@ -211,9 +213,15 @@ export function SuppliesProjection() {
         });
     });
 
-    const items = Object.values(finalItems).filter(item => 
-        Object.values(item.monthlyReq).some(val => val > 0)
-    );
+    const items = Object.values(finalItems).filter(item => {
+        if (excludeJuiceAndSugar) {
+            const lowerName = item.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+            if (lowerName.includes('azucar') || lowerName.includes('jugo')) {
+                return false;
+            }
+        }
+        return Object.values(item.monthlyReq).some(val => val > 0);
+    });
 
     const getMappedCodes = (originalNames: string[]): string[] => {
         let allCodes: string[] = [];
@@ -331,7 +339,7 @@ export function SuppliesProjection() {
     });
 
     return { projection: projectionResults.sort((a,b) => (a.stockoutMonthIndex === -1 ? 1 : b.stockoutMonthIndex === -1 ? -1 : a.stockoutMonthIndex - b.stockoutMonthIndex)), items: items };
-  }, [config, goals, planningMonths, stockData, findPreformaForProduct, findTermoForProduct, findStretchForProduct, findTapaForProduct, getPackingCategory, insumoMappings, etiquetasMappings]);
+  }, [config, goals, planningMonths, stockData, findPreformaForProduct, findTermoForProduct, findStretchForProduct, findTapaForProduct, getPackingCategory, insumoMappings, etiquetasMappings, excludeJuiceAndSugar]);
 
   const getDailySimulation = useCallback((item: any, includeTransit: boolean) => {
     if (!item) return { dailyData: [], events: [], itemTransits: [] };
@@ -351,7 +359,7 @@ export function SuppliesProjection() {
     });
 
     const todayStr = format(now, 'yyyy-MM-dd');
-    const adjustedTransitDate = addDays(now, 5);
+    const adjustedTransitDate = addDays(now, overdueDelayDays);
     const adjustedTransitDateStr = format(adjustedTransitDate, 'yyyy-MM-dd');
 
     // Match transits
@@ -414,7 +422,7 @@ export function SuppliesProjection() {
               originalNeedDate: t.originalNeedDate,
               label: t.isOverdue ? `Tránsito Demorado (Reprogramado)` : `Recepción Tránsito`,
               description: t.isOverdue 
-                ? `Ingreso de ${Math.round(t.qty).toLocaleString('es-AR')} un. (Vencido original: ${formatIsoDateStr(t.originalNeedDate)}, reprogramado +5 días)`
+                ? `Ingreso de ${Math.round(t.qty).toLocaleString('es-AR')} un. (Vencido original: ${formatIsoDateStr(t.originalNeedDate)}, reprogramado +${overdueDelayDays} días)`
                 : `Ingreso de ${Math.round(t.qty).toLocaleString('es-AR')} un. (Requerimiento ${t.requisitionNumber || 'S/N'})`,
               amount: t.qty,
               transitRef: t
@@ -459,7 +467,7 @@ export function SuppliesProjection() {
     }
     
     return { dailyData, events, itemTransits };
-  }, [transits]);
+  }, [transits, overdueDelayDays]);
 
   const getItemAlerts = useCallback((item: any) => {
     if (!item) return { alerts: [], quiebreNoTransit: null, quiebreWithTransit: null, hasTransits: false, transitCount: 0 };
@@ -497,7 +505,7 @@ export function SuppliesProjection() {
           alerts.push({
             type: 'warning',
             message: `Tránsito Vencido (Req: ${t.requisitionNumber || 'S/N'})`,
-            description: `Fecha original planificada: ${formatIsoDateStr(t.originalNeedDate)}. Se simula ingreso demorado en 5 días (${formatIsoDateStr(t.simulatedNeedDate)}).`
+            description: `Fecha original planificada: ${formatIsoDateStr(t.originalNeedDate)}. Se simula ingreso demorado en ${overdueDelayDays} días (${formatIsoDateStr(t.simulatedNeedDate)}).`
           });
         }
 
@@ -540,7 +548,7 @@ export function SuppliesProjection() {
       hasTransits: transitsList.length > 0,
       transitCount: transitsList.length
     };
-  }, [getDailySimulation]);
+  }, [getDailySimulation, overdueDelayDays]);
 
   const handleSort = (field: string) => {
     if (sortConfig.field === field) setSortConfig({ field, asc: !sortConfig.asc });
@@ -598,21 +606,39 @@ export function SuppliesProjection() {
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-        <h2 className="text-2xl font-black text-gray-900 tracking-tight">Gestión y Proyecciones de Insumos</h2>
-        <div className="flex items-center justify-between mt-4">
-            <div className="flex gap-2">
-                {(['proyeccion', 'consumo', 'quiebre'] as const).map(tab => (
-                    <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg text-sm font-black uppercase tracking-widest transition-all ${activeTab === tab ? 'bg-amber-600 text-white shadow-lg' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                        {tab === 'proyeccion' ? 'Cobertura' : tab === 'consumo' ? 'Consumo Mensual' : 'Análisis de Quiebre (ETA)'}
-                    </button>
-                ))}
-            </div>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-black text-gray-900 tracking-tight">Gestión y Proyecciones de Insumos</h2>
+            <p className="text-xs text-gray-500 font-bold mt-1">Análisis de cobertura, requerimientos y simulación de abastecimiento.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
             <button
-                onClick={() => setShowSeparatedModal(true)}
-                className="px-4 py-2 rounded-lg text-sm font-black uppercase tracking-widest bg-red-50 text-red-700 hover:bg-red-100 transition-colors border border-red-200"
+              onClick={() => setExcludeJuiceAndSugar(!excludeJuiceAndSugar)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider border transition-all flex items-center gap-2 ${
+                excludeJuiceAndSugar
+                  ? 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm'
+                  : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
+              }`}
             >
-                Artículos Separados
+              <span className={`w-2 h-2 rounded-full ${excludeJuiceAndSugar ? 'bg-amber-600 animate-pulse' : 'bg-gray-300'}`}></span>
+              Excluir Jugo y Azúcar
             </button>
+
+            <button
+              onClick={() => setShowSeparatedModal(true)}
+              className="px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider bg-red-50 text-red-700 hover:bg-red-100 transition-colors border border-red-200"
+            >
+              Artículos Separados
+            </button>
+          </div>
+        </div>
+
+        <div className="flex gap-2 mt-6">
+            {(['proyeccion', 'consumo', 'quiebre'] as const).map(tab => (
+                <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg text-sm font-black uppercase tracking-widest transition-all ${activeTab === tab ? 'bg-amber-600 text-white shadow-lg' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                    {tab === 'proyeccion' ? 'Cobertura' : tab === 'consumo' ? 'Consumo Mensual' : 'Análisis de Quiebre (ETA)'}
+                </button>
+            ))}
         </div>
       </div>
 
@@ -758,6 +784,47 @@ export function SuppliesProjection() {
                   >
                     <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${includeTransitGlobally ? 'translate-x-6' : 'translate-x-1'}`} />
                   </button>
+                </div>
+
+                <div className="flex flex-col gap-1.5 py-2 bg-rose-50/50 rounded-lg px-3 border border-rose-100/60">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-3.5 h-3.5 text-rose-600" />
+                      <span className="text-[10px] font-black text-rose-900 uppercase tracking-wide">Reprogramación Vencidos:</span>
+                    </div>
+                    <span className="text-[10px] font-black text-rose-700 bg-rose-100/80 px-2 py-0.5 rounded border border-rose-200">
+                      +{overdueDelayDays} {overdueDelayDays === 1 ? 'día' : 'días'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="1"
+                      max="30"
+                      value={overdueDelayDays}
+                      onChange={(e) => setOverdueDelayDays(parseInt(e.target.value))}
+                      className="flex-1 accent-rose-600 h-1 bg-rose-200 rounded-lg cursor-pointer"
+                    />
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => setOverdueDelayDays(prev => Math.max(1, prev - 1))}
+                        disabled={overdueDelayDays <= 1}
+                        className="w-5 h-5 flex items-center justify-center rounded bg-white border border-rose-200 text-rose-700 text-xs font-black disabled:opacity-40 hover:bg-rose-50 transition-colors"
+                      >
+                        -
+                      </button>
+                      <button
+                        onClick={() => setOverdueDelayDays(prev => Math.min(30, prev + 1))}
+                        disabled={overdueDelayDays >= 30}
+                        className="w-5 h-5 flex items-center justify-center rounded bg-white border border-rose-200 text-rose-700 text-xs font-black disabled:opacity-40 hover:bg-rose-50 transition-colors"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-rose-600/80 font-bold leading-tight">
+                    Simula que los ingresos atrasados llegarán dentro de {overdueDelayDays} {overdueDelayDays === 1 ? 'día' : 'días'} a contar desde hoy.
+                  </p>
                 </div>
               </div>
 

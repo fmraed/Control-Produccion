@@ -188,10 +188,10 @@ export function ConsolidatedReport() {
       const isExternal = (config?.externalProducts?.[report.marca]?.[tamano.toString()] || []).includes(report.sabor);
       
       if (tamano && data[key] && data[key][tamano] && !isExternal) {
-        const botellas = report.botellas || 0;
+        const packs = Number(report.paquetes) || 0;
+        const botellas = Number(report.botellas) || 0;
         const botellasPorPack = config?.botellasPorPack?.[tamano] || 1;
-        const packs = Math.floor(botellas / botellasPorPack);
-        const extra = botellas % botellasPorPack;
+        const extra = Math.max(0, botellas - (packs * botellasPorPack));
 
         data[key][tamano].packs += packs;
         data[key][tamano].extraBot += extra;

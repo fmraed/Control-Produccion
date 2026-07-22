@@ -458,6 +458,13 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin, filters, onFilte
                     <Clock className="w-3.5 h-3.5 text-gray-400" />
                     {report.entraTurno} - {report.saleTurno}
                   </div>
+                  {((report.esCanjeHoras || report.esRecuperacionHoras) || 
+                    (config?.shiftConfig?.exchangeShifts || []).some(ex => ex.date === report.fecha && (ex.shift === 'Todos' || ex.shift === report.turno))
+                  ) && (
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200 mt-1">
+                      Canje / Recuperación
+                    </span>
+                  )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="text-sm font-medium text-gray-900">{report.supervisor}</div>
@@ -465,7 +472,7 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin, filters, onFilte
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="text-sm font-semibold text-gray-900">Línea {report.linea}</div>
                   <div className="text-xs text-gray-500 mt-1">
-                    {report.sabor || 'Sin sabor'} {report.tamano ? `${report.tamano}ml` : ''}
+                    {report.marca ? `${report.marca} ` : ''}{report.sabor || 'Sin sabor'} {report.tamano ? `${report.tamano}ml` : ''}
                   </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">

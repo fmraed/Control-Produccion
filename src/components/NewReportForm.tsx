@@ -231,6 +231,8 @@ const reportSchema = z.object({
     contFinal: z.number().min(1, 'Requerido'),
     botRotas: z.number().min(0).optional(),
     co2: z.number().min(0).optional(),
+    esCanjeHoras: z.boolean().optional(),
+    esRecuperacionHoras: z.boolean().optional(),
     observaciones: z.string().optional(),
     parcialAnterior: z.number().min(0).optional(),
     resetParcial: z.boolean().optional(),
@@ -324,6 +326,8 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
       parcialAnterior: 0,
       resetParcial: false,
       ajusteParcial: 0,
+      esCanjeHoras: false,
+      esRecuperacionHoras: false,
       botRotas: 0,
       jarabeInicial: 0,
       contInicial: 0,
@@ -1294,6 +1298,31 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
                     </div>
                   )}
                 />
+                <div className="col-span-2 pt-2 border-t border-gray-100 mt-2">
+                  <Controller
+                    name={`reports.${index}.esCanjeHoras`}
+                    control={control}
+                    render={({ field }) => (
+                      <label className="flex items-start gap-2.5 p-3 bg-amber-50/90 hover:bg-amber-100/70 rounded-xl border border-amber-200/80 cursor-pointer transition-colors shadow-xs">
+                        <input
+                          type="checkbox"
+                          checked={!!field.value}
+                          onChange={(e) => field.onChange(e.target.checked)}
+                          className="mt-0.5 rounded text-amber-600 focus:ring-amber-500 h-4 w-4 border-amber-300"
+                        />
+                        <div className="text-xs">
+                          <span className="font-bold text-amber-900 block flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5 text-amber-600" />
+                            Jornada por Recuperación / Canje de Horas (No es Hora Extra)
+                          </span>
+                          <span className="text-amber-800/80 text-[11px] block mt-0.5">
+                            Marque esta opción si la producción de este turno corresponde a horas/días adeudados o canjeados. El sistema NO las contabilizará como Horas Extras en los tableros.
+                          </span>
+                        </div>
+                      </label>
+                    )}
+                  />
+                </div>
               </div>
             </div>
 

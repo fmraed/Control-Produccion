@@ -1,5 +1,5 @@
 import { useState, useEffect, Fragment, useMemo } from 'react';
-import { collection, query, orderBy, onSnapshot, doc, getDoc, setDoc, addDoc, deleteDoc, getDocs, writeBatch } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, getDoc, setDoc, addDoc, deleteDoc, getDocs, writeBatch, updateDoc, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, CO2_VOLUMES, SABORES_SIN_JARABE, RANGOS_MIXTO, WASTE_WEIGHTS, DEFAULT_INSUMOS, PreformaConfig, TermoConfig, StretchConfig, TapaConfig } from '../constants';
 import { Settings, Save, CheckCircle2, XCircle, AlertCircle, Plus, Trash2, Users, Database, FlaskConical, Link2, Clock, Calendar, ShieldCheck, UserCog, Briefcase, AlertTriangle, Hash, Package, TrendingUp, Scale, ArrowUp, ArrowDown } from 'lucide-react';
@@ -38,6 +38,7 @@ interface AppConfig {
     weeklyPlan: Record<string, Record<string, { count: number, duration: number }>>;
     holidays?: string[];
     holidayNightDuration?: number;
+    exchangeShifts?: { date: string; shift: string; note?: string }[];
     changeDate?: string;
     previousWeeklyPlan?: Record<string, Record<string, { count: number, duration: number }>>;
   };
@@ -141,6 +142,125 @@ export function AdminPanel() {
 
   // Permission states
   const [rolePermissions, setRolePermissions] = useState<Record<UserRole, RolePermissions> | null>(null);
+  
+  // Canje reports state from production_reports
+  const [canjeReports, setCanjeReports] = useState<{ id: string; fecha: string; turno: string; supervisor?: string }[]>([]);
+
+  useEffect(() => {
+    if (activeTab === 'shifts') {
+      const q = query(collection(db, 'production_reports'), where('esCanjeHoras', '==', true));
+      const unsub = onSnapshot(q, (snap) => {
+        const list = snap.docs.map(d => ({
+          id: d.id,
+          fecha: d.data().fecha,
+          turno: d.data().turno,
+          supervisor: d.data().supervisor
+        }));
+        setCanjeReports(list);
+      }, (err) => {
+        console.error("Error loading canje reports in admin:", err);
+      });
+      return () => unsub();
+    }
+  }, [activeTab]);
+
+  const allExchangeShifts = useMemo(() => {
+    const configExchanges = config?.shiftConfig?.exchangeShifts || [];
+    const combined = [...configExchanges];
+
+    canjeReports.forEach(r => {
+      if (!r.fecha || !r.turno) return;
+      const exists = combined.some(ex => ex.date === r.fecha && (ex.shift === r.turno || ex.shift === 'Todos'));
+      if (!exists) {
+        combined.push({
+          date: r.fecha,
+          shift: r.turno,
+          note: `Parte de Producción (${r.supervisor || 'Operador'})`
+        });
+      }
+    });
+
+    return combined.sort((a, b) => b.date.localeCompare(a.date));
+  }, [config?.shiftConfig?.exchangeShifts, canjeReports]);
+
+  const handleAddExchange = async (date: string, shift: string, note: string) => {
+    if (!config || !date) return;
+    const currentExchanges = config.shiftConfig?.exchangeShifts || [];
+    const exists = currentExchanges.some(ex => ex.date === date && ex.shift === shift);
+    if (!exists) {
+      const updatedExchanges = [...currentExchanges, { date, shift, note }].sort((a, b) => b.date.localeCompare(a.date));
+      const newConfig = {
+        ...config,
+        shiftConfig: {
+          ...config.shiftConfig!,
+          exchangeShifts: updatedExchanges
+        }
+      };
+      setConfig(newConfig);
+
+      try {
+        await setDoc(doc(db, 'config', 'production'), newConfig, { merge: true });
+      } catch (e) {
+        console.error("Error saving exchange config:", e);
+      }
+
+      try {
+        let q;
+        if (shift === 'Todos') {
+          q = query(collection(db, 'production_reports'), where('fecha', '==', date));
+        } else {
+          q = query(collection(db, 'production_reports'), where('fecha', '==', date), where('turno', '==', shift));
+        }
+        const snap = await getDocs(q);
+        for (const d of snap.docs) {
+          await updateDoc(doc(db, 'production_reports', d.id), {
+            esCanjeHoras: true,
+            esRecuperacionHoras: true
+          });
+        }
+      } catch (e) {
+        console.error("Error updating matching reports for new exchange:", e);
+      }
+    }
+  };
+
+  const handleDeleteExchange = async (ex: { date: string; shift: string; note?: string }) => {
+    if (!config) return;
+    const currentExchanges = config.shiftConfig?.exchangeShifts || [];
+    const updatedExchanges = currentExchanges.filter(item => !(item.date === ex.date && (item.shift === ex.shift || ex.shift === 'Todos')));
+    const newConfig = {
+      ...config,
+      shiftConfig: {
+        ...config.shiftConfig!,
+        exchangeShifts: updatedExchanges
+      }
+    };
+    setConfig(newConfig);
+
+    try {
+      await setDoc(doc(db, 'config', 'production'), newConfig, { merge: true });
+    } catch (e) {
+      console.error("Error saving exchange config after delete:", e);
+    }
+
+    try {
+      let q;
+      if (ex.shift === 'Todos') {
+        q = query(collection(db, 'production_reports'), where('fecha', '==', ex.date));
+      } else {
+        q = query(collection(db, 'production_reports'), where('fecha', '==', ex.date), where('turno', '==', ex.shift));
+      }
+      const snap = await getDocs(q);
+      for (const d of snap.docs) {
+        await updateDoc(doc(db, 'production_reports', d.id), {
+          esCanjeHoras: false,
+          esRecuperacionHoras: false
+        });
+      }
+    } catch (e) {
+      console.error("Error unsetting matching reports for deleted exchange:", e);
+    }
+  };
   
   // Active product config selection
   const [selectedBrandForTriple, setSelectedBrandForTriple] = useState('');
@@ -268,6 +388,11 @@ export function AdminPanel() {
           shiftConfig.holidays = [];
         }
 
+        // Ensure exchangeShifts exists
+        if (!shiftConfig.exchangeShifts) {
+          shiftConfig.exchangeShifts = [];
+        }
+
         // Ensure holidayNightDuration exists
         if (shiftConfig.holidayNightDuration === undefined) {
           shiftConfig.holidayNightDuration = 360;
@@ -317,6 +442,9 @@ export function AdminPanel() {
           termoConfig: data.termoConfig || [],
           stretchConfig: data.stretchConfig || [],
           tapaConfig: data.tapaConfig || [],
+          categorySecurityDays: data.categorySecurityDays || {},
+          insumosCriticality: data.insumosCriticality || {},
+          insumosPurchaseLots: data.insumosPurchaseLots || {},
           efficiencyExcludedDowntimes: data.efficiencyExcludedDowntimes || ['Sin programa', 'Mantenimiento programado', 'Otras ajenas a linea']
         };
         setConfig(mergedConfig);
@@ -416,7 +544,8 @@ export function AdminPanel() {
                 Noche: { count: 3, duration: 360 } 
               }
             },
-            holidays: []
+            holidays: [],
+            exchangeShifts: []
           },
           saboresSinJarabe: SABORES_SIN_JARABE,
           co2Volumes: CO2_VOLUMES,
@@ -431,6 +560,9 @@ export function AdminPanel() {
           termoConfig: [],
           stretchConfig: [],
           tapaConfig: [],
+          categorySecurityDays: {},
+          insumosCriticality: {},
+          insumosPurchaseLots: {},
           efficiencyExcludedDowntimes: ['Sin programa', 'Mantenimiento programado', 'Otras ajenas a linea']
         };
         setConfig(defaultConfig);
@@ -678,22 +810,24 @@ export function AdminPanel() {
   const handleUpdateInsumoPurchasing = (insumo: string, field: 'criticality' | 'lotSize' | 'lotUnit', value: any) => {
     if (!config) return;
     if (field === 'criticality') {
+      const val = value === '' ? 1 : Number(value);
       setConfig({
         ...config,
         insumosCriticality: {
           ...(config.insumosCriticality || {}),
-          [insumo]: Number(value) || 1
+          [insumo]: isNaN(val) ? 1 : val
         }
       });
     } else {
       const currentLot = config.insumosPurchaseLots?.[insumo] || { size: 1, unit: 'kg' };
+      const parsedSize = field === 'lotSize' ? (value === '' ? 1 : Number(value)) : currentLot.size;
       setConfig({
         ...config,
         insumosPurchaseLots: {
           ...(config.insumosPurchaseLots || {}),
           [insumo]: {
             ...currentLot,
-            [field === 'lotSize' ? 'size' : 'unit']: field === 'lotSize' ? (Number(value) || 1) : value
+            [field === 'lotSize' ? 'size' : 'unit']: field === 'lotSize' ? (isNaN(parsedSize as number) ? 1 : parsedSize) : value
           }
         }
       });
@@ -1696,6 +1830,106 @@ export function AdminPanel() {
                 {(!config.shiftConfig?.holidays || config.shiftConfig.holidays.length === 0) && (
                   <div className="col-span-full py-4 text-center text-gray-400 text-xs italic">
                     No hay feriados configurados.
+                  </div>
+                )}
+              </div>
+            </section>
+
+            {/* Sección Canjes y Recuperación de Horas */}
+            <section className="border-t pt-6 mt-6">
+              <h3 className="text-lg font-bold text-gray-900 mb-2 flex items-center gap-2">
+                <Clock className="w-5 h-5 text-amber-600" />
+                Canjes y Recuperación de Horas (No generan Horas Extras)
+              </h3>
+              <p className="text-sm text-gray-500 mb-4">
+                Agregue los días y turnos donde se hayan trabajado horas de recupero o canje por días/horas adeudados. Los partes o turnos en estas fechas y turnos NO sumarán horas extras en los informes gerenciales ni comparativos.
+              </p>
+              
+              <div className="flex flex-wrap gap-4 items-end mb-6 bg-amber-50/60 p-4 rounded-xl border border-amber-200/70">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Fecha de Canje</label>
+                  <input 
+                    type="date"
+                    id="new-exchange-date"
+                    className="rounded-md border-gray-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 text-sm border p-2 bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Turno Afectado</label>
+                  <select
+                    id="new-exchange-shift"
+                    className="rounded-md border-gray-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 text-sm border p-2 bg-white font-medium"
+                  >
+                    <option value="Todos">Todos los Turnos del día</option>
+                    <option value="Mañana">Turno Mañana</option>
+                    <option value="Tarde">Turno Tarde</option>
+                    <option value="Noche">Turno Noche</option>
+                  </select>
+                </div>
+                <div className="flex-1 min-w-[200px]">
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Motivo / Nota (Opcional)</label>
+                  <input 
+                    type="text"
+                    id="new-exchange-note"
+                    placeholder="Ej: Recupero horas por deudo anterior"
+                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 text-sm border p-2 bg-white"
+                  />
+                </div>
+                <button 
+                  type="button"
+                  onClick={() => {
+                    const dateInput = document.getElementById('new-exchange-date') as HTMLInputElement;
+                    const shiftInput = document.getElementById('new-exchange-shift') as HTMLSelectElement;
+                    const noteInput = document.getElementById('new-exchange-note') as HTMLInputElement;
+                    
+                    const date = dateInput.value;
+                    const shift = shiftInput.value;
+                    const note = noteInput.value.trim();
+
+                    if (date) {
+                      handleAddExchange(date, shift, note);
+                      dateInput.value = '';
+                      noteInput.value = '';
+                    }
+                  }}
+                  className="bg-amber-600 text-white px-4 py-2 rounded-md hover:bg-amber-700 transition-colors flex items-center gap-2 text-sm font-bold cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  Agregar Canje
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                {allExchangeShifts.map((ex, idx) => (
+                  <div key={`${ex.date}_${ex.shift}_${idx}`} className="flex items-center justify-between bg-amber-50/40 border border-amber-200/80 rounded-xl p-3 shadow-2xs group">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-extrabold text-amber-950">
+                          {new Date(ex.date + 'T00:00:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                        </span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-900 uppercase">
+                          {ex.shift}
+                        </span>
+                      </div>
+                      {ex.note && (
+                        <p className="text-[11px] text-amber-800/80 mt-1 italic truncate max-w-[220px]" title={ex.note}>
+                          {ex.note}
+                        </p>
+                      )}
+                    </div>
+                    <button 
+                      type="button"
+                      onClick={() => handleDeleteExchange(ex)}
+                      className="text-amber-400 hover:text-red-600 transition-colors p-1 cursor-pointer"
+                      title="Eliminar canje"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+                {allExchangeShifts.length === 0 && (
+                  <div className="col-span-full py-4 text-center text-gray-400 text-xs italic bg-gray-50/50 rounded-xl border border-dashed border-gray-200">
+                    No hay turnos/días de canje o recuperación registrados.
                   </div>
                 )}
               </div>

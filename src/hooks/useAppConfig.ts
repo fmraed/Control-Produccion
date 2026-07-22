@@ -35,6 +35,7 @@ interface AppConfig {
     weeklyPlan: Record<string, Record<string, { count: number, duration: number }>>;
     holidays?: string[];
     holidayNightDuration?: number;
+    exchangeShifts?: { date: string; shift: string; note?: string }[];
   };
   saboresSinJarabe?: string[];
   co2Volumes?: Record<string, Record<string, number>>;
@@ -67,6 +68,9 @@ interface AppConfig {
   termoConfig?: TermoConfig[];
   stretchConfig?: StretchConfig[];
   tapaConfig?: TapaConfig[];
+  categorySecurityDays?: Record<string, number>;
+  insumosCriticality?: Record<string, number>;
+  insumosPurchaseLots?: Record<string, { size: number; unit: string }>;
   efficiencyExcludedDowntimes: string[];
 }
 
@@ -127,6 +131,9 @@ export function useAppConfig() {
           termoConfig: data.termoConfig || [],
           stretchConfig: data.stretchConfig || [],
           tapaConfig: data.tapaConfig || [],
+          categorySecurityDays: data.categorySecurityDays || {},
+          insumosCriticality: data.insumosCriticality || {},
+          insumosPurchaseLots: data.insumosPurchaseLots || {},
           efficiencyExcludedDowntimes: data.efficiencyExcludedDowntimes || ['Sin programa', 'Mantenimiento programado', 'Otras ajenas a linea'],
           co2Volumes: (() => {
             const defaultVols = { ...CO2_VOLUMES };
