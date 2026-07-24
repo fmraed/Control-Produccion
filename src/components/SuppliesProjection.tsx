@@ -286,7 +286,7 @@ export function SuppliesProjection() {
   }, [config, productionPlans, findPreformaForProduct, findTermoForProduct, findStretchForProduct, findTapaForProduct]);
 
   const combinedData = useMemo(() => {
-    if (!config) return { projection: [], consumption: {} };
+    if (!config) return { projection: [], consumption: {}, items: [] };
 
     const requirementsByMonth: Record<string, Record<string, number>> = {};
     planningMonths.forEach(month => { requirementsByMonth[month] = {}; });
@@ -851,7 +851,7 @@ export function SuppliesProjection() {
 
       {activeTab === 'proyeccion' && (
         <div className="space-y-6">
-            {Object.keys(combinedData.items.reduce((acc, i) => { if(!acc[i.category]) acc[i.category] = []; acc[i.category].push(i); return acc; }, {} as Record<string, any[]>)).map(cat => (
+            {Object.keys((combinedData?.items || []).reduce((acc, i) => { if(!acc[i.category]) acc[i.category] = []; acc[i.category].push(i); return acc; }, {} as Record<string, any[]>)).map(cat => (
                 <div key={cat} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
                     <h3 className="text-lg font-black text-amber-900 p-6 pb-0">{cat}</h3>
                     <table className="w-full text-left">
@@ -903,7 +903,7 @@ export function SuppliesProjection() {
 
       {activeTab === 'consumo' && (
         <div className="space-y-6">
-            {Object.keys(combinedData.items.reduce((acc, i) => { if(!acc[i.category]) acc[i.category] = []; acc[i.category].push(i); return acc; }, {} as Record<string, any[]>)).map(cat => (
+            {Object.keys((combinedData?.items || []).reduce((acc, i) => { if(!acc[i.category]) acc[i.category] = []; acc[i.category].push(i); return acc; }, {} as Record<string, any[]>)).map(cat => (
                 <div key={cat} className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
                     <h3 className="text-lg font-black text-amber-900 mb-4">{cat}</h3>
                     <div className="overflow-x-auto">
@@ -1509,7 +1509,7 @@ export function SuppliesProjection() {
                       className="flex-1 rounded-lg border-gray-300 text-sm font-bold shadow-sm focus:ring-blue-500 focus:border-blue-500 border p-2.5"
                     >
                       <option value="">Seleccionar insumo...</option>
-                      {[...combinedData.items].sort((a, b) => a.name.localeCompare(b.name)).map(i => (
+                      {[...(combinedData?.items || [])].sort((a, b) => a.name.localeCompare(b.name)).map(i => (
                         <option key={i.name} value={i.name}>{i.name}</option>
                       ))}
                     </select>
