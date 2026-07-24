@@ -147,22 +147,24 @@ export function AdminPanel() {
   const [canjeReports, setCanjeReports] = useState<{ id: string; fecha: string; turno: string; supervisor?: string }[]>([]);
 
   useEffect(() => {
-    if (activeTab === 'shifts') {
-      const q = query(collection(db, 'production_reports'), where('esCanjeHoras', '==', true));
-      const unsub = onSnapshot(q, (snap) => {
-        const list = snap.docs.map(d => ({
+    const unsub = onSnapshot(collection(db, 'production_reports'), (snap) => {
+      const list = snap.docs
+        .filter(d => {
+          const data = d.data();
+          return Boolean(data.esCanjeHoras || data.esRecuperacionHoras);
+        })
+        .map(d => ({
           id: d.id,
           fecha: d.data().fecha,
           turno: d.data().turno,
           supervisor: d.data().supervisor
         }));
-        setCanjeReports(list);
-      }, (err) => {
-        console.error("Error loading canje reports in admin:", err);
-      });
-      return () => unsub();
-    }
-  }, [activeTab]);
+      setCanjeReports(list);
+    }, (err) => {
+      console.error("Error loading canje reports in admin:", err);
+    });
+    return () => unsub();
+  }, []);
 
   const allExchangeShifts = useMemo(() => {
     const configExchanges = config?.shiftConfig?.exchangeShifts || [];

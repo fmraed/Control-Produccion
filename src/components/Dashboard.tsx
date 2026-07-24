@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { collection, query, orderBy, limit, getDocs, startAfter, doc, deleteDoc, QueryDocumentSnapshot, where } from 'firebase/firestore';
+import { collection, query, orderBy, limit, getDocs, startAfter, doc, deleteDoc, updateDoc, getDoc, setDoc, QueryDocumentSnapshot, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { ProductionReport } from '../types';
 import { FileText, Calendar, Clock, Activity, AlertCircle, Edit2, Filter, ChevronDown, ChevronUp, Trash2, Settings2, Info, Printer, RefreshCw, Droplets } from 'lucide-react';
@@ -238,6 +238,57 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin, filters, onFilte
     }
   };
 
+  const toggleCanjeReport = async (report: ProductionReport) => {
+    if (!report.id) return;
+    const isCurrentlyCanje = Boolean(report.esCanjeHoras || report.esRecuperacionHoras);
+    const newStatus = !isCurrentlyCanje;
+
+    try {
+      // 1. Update report doc in local state & Firestore
+      await updateDoc(doc(db, 'production_reports', report.id), {
+        esCanjeHoras: newStatus,
+        esRecuperacionHoras: newStatus
+      });
+
+      setReports(prev => prev.map(r => r.id === report.id ? {
+        ...r,
+        esCanjeHoras: newStatus,
+        esRecuperacionHoras: newStatus
+      } : r));
+
+      // 2. Sync with shiftConfig.exchangeShifts in config/production
+      const configRef = doc(db, 'config', 'production');
+      const configSnap = await getDoc(configRef);
+      if (configSnap.exists()) {
+        const configData = configSnap.data();
+        const currentShiftCfg = configData.shiftConfig || {};
+        const currentExchanges: { date: string; shift: string; note?: string }[] = currentShiftCfg.exchangeShifts || [];
+        
+        let updatedExchanges = [...currentExchanges];
+        if (newStatus) {
+          if (!updatedExchanges.some(ex => ex.date === report.fecha && (ex.shift === report.turno || ex.shift === 'Todos'))) {
+            updatedExchanges.push({
+              date: report.fecha,
+              shift: report.turno,
+              note: `Marcado desde Dashboard (${report.supervisor || 'Operador'})`
+            });
+          }
+        } else {
+          updatedExchanges = updatedExchanges.filter(ex => !(ex.date === report.fecha && (ex.shift === report.turno || ex.shift === 'Todos')));
+        }
+
+        await setDoc(configRef, {
+          shiftConfig: {
+            ...currentShiftCfg,
+            exchangeShifts: updatedExchanges
+          }
+        }, { merge: true });
+      }
+    } catch (err: any) {
+      console.error("Error toggling canje in Dashboard:", err);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center py-12">
@@ -461,9 +512,15 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin, filters, onFilte
                   {((report.esCanjeHoras || report.esRecuperacionHoras) || 
                     (config?.shiftConfig?.exchangeShifts || []).some(ex => ex.date === report.fecha && (ex.shift === 'Todos' || ex.shift === report.turno))
                   ) && (
-                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200 mt-1">
+                    <button
+                      type="button"
+                      onClick={() => toggleCanjeReport(report)}
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-200 mt-1 transition-colors cursor-pointer"
+                      title="Haz clic para cambiar el estado de Canje / Recuperación"
+                    >
+                      <Clock className="w-2.5 h-2.5" />
                       Canje / Recuperación
-                    </span>
+                    </button>
                   )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
@@ -544,6 +601,17 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin, filters, onFilte
                       title="Imprimir Parte Interno (Detallado)"
                     >
                       <ClipboardCheck className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => toggleCanjeReport(report)}
+                      className={`p-2 rounded-md transition-colors ${
+                        (report.esCanjeHoras || report.esRecuperacionHoras) 
+                          ? 'bg-amber-500 text-white hover:bg-amber-600' 
+                          : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                      }`}
+                      title={(report.esCanjeHoras || report.esRecuperacionHoras) ? "Marque como Canje (click para desactivar)" : "Marcar como Canje / Recuperación de Horas"}
+                    >
+                      <Clock className="w-4 h-4" />
                     </button>
                     {isEditable && (
                       <button

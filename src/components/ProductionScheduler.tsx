@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
-import { collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, writeBatch, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, writeBatch, serverTimestamp, setDoc, getDocs } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { ProductionPlan, ProductionReport, ScheduleAuditLog } from '../types';
 import { FLAVOR_COLORS, SABORES } from '../constants';
@@ -67,6 +67,124 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
   const [actualReports, setActualReports] = useState<ProductionReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Canje state and handlers
+  const [newExchangeDate, setNewExchangeDate] = useState('');
+  const [newExchangeShift, setNewExchangeShift] = useState('Todos');
+  const [newExchangeNote, setNewExchangeNote] = useState('');
+  const [canjeReports, setCanjeReports] = useState<{ id: string; fecha: string; turno: string; supervisor?: string }[]>([]);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'production_reports'), (snap) => {
+      const list = snap.docs
+        .filter(d => Boolean(d.data().esCanjeHoras || d.data().esRecuperacionHoras))
+        .map(d => ({
+          id: d.id,
+          fecha: d.data().fecha,
+          turno: d.data().turno,
+          supervisor: d.data().supervisor
+        }));
+      setCanjeReports(list);
+    }, (err) => {
+      console.error("Error fetching canjes in ProductionScheduler:", err);
+    });
+    return () => unsub();
+  }, []);
+
+  const allExchangesInScheduler = useMemo(() => {
+    const configExchanges = config?.shiftConfig?.exchangeShifts || [];
+    const combined = [...configExchanges];
+
+    canjeReports.forEach(r => {
+      if (!r.fecha || !r.turno) return;
+      const exists = combined.some(ex => ex.date === r.fecha && (ex.shift === r.turno || ex.shift === 'Todos'));
+      if (!exists) {
+        combined.push({
+          date: r.fecha,
+          shift: r.turno,
+          note: `Parte de Producción (${r.supervisor || 'Operador'})`
+        });
+      }
+    });
+
+    return combined.sort((a, b) => b.date.localeCompare(a.date));
+  }, [config?.shiftConfig?.exchangeShifts, canjeReports]);
+
+  const handleAddExchangeInScheduler = async () => {
+    if (!newExchangeDate) return;
+    const currentExchanges = config?.shiftConfig?.exchangeShifts || [];
+    let updatedExchanges = [...currentExchanges];
+
+    if (!updatedExchanges.some(ex => ex.date === newExchangeDate && (ex.shift === newExchangeShift || ex.shift === 'Todos'))) {
+      updatedExchanges.push({
+        date: newExchangeDate,
+        shift: newExchangeShift,
+        note: newExchangeNote.trim() || 'Cargado desde Turnos'
+      });
+    }
+
+    try {
+      const configRef = doc(db, 'config', 'production');
+      const currentShiftCfg = config?.shiftConfig || {};
+      await setDoc(configRef, {
+        shiftConfig: {
+          ...currentShiftCfg,
+          exchangeShifts: updatedExchanges
+        }
+      }, { merge: true });
+
+      let q;
+      if (newExchangeShift === 'Todos') {
+        q = query(collection(db, 'production_reports'), where('fecha', '==', newExchangeDate));
+      } else {
+        q = query(collection(db, 'production_reports'), where('fecha', '==', newExchangeDate), where('turno', '==', newExchangeShift));
+      }
+      const snap = await getDocs(q);
+      for (const d of snap.docs) {
+        await updateDoc(doc(db, 'production_reports', d.id), {
+          esCanjeHoras: true,
+          esRecuperacionHoras: true
+        });
+      }
+
+      setNewExchangeDate('');
+      setNewExchangeNote('');
+    } catch (err) {
+      console.error("Error adding exchange in scheduler:", err);
+    }
+  };
+
+  const handleDeleteExchangeInScheduler = async (ex: { date: string; shift: string; note?: string }) => {
+    const currentExchanges = config?.shiftConfig?.exchangeShifts || [];
+    const updatedExchanges = currentExchanges.filter(item => !(item.date === ex.date && (item.shift === ex.shift || ex.shift === 'Todos')));
+
+    try {
+      const configRef = doc(db, 'config', 'production');
+      const currentShiftCfg = config?.shiftConfig || {};
+      await setDoc(configRef, {
+        shiftConfig: {
+          ...currentShiftCfg,
+          exchangeShifts: updatedExchanges
+        }
+      }, { merge: true });
+
+      let q;
+      if (ex.shift === 'Todos') {
+        q = query(collection(db, 'production_reports'), where('fecha', '==', ex.date));
+      } else {
+        q = query(collection(db, 'production_reports'), where('fecha', '==', ex.date), where('turno', '==', ex.shift));
+      }
+      const snap = await getDocs(q);
+      for (const d of snap.docs) {
+        await updateDoc(doc(db, 'production_reports', d.id), {
+          esCanjeHoras: false,
+          esRecuperacionHoras: false
+        });
+      }
+    } catch (err) {
+      console.error("Error deleting exchange in scheduler:", err);
+    }
+  };
 
   // Scroll sync refs
   const bottomScrollRef = useRef<HTMLDivElement>(null);
@@ -1020,6 +1138,104 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
               <span className="text-blue-600 font-bold"> Azul 50-99%</span> y <span className="text-green-600 font-bold"> Verde Completo</span>.
             </p>
           </div>
+        </div>
+      </div>
+
+      {/* Sección Carga y Gestión de Canjes / Recuperación de Horas */}
+      <div className="bg-white border border-amber-200/80 rounded-2xl p-6 shadow-xs space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-amber-100 text-amber-800 rounded-xl">
+              <Clock className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-gray-900">Carga de Canjes y Recuperación de Horas</h3>
+              <p className="text-xs text-gray-500">
+                Añada turnos o fechas que correspondan a canje de horas o días adeudados. Los partes cargados en estas fechas y turnos no sumarán horas extras en los informes.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Formulario de Carga */}
+        <div className="flex flex-wrap gap-3 items-end bg-amber-50/60 p-4 rounded-xl border border-amber-200/60">
+          <div>
+            <label className="block text-[11px] font-extrabold text-amber-900 uppercase mb-1">Fecha de Canje</label>
+            <input
+              type="date"
+              value={newExchangeDate}
+              onChange={(e) => setNewExchangeDate(e.target.value)}
+              className="rounded-lg border-amber-200 bg-white text-xs font-medium p-2 border focus:ring-amber-500 focus:border-amber-500 shadow-2xs"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-extrabold text-amber-900 uppercase mb-1">Turno Afectado</label>
+            <select
+              value={newExchangeShift}
+              onChange={(e) => setNewExchangeShift(e.target.value)}
+              className="rounded-lg border-amber-200 bg-white text-xs font-bold p-2 border focus:ring-amber-500 focus:border-amber-500 shadow-2xs"
+            >
+              <option value="Todos">Todos los Turnos del día</option>
+              <option value="Mañana">Turno Mañana</option>
+              <option value="Tarde">Turno Tarde</option>
+              <option value="Noche">Turno Noche</option>
+            </select>
+          </div>
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-[11px] font-extrabold text-amber-900 uppercase mb-1">Motivo / Nota (Opcional)</label>
+            <input
+              type="text"
+              placeholder="Ej: Recuperación de horas deudo anterior"
+              value={newExchangeNote}
+              onChange={(e) => setNewExchangeNote(e.target.value)}
+              className="w-full rounded-lg border-amber-200 bg-white text-xs font-medium p-2 border focus:ring-amber-500 focus:border-amber-500 shadow-2xs"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={handleAddExchangeInScheduler}
+            disabled={!newExchangeDate}
+            className="bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold text-xs px-4 py-2 rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer h-[38px]"
+          >
+            <Plus className="w-4 h-4" />
+            Cargar Canje
+          </button>
+        </div>
+
+        {/* Lista de Canjes */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 pt-2">
+          {allExchangesInScheduler.map((ex, idx) => (
+            <div key={`${ex.date}_${ex.shift}_${idx}`} className="flex items-center justify-between bg-amber-50/70 border border-amber-200/80 rounded-xl p-2.5 shadow-2xs group">
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-extrabold text-amber-950">
+                    {new Date(ex.date + 'T00:00:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                  </span>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-200/90 text-amber-900 uppercase">
+                    {ex.shift}
+                  </span>
+                </div>
+                {ex.note && (
+                  <p className="text-[10px] text-amber-800/80 mt-0.5 italic truncate max-w-[180px]" title={ex.note}>
+                    {ex.note}
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => handleDeleteExchangeInScheduler(ex)}
+                className="text-amber-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-amber-100 transition-colors cursor-pointer"
+                title="Eliminar Canje"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+          {allExchangesInScheduler.length === 0 && (
+            <div className="col-span-full py-3 text-center text-gray-400 text-xs italic">
+              No hay canjes o recuperaciones registradas actualmente.
+            </div>
+          )}
         </div>
       </div>
     </div>

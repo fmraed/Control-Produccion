@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback } from 'react';
 import { collection, query, where, onSnapshot, doc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAppConfig } from '../hooks/useAppConfig';
-import { MonthlyGoal, InsumosTransit } from '../types';
+import { MonthlyGoal, InsumosTransit, ProductionPlan } from '../types';
 import { BOTELLAS_POR_PACK, PACKS_POR_PALETA, WASTE_WEIGHTS } from '../constants';
 import { format, parseISO, addMonths, startOfMonth, addDays, differenceInDays } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -25,6 +25,17 @@ const formatIsoDateStr = (dateStr: string) => {
   return dateStr;
 };
 
+const safeFormatDate = (dateOrStr: Date | string | null | undefined, fmt: string) => {
+  if (!dateOrStr) return null;
+  try {
+    const d = typeof dateOrStr === 'string' ? parseISO(dateOrStr) : dateOrStr;
+    if (!d || isNaN(d.getTime())) return null;
+    return format(d, fmt, { locale: es });
+  } catch {
+    return null;
+  }
+};
+
 export function SuppliesProjection() {
   const { config } = useAppConfig();
   const [goals, setGoals] = useState<MonthlyGoal[]>([]);
@@ -42,6 +53,8 @@ export function SuppliesProjection() {
   const [sortConfig, setSortConfig] = useState<{ field: string, asc: boolean }>({ field: 'etaDate', asc: true });
   const [sortConfigConsumo, setSortConfigConsumo] = useState<{ field: string, asc: boolean }>({ field: 'name', asc: true });
   const [transits, setTransits] = useState<InsumosTransit[]>([]);
+  const [productionPlans, setProductionPlans] = useState<ProductionPlan[]>([]);
+  const [simulationMode, setSimulationMode] = useState<'proyeccion' | 'programa'>('programa');
   const [excludeJuiceAndSugar, setExcludeJuiceAndSugar] = useState<boolean>(true);
   const [overdueDelayDays, setOverdueDelayDays] = useState<number>(5);
 
@@ -128,6 +141,14 @@ export function SuppliesProjection() {
       setTransits(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as InsumosTransit)));
     });
 
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const qPlans = query(collection(db, 'production_plans'), where('date', '>=', todayStr));
+    const unsubPlans = onSnapshot(qPlans, (snap) => {
+      setProductionPlans(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductionPlan)));
+    }, (err) => {
+      console.error('Error fetching production plans for projection:', err);
+    });
+
     fetch('/api/sql/insumosStock')
       .then(res => res.json())
       .then(data => {
@@ -146,8 +167,123 @@ export function SuppliesProjection() {
         setLoading(false);
       });
 
-    return () => { unsubGoals(); unsubInsumos(); unsubEtiquetas(); unsubSeparated(); unsubTransits(); };
+    return () => { unsubGoals(); unsubInsumos(); unsubEtiquetas(); unsubSeparated(); unsubTransits(); unsubPlans(); };
   }, [planningMonths]);
+
+  const programRequirementsByDay = useMemo(() => {
+    if (!config || productionPlans.length === 0) {
+      return { dailyMap: {}, minDateStr: null, maxDateStr: null, programmedDaysCount: 0, programItemDailyAvg: {} };
+    }
+
+    const combinedGroups = [
+      ...(config?.compatibleInsumoGroups ? Object.values(config.compatibleInsumoGroups) : []),
+      ...(config?.compatiblePackagingGroups ? Object.values(config.compatiblePackagingGroups) : [])
+    ] as string[][];
+
+    const getGroupKey = (insumoName: string) => {
+      if (!insumoName) return '';
+      const match = combinedGroups.find(g => g.includes(insumoName));
+      return match ? match.join(' / ') : insumoName;
+    };
+
+    const dailyMap: Record<string, Record<string, number>> = {};
+    let minDateStr: string | null = null;
+    let maxDateStr: string | null = null;
+
+    productionPlans.forEach(plan => {
+      const { date, marca, sabor, tamano, plannedPacks, linea } = plan;
+      if (!date || !plannedPacks || plannedPacks <= 0 || !tamano || !marca || !sabor) return;
+
+      if (!minDateStr || date < minDateStr) minDateStr = date;
+      if (!maxDateStr || date > maxDateStr) maxDateStr = date;
+
+      if (!dailyMap[date]) dailyMap[date] = {};
+      const reqObj = dailyMap[date];
+
+      const botellasPorPack = config?.botellasPorPack?.[tamano] || BOTELLAS_POR_PACK[tamano] || 6;
+      const beverageLiters = plannedPacks * botellasPorPack * (tamano / 1000);
+      const mixRatio = config.co2Volumes?.[marca]?.[sabor] !== undefined && config.co2Volumes?.[marca]?.[sabor] === 0 ? 1 : 5;
+      const syrupLitersNeeded = beverageLiters / mixRatio;
+      const unitsRequired = (config.syrupFormulas?.[marca]?.[sabor]?.liters || 0) > 0 ? (syrupLitersNeeded / config.syrupFormulas?.[marca]?.[sabor]?.liters) : 0;
+
+      Object.keys(config.insumosMatrix?.[marca]?.[sabor] || {}).forEach(insName => {
+        const kgPerUnit = config.insumosMatrix?.[marca]?.[sabor]?.[insName] || 0;
+        if (kgPerUnit > 0) {
+          const gk = getGroupKey(insName);
+          reqObj[gk] = (reqObj[gk] || 0) + (unitsRequired * kgPerUnit);
+        }
+      });
+
+      const preformasNeeded = plannedPacks * botellasPorPack;
+      const termoWeight = config?.wasteWeights?.[tamano.toString()]?.termo ?? WASTE_WEIGHTS[tamano]?.termo ?? 0;
+      const termoNeededKg = plannedPacks * termoWeight;
+      const packsPerPaleta = PACKS_POR_PALETA[tamano] || 80;
+      const stretchNeededKg = (plannedPacks / packsPerPaleta) * 0.4;
+      const tapasNeeded = preformasNeeded;
+
+      const prefName = findPreformaForProduct(tamano, linea?.toString() || '', sabor)?.name;
+      if (prefName) {
+        const gk = getGroupKey(prefName);
+        reqObj[gk] = (reqObj[gk] || 0) + preformasNeeded;
+      }
+
+      const termoName = findTermoForProduct(tamano, sabor)?.name;
+      if (termoName) {
+        const gk = getGroupKey(termoName);
+        reqObj[gk] = (reqObj[gk] || 0) + termoNeededKg;
+      }
+
+      const stretchName = findStretchForProduct(tamano, sabor)?.name;
+      if (stretchName) {
+        const gk = getGroupKey(stretchName);
+        reqObj[gk] = (reqObj[gk] || 0) + stretchNeededKg;
+      }
+
+      const tapaName = findTapaForProduct(tamano, sabor)?.name;
+      if (tapaName) {
+        const gk = getGroupKey(tapaName);
+        reqObj[gk] = (reqObj[gk] || 0) + tapasNeeded;
+      }
+
+      const isExternal = config?.externalProducts?.[marca]?.[tamano.toString()]?.includes(sabor);
+      if (!isExternal) {
+        const etiqName = `Etiqueta ${marca} / ${sabor} / ${tamano}cc`;
+        const gk = getGroupKey(etiqName);
+        reqObj[gk] = (reqObj[gk] || 0) + preformasNeeded;
+      }
+    });
+
+    const now = new Date();
+    const todayStr = format(now, 'yyyy-MM-dd');
+    const startWindow = minDateStr && minDateStr < todayStr ? minDateStr : todayStr;
+    const endWindow = maxDateStr || todayStr;
+    
+    let startD = parseISO(startWindow);
+    let endD = parseISO(endWindow);
+    if (isNaN(startD.getTime())) startD = now;
+    if (isNaN(endD.getTime())) endD = now;
+    const programmedDaysCount = Math.max(1, differenceInDays(endD, startD) + 1);
+
+    const itemTotals: Record<string, number> = {};
+    Object.values(dailyMap).forEach(dayReqs => {
+      Object.entries(dayReqs).forEach(([itemGk, qty]) => {
+        itemTotals[itemGk] = (itemTotals[itemGk] || 0) + qty;
+      });
+    });
+
+    const programItemDailyAvg: Record<string, number> = {};
+    Object.entries(itemTotals).forEach(([itemGk, totalQty]) => {
+      programItemDailyAvg[itemGk] = totalQty / programmedDaysCount;
+    });
+
+    return {
+      dailyMap,
+      minDateStr: startWindow,
+      maxDateStr: endWindow,
+      programmedDaysCount,
+      programItemDailyAvg
+    };
+  }, [config, productionPlans, findPreformaForProduct, findTermoForProduct, findStretchForProduct, findTapaForProduct]);
 
   const combinedData = useMemo(() => {
     if (!config) return { projection: [], consumption: {} };
@@ -316,22 +452,47 @@ export function SuppliesProjection() {
             if (currentStock < 0 && stockoutMonthIndex === -1) stockoutMonthIndex = i;
         });
 
-        let etaDate = null;
-        if (stockoutMonthIndex !== -1) {
-            const m = planningMonths[stockoutMonthIndex];
-            const stockAtStartOfMonth = stockEvolution[stockoutMonthIndex];
-            const consumedInMonth = item.monthlyReq[m] || 1;
-            const daysInMonth = new Date(parseISO(`${m}-01`).getFullYear(), parseISO(`${m}-01`).getMonth() + 1, 0).getDate();
-            const dailyRate = consumedInMonth / daysInMonth;
-            
-            if (m === currentYearMonth) {
-                // Stockout happens in current month, calculate from today
-                const daysToStockout = Math.max(0, stockAtStartOfMonth / dailyRate);
-                etaDate = addDays(now, daysToStockout);
-            } else {
-                // Stockout happens in future month, calculate from start of that month
-                const daysToStockout = Math.max(0, stockAtStartOfMonth / dailyRate);
-                etaDate = addDays(startOfMonth(parseISO(`${m}-01`)), daysToStockout);
+        let etaDate: Date | null = null;
+
+        if (simulationMode === 'programa') {
+            // Compute ETA based on exact Production Plan daily consumption
+            let simStock = initialStock;
+            const { dailyMap, maxDateStr, programItemDailyAvg } = programRequirementsByDay;
+            for (let dayOffset = 0; dayOffset <= 180; dayOffset++) {
+                const currentDate = addDays(now, dayOffset);
+                const dateStr = format(currentDate, 'yyyy-MM-dd');
+                const monthKey = format(currentDate, 'yyyy-MM');
+                const daysInM = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
+                
+                let dailyCons = (item.monthlyReq[monthKey] || 0) / daysInM;
+                if (maxDateStr && dateStr <= maxDateStr) {
+                    dailyCons = dailyMap[dateStr]?.[item.name] || 0;
+                } else if (programItemDailyAvg[item.name] !== undefined && programItemDailyAvg[item.name] > 0) {
+                    dailyCons = programItemDailyAvg[item.name];
+                }
+
+                simStock -= dailyCons;
+                if (simStock < 0) {
+                    etaDate = currentDate;
+                    break;
+                }
+            }
+        } else {
+            // Compute ETA based on monthly projection linear rate
+            if (stockoutMonthIndex !== -1) {
+                const m = planningMonths[stockoutMonthIndex];
+                const stockAtStartOfMonth = stockEvolution[stockoutMonthIndex];
+                const consumedInMonth = item.monthlyReq[m] || 1;
+                const daysInM = new Date(parseISO(`${m}-01`).getFullYear(), parseISO(`${m}-01`).getMonth() + 1, 0).getDate();
+                const dailyRate = consumedInMonth / daysInM;
+                
+                if (m === currentYearMonth) {
+                    const daysToStockout = Math.max(0, stockAtStartOfMonth / dailyRate);
+                    etaDate = addDays(now, daysToStockout);
+                } else {
+                    const daysToStockout = Math.max(0, stockAtStartOfMonth / dailyRate);
+                    etaDate = addDays(startOfMonth(parseISO(`${m}-01`)), daysToStockout);
+                }
             }
         }
 
@@ -339,13 +500,13 @@ export function SuppliesProjection() {
     });
 
     return { projection: projectionResults.sort((a,b) => (a.stockoutMonthIndex === -1 ? 1 : b.stockoutMonthIndex === -1 ? -1 : a.stockoutMonthIndex - b.stockoutMonthIndex)), items: items };
-  }, [config, goals, planningMonths, stockData, findPreformaForProduct, findTermoForProduct, findStretchForProduct, findTapaForProduct, getPackingCategory, insumoMappings, etiquetasMappings, excludeJuiceAndSugar]);
+  }, [config, goals, planningMonths, stockData, findPreformaForProduct, findTermoForProduct, findStretchForProduct, findTapaForProduct, getPackingCategory, insumoMappings, etiquetasMappings, excludeJuiceAndSugar, programRequirementsByDay, simulationMode]);
 
-  const getDailySimulation = useCallback((item: any, includeTransit: boolean) => {
+  const getDailySimulation = useCallback((item: any, includeTransit: boolean, mode: 'proyeccion' | 'programa' = simulationMode) => {
     if (!item) return { dailyData: [], events: [], itemTransits: [] };
     
-    const dailyData: { date: Date; dateStr: string; stock: number; consumption: number; events: any[] }[] = [];
-    const events: { type: 'initial' | 'quiebre' | 'transit' | 'recovery'; date: Date; label: string; description: string; amount?: number; transitRef?: any; isOverdue?: boolean; originalNeedDate?: string }[] = [];
+    const dailyData: { date: Date; dateStr: string; stock: number; consumption: number; events: any[]; isProgrammedPhase?: boolean; isExtrapolatedPhase?: boolean }[] = [];
+    const events: { type: 'initial' | 'quiebre' | 'transit' | 'recovery'; date: Date; label: string; description: string; amount?: number; transitRef?: any; isOverdue?: boolean; originalNeedDate?: string; isProgrammedPhase?: boolean; isExtrapolatedPhase?: boolean }[] = [];
     
     const now = new Date();
     let currentStock = item.initialStock || 0;
@@ -401,14 +562,34 @@ export function SuppliesProjection() {
       const currentDate = addDays(now, dayOffset);
       const monthKey = format(currentDate, 'yyyy-MM');
       const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
+      const dateStr = format(currentDate, 'yyyy-MM-dd');
       
       const monthlyReq = item.monthlyReq[monthKey] || 0;
-      const dailyConsumption = monthlyReq / daysInMonth;
+      const projectionDailyConsumption = monthlyReq / daysInMonth;
+
+      let dailyConsumption = projectionDailyConsumption;
+      let isProgrammedPhase = false;
+      let isExtrapolatedPhase = false;
+
+      if (mode === 'programa') {
+        const { dailyMap, maxDateStr, programItemDailyAvg } = programRequirementsByDay;
+        if (maxDateStr && dateStr <= maxDateStr) {
+          dailyConsumption = dailyMap[dateStr]?.[item.name] || 0;
+          isProgrammedPhase = true;
+        } else {
+          const programAvg = programItemDailyAvg[item.name];
+          if (programAvg !== undefined && programAvg > 0) {
+            dailyConsumption = programAvg;
+            isExtrapolatedPhase = true;
+          } else {
+            dailyConsumption = projectionDailyConsumption;
+          }
+        }
+      }
       
       currentStock -= dailyConsumption;
       
       const dayEvents: any[] = [];
-      const dateStr = format(currentDate, 'yyyy-MM-dd');
       
       let transitAdded = 0;
       if (includeTransit) {
@@ -440,7 +621,13 @@ export function SuppliesProjection() {
           type: 'quiebre' as const,
           date: currentDate,
           label: 'Quiebre de Stock',
-          description: `El inventario se agota. Stock proyectado: ${Math.round(currentStock).toLocaleString('es-AR')}`,
+          description: mode === 'programa'
+            ? (isProgrammedPhase 
+                ? `Stock agotado según lotes programados en Turnero. Stock proyectado: ${Math.round(currentStock).toLocaleString('es-AR')}`
+                : `Stock agotado en fase de extrapolación (Ritmo promedio: ${Math.round(dailyConsumption).toLocaleString('es-AR')} un/día). Stock proyectado: ${Math.round(currentStock).toLocaleString('es-AR')}`)
+            : `El inventario se agota. Stock proyectado: ${Math.round(currentStock).toLocaleString('es-AR')}`,
+          isProgrammedPhase,
+          isExtrapolatedPhase
         };
         events.push(ev);
         dayEvents.push(ev);
@@ -462,34 +649,41 @@ export function SuppliesProjection() {
         dateStr,
         stock: Math.round(currentStock),
         consumption: dailyConsumption,
-        events: dayEvents
+        events: dayEvents,
+        isProgrammedPhase,
+        isExtrapolatedPhase
       });
     }
     
     return { dailyData, events, itemTransits };
-  }, [transits, overdueDelayDays]);
+  }, [transits, overdueDelayDays, programRequirementsByDay, simulationMode]);
 
   const getItemAlerts = useCallback((item: any) => {
-    if (!item) return { alerts: [], quiebreNoTransit: null, quiebreWithTransit: null, hasTransits: false, transitCount: 0 };
+    if (!item) return { alerts: [], quiebreNoTransit: null, quiebreWithTransit: null, hasTransits: false, transitCount: 0, quiebrePhaseNoTransit: null, quiebrePhaseWithTransit: null };
     
     // 1. Simulation without transit
     const simNoTransit = getDailySimulation(item, false);
-    const quiebreNoTransit = simNoTransit.events.find(e => e.type === 'quiebre')?.date || null;
+    const quiebreNoTransitEvt = simNoTransit.events.find(e => e.type === 'quiebre');
+    const quiebreNoTransit = quiebreNoTransitEvt?.date || null;
+    const quiebrePhaseNoTransit = quiebreNoTransitEvt?.isProgrammedPhase ? 'programa' : quiebreNoTransitEvt?.isExtrapolatedPhase ? 'extrapolado' : 'proyeccion';
     
     // 2. Simulation with transit
     const simWithTransit = getDailySimulation(item, true);
-    const quiebreWithTransit = simWithTransit.events.find(e => e.type === 'quiebre')?.date || null;
+    const quiebreWithTransitEvt = simWithTransit.events.find(e => e.type === 'quiebre');
+    const quiebreWithTransit = quiebreWithTransitEvt?.date || null;
+    const quiebrePhaseWithTransit = quiebreWithTransitEvt?.isProgrammedPhase ? 'programa' : quiebreWithTransitEvt?.isExtrapolatedPhase ? 'extrapolado' : 'proyeccion';
     
     const alerts: { type: 'danger' | 'warning' | 'success'; message: string; description: string }[] = [];
     
     const transitsList = simNoTransit.itemTransits;
     
     if (transitsList.length === 0) {
-      if (quiebreNoTransit) {
+      if (quiebreNoTransit && !isNaN(quiebreNoTransit.getTime())) {
+        const qStr = safeFormatDate(quiebreNoTransit, "dd 'de' MMMM") || 'pronto';
         alerts.push({
           type: 'danger',
           message: 'Quiebre inminente sin tránsitos',
-          description: `El stock se agota el ${format(quiebreNoTransit, "dd 'de' MMMM", { locale: es })} y no hay tránsitos programados.`
+          description: `El stock se agota el ${qStr} y no hay tránsitos programados.`
         });
       } else {
         alerts.push({
@@ -511,32 +705,43 @@ export function SuppliesProjection() {
 
         const actualNeedDate = t.simulatedNeedDate;
         if (!actualNeedDate) return;
-        const transitDate = new Date(actualNeedDate + 'T12:00:00');
+        let transitDate: Date | null = null;
+        try {
+          transitDate = typeof actualNeedDate === 'string' ? parseISO(actualNeedDate) : new Date(actualNeedDate);
+          if (isNaN(transitDate.getTime())) transitDate = null;
+        } catch {
+          transitDate = null;
+        }
         
-        if (quiebreNoTransit && transitDate > quiebreNoTransit) {
-          const diffDays = differenceInDays(transitDate, quiebreNoTransit);
-          alerts.push({
-            type: 'danger',
-            message: `Tránsito tardío (Req: ${t.requisitionNumber || 'S/N'})`,
-            description: `Llega el ${formatIsoDateStr(actualNeedDate)}${t.isOverdue ? ' (reprogramado)' : ''}, pero el stock se agota antes, el ${format(quiebreNoTransit, 'dd/MM/yyyy')} (${diffDays} días de quiebre).`
-          });
-        } else if (quiebreNoTransit) {
-          const margin = differenceInDays(quiebreNoTransit, transitDate);
-          if (margin < 10) {
+        if (quiebreNoTransit && !isNaN(quiebreNoTransit.getTime()) && transitDate) {
+          if (transitDate > quiebreNoTransit) {
+            const diffDays = differenceInDays(transitDate, quiebreNoTransit);
+            const qStr = safeFormatDate(quiebreNoTransit, 'dd/MM/yyyy') || '';
             alerts.push({
-              type: 'warning',
-              message: `Margen crítico (Req: ${t.requisitionNumber || 'S/N'})`,
-              description: `Llega el ${formatIsoDateStr(actualNeedDate)}${t.isOverdue ? ' (reprogramado)' : ''}, solo ${margin} días antes del quiebre proyectado (${format(quiebreNoTransit, 'dd/MM/yyyy')}).`
+              type: 'danger',
+              message: `Tránsito tardío (Req: ${t.requisitionNumber || 'S/N'})`,
+              description: `Llega el ${formatIsoDateStr(actualNeedDate)}${t.isOverdue ? ' (reprogramado)' : ''}, pero el stock se agota antes, el ${qStr} (${diffDays} días de quiebre).`
             });
+          } else {
+            const margin = differenceInDays(quiebreNoTransit, transitDate);
+            if (margin < 10) {
+              const qStr = safeFormatDate(quiebreNoTransit, 'dd/MM/yyyy') || '';
+              alerts.push({
+                type: 'warning',
+                message: `Margen crítico (Req: ${t.requisitionNumber || 'S/N'})`,
+                description: `Llega el ${formatIsoDateStr(actualNeedDate)}${t.isOverdue ? ' (reprogramado)' : ''}, solo ${margin} días antes del quiebre proyectado (${qStr}).`
+              });
+            }
           }
         }
       });
       
-      if (quiebreWithTransit) {
+      if (quiebreWithTransit && !isNaN(quiebreWithTransit.getTime())) {
+        const qStr = safeFormatDate(quiebreWithTransit, 'dd/MM/yyyy') || '';
         alerts.push({
           type: 'danger',
           message: 'Quiebre persistente',
-          description: `El stock se agota el ${format(quiebreWithTransit, 'dd/MM/yyyy')} a pesar de recibir los tránsitos.`
+          description: `El stock se agota el ${qStr} a pesar de recibir los tránsitos.`
         });
       }
     }
@@ -546,7 +751,9 @@ export function SuppliesProjection() {
       quiebreNoTransit,
       quiebreWithTransit,
       hasTransits: transitsList.length > 0,
-      transitCount: transitsList.length
+      transitCount: transitsList.length,
+      quiebrePhaseNoTransit,
+      quiebrePhaseWithTransit
     };
   }, [getDailySimulation, overdueDelayDays]);
 
@@ -725,7 +932,7 @@ export function SuppliesProjection() {
       )}
 
       {activeTab === 'quiebre' && (() => {
-        const insumoList = combinedData.projection;
+        const insumoList = combinedData?.projection || [];
         
         const filteredInsumos = insumoList.filter(item => 
           item.name.toLowerCase().includes(quiebreSearchQuery.toLowerCase()) ||
@@ -734,19 +941,105 @@ export function SuppliesProjection() {
 
         const currentItem = filteredInsumos.find(item => item.name === selectedInsumoName) || filteredInsumos[0];
         
-        const { dailyData, events: simEvents, itemTransits } = getDailySimulation(currentItem, includeTransitGlobally);
-        const alertsInfo = currentItem ? getItemAlerts(currentItem) : { alerts: [], quiebreNoTransit: null, quiebreWithTransit: null, hasTransits: false, transitCount: 0 };
+        const { dailyData = [], events: simEvents = [], itemTransits = [] } = getDailySimulation(currentItem, includeTransitGlobally);
+        const alertsInfo = currentItem ? getItemAlerts(currentItem) : { alerts: [], quiebreNoTransit: null, quiebreWithTransit: null, hasTransits: false, transitCount: 0, quiebrePhaseNoTransit: null, quiebrePhaseWithTransit: null };
 
-        const sortedEvents = [...simEvents].sort((a, b) => a.date.getTime() - b.date.getTime());
+        const sortedEvents = [...simEvents].sort((a, b) => {
+          const tA = a?.date && !isNaN(a.date.getTime()) ? a.date.getTime() : 0;
+          const tB = b?.date && !isNaN(b.date.getTime()) ? b.date.getTime() : 0;
+          return tA - tB;
+        });
 
         const displayedDailyData = dailyData.slice(0, chartScaleMonths * 30 + 1);
         const maxDate = displayedDailyData[displayedDailyData.length - 1]?.date;
-        const filteredEvents = maxDate 
-          ? sortedEvents.filter(evt => evt.date.getTime() <= maxDate.getTime() + 86400000)
+        const filteredEvents = (maxDate && !isNaN(maxDate.getTime())) 
+          ? sortedEvents.filter(evt => evt.date && !isNaN(evt.date.getTime()) && evt.date.getTime() <= maxDate.getTime() + 86400000)
           : sortedEvents;
 
+        const maxProgDateFormatted = safeFormatDate(programRequirementsByDay?.maxDateStr, "dd/MM/yyyy");
+
+        const currentItemAvgProgRate = (currentItem && programRequirementsByDay?.programItemDailyAvg?.[currentItem.name])
+          ? Math.round(programRequirementsByDay.programItemDailyAvg[currentItem.name])
+          : 0;
+
         return (
-          <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+          <div className="space-y-4">
+            {/* Simulation Mode Toggle Bar */}
+            <div className="bg-white rounded-2xl p-4 border border-gray-200 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider text-gray-400 block">Origen de Consumo para la Simulación</span>
+                <h3 className="text-sm font-black text-gray-900">Análisis de Quiebre de Insumos</h3>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                <button
+                  onClick={() => setSimulationMode('programa')}
+                  className={`flex-1 md:flex-initial px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 border ${
+                    simulationMode === 'programa'
+                      ? 'bg-indigo-600 text-white border-indigo-700 shadow-md ring-2 ring-indigo-200'
+                      : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                  }`}
+                >
+                  <CalendarDays className="w-4 h-4" />
+                  <span>Programa de Producción</span>
+                  {productionPlans.length > 0 && (
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-black ${
+                      simulationMode === 'programa' ? 'bg-indigo-800 text-indigo-100' : 'bg-gray-200 text-gray-700'
+                    }`}>
+                      {productionPlans.length} lotes
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => setSimulationMode('proyeccion')}
+                  className={`flex-1 md:flex-initial px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 border ${
+                    simulationMode === 'proyeccion'
+                      ? 'bg-amber-600 text-white border-amber-700 shadow-md ring-2 ring-amber-200'
+                      : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                  }`}
+                >
+                  <TrendingUp className="w-4 h-4" />
+                  <span>Proyección Mensual</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Extrapolation / Program Status Banner */}
+            {simulationMode === 'programa' && (
+              <div className="bg-gradient-to-r from-indigo-50 to-blue-50 border border-indigo-100/80 rounded-2xl p-4 flex items-start gap-3 text-indigo-950">
+                <Info className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
+                <div className="text-xs space-y-1">
+                  <div className="font-black flex flex-wrap items-center gap-2">
+                    <span>Simulación con Programa de Producción Turnero</span>
+                    {maxProgDateFormatted ? (
+                      <span className="bg-indigo-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">
+                        Programa hasta {maxProgDateFormatted}
+                      </span>
+                    ) : (
+                      <span className="bg-rose-100 text-rose-800 text-[10px] font-black px-2 py-0.5 rounded-full">
+                        Sin Programa Cargado
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-indigo-800/90 font-medium text-[11px] leading-relaxed">
+                    {maxProgDateFormatted ? (
+                      <>
+                        Hasta el <strong className="font-bold text-indigo-950">{maxProgDateFormatted}</strong> la simulación consume según los lotes reales agendados. 
+                        Para el periodo restante (hasta completar 180 días), la proyección se <strong className="font-bold text-indigo-950">extrapola al ritmo promedio del programa</strong>
+                        {currentItemAvgProgRate > 0 && <> (aprox. <strong className="font-bold text-indigo-950">{currentItemAvgProgRate.toLocaleString('es-AR')} un/día</strong> para {currentItem?.name})</>}.
+                      </>
+                    ) : (
+                      <>
+                        No se detectaron lotes de producción activos en el Turnero para las fechas futuras. Se utiliza el consumo estimado por proyección mensual como alternativa.
+                      </>
+                    )}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
             {/* Left Column: List of Insumos */}
             <div className="xl:col-span-5 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-[750px]">
               <div className="p-4 border-b border-gray-100 bg-gray-50/50 space-y-3">
@@ -836,6 +1129,7 @@ export function SuppliesProjection() {
                     const isSelected = currentItem && item.name === currentItem.name;
                     const itemAlerts = getItemAlerts(item);
                     const quiebreDate = includeTransitGlobally ? itemAlerts.quiebreWithTransit : itemAlerts.quiebreNoTransit;
+                    const quiebrePhase = includeTransitGlobally ? itemAlerts.quiebrePhaseWithTransit : itemAlerts.quiebrePhaseNoTransit;
                     const hasDanger = itemAlerts.alerts.some(a => a.type === 'danger');
                     const hasWarning = itemAlerts.alerts.some(a => a.type === 'warning');
 
@@ -862,9 +1156,20 @@ export function SuppliesProjection() {
                         
                         <div className="flex flex-col items-end shrink-0 gap-1">
                           {quiebreDate ? (
-                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${hasDanger ? 'bg-red-100 text-red-800' : 'bg-orange-100 text-orange-800'}`}>
-                              ETA: {format(quiebreDate, 'dd/MM/yy')}
-                            </span>
+                            <div className="flex flex-col items-end gap-1">
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${hasDanger ? 'bg-red-100 text-red-800' : 'bg-orange-100 text-orange-800'}`}>
+                                ETA: {safeFormatDate(quiebreDate, 'dd/MM/yy') || '-'}
+                              </span>
+                              {simulationMode === 'programa' && (
+                                <span className={`text-[9px] font-black px-1.5 py-0.2 rounded ${
+                                  quiebrePhase === 'programa' 
+                                    ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' 
+                                    : 'bg-purple-100 text-purple-800 border border-purple-200'
+                                }`}>
+                                  {quiebrePhase === 'programa' ? '📅 Programa' : '📈 Extrapolado'}
+                                </span>
+                              )}
+                            </div>
                           ) : (
                             <span className="text-[10px] font-black text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
                               🟢 Abastecido
@@ -925,13 +1230,13 @@ export function SuppliesProjection() {
                           <span className="text-[9px] text-gray-400 font-black block uppercase">ETA QUIEBRE</span>
                           {includeTransitGlobally ? (
                             alertsInfo.quiebreWithTransit ? (
-                              <span className="text-sm font-black text-red-600 block">{format(alertsInfo.quiebreWithTransit, 'dd/MM/yyyy')}</span>
+                              <span className="text-sm font-black text-red-600 block">{safeFormatDate(alertsInfo.quiebreWithTransit, 'dd/MM/yyyy') || 'Sin Quiebre'}</span>
                             ) : (
                               <span className="text-sm font-black text-emerald-600 block">Sin Quiebre</span>
                             )
                           ) : (
                             alertsInfo.quiebreNoTransit ? (
-                              <span className="text-sm font-black text-orange-600 block">{format(alertsInfo.quiebreNoTransit, 'dd/MM/yyyy')}</span>
+                              <span className="text-sm font-black text-orange-600 block">{safeFormatDate(alertsInfo.quiebreNoTransit, 'dd/MM/yyyy') || 'Sin Quiebre'}</span>
                             ) : (
                               <span className="text-sm font-black text-emerald-600 block">Sin Quiebre</span>
                             )
@@ -1008,7 +1313,7 @@ export function SuppliesProjection() {
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                           <XAxis
                             dataKey="dateStr"
-                            tickFormatter={(tick) => format(parseISO(tick), 'dd MMM', { locale: es })}
+                            tickFormatter={(tick) => safeFormatDate(tick, 'dd MMM') || String(tick || '')}
                             stroke="#94a3b8"
                             fontSize={9}
                             fontFamily="monospace"
@@ -1020,7 +1325,7 @@ export function SuppliesProjection() {
                             tickFormatter={(tick) => Math.round(tick).toLocaleString('es-AR')}
                           />
                           <Tooltip
-                            labelFormatter={(label) => format(parseISO(String(label)), "eeee dd 'de' MMMM, yyyy", { locale: es })}
+                            labelFormatter={(label) => safeFormatDate(String(label), "eeee dd 'de' MMMM, yyyy") || String(label || '')}
                             formatter={(value: any, name: any, props: any) => {
                               const dayEvts = props.payload.events || [];
                               const formattedVal = Math.round(Number(value)).toLocaleString('es-AR') + ' un.';
@@ -1049,7 +1354,7 @@ export function SuppliesProjection() {
                               return (
                                 <ReferenceLine
                                   key={`q-${idx}`}
-                                  x={format(evt.date, 'yyyy-MM-dd')}
+                                  x={safeFormatDate(evt.date, 'yyyy-MM-dd') || ''}
                                   stroke="#dc2626"
                                   strokeDasharray="3 3"
                                 />
@@ -1059,7 +1364,7 @@ export function SuppliesProjection() {
                               return (
                                 <ReferenceLine
                                   key={`t-${idx}`}
-                                  x={format(evt.date, 'yyyy-MM-dd')}
+                                  x={safeFormatDate(evt.date, 'yyyy-MM-dd') || ''}
                                   stroke={evt.isOverdue ? "#f43f5e" : "#2563eb"}
                                   strokeDasharray="3 3"
                                 />
@@ -1116,6 +1421,15 @@ export function SuppliesProjection() {
                               <div className="space-y-1">
                                 <h5 className={`text-xs font-black ${titleColor} flex items-center gap-1.5 flex-wrap`}>
                                   {evt.label}
+                                  {evt.type === 'quiebre' && simulationMode === 'programa' && (
+                                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${
+                                      evt.isProgrammedPhase 
+                                        ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' 
+                                        : 'bg-purple-100 text-purple-800 border border-purple-200'
+                                    }`}>
+                                      {evt.isProgrammedPhase ? 'En Programa' : 'Fase Extrapolada'}
+                                    </span>
+                                  )}
                                   {evt.amount !== undefined && evt.type === 'transit' && (
                                     <span className="text-[9px] font-black bg-blue-100 text-blue-800 px-1 rounded">
                                       +{Math.round(evt.amount).toLocaleString('es-AR')} un
@@ -1132,7 +1446,7 @@ export function SuppliesProjection() {
                                 </p>
                               </div>
                               <span className="text-[10px] font-mono text-gray-400 bg-white border border-gray-100 px-2 py-0.5 rounded self-start md:self-center font-bold">
-                                {format(evt.date, 'dd MMM yyyy', { locale: es })}
+                                {safeFormatDate(evt.date, 'dd MMM yyyy') || '-'}
                               </span>
                             </div>
                           </div>
@@ -1148,6 +1462,7 @@ export function SuppliesProjection() {
               )}
             </div>
           </div>
+        </div>
         );
       })()}
 
