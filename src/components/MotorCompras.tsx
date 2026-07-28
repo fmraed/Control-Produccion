@@ -447,7 +447,8 @@ export function MotorCompras() {
       const termoWeight = config?.wasteWeights?.[tamano.toString()]?.termo ?? WASTE_WEIGHTS[tamano]?.termo ?? 0;
       const termoNeededKg = quantity * termoWeight;
       const packsPerPaleta = PACKS_POR_PALETA[tamano] || 80;
-      const stretchNeededKg = (quantity / packsPerPaleta) * 0.4;
+      const stretchWeight = config?.wasteWeights?.[tamano.toString()]?.stretch ?? WASTE_WEIGHTS[tamano]?.stretch ?? 0.4;
+      const stretchNeededKg = (quantity / packsPerPaleta) * stretchWeight;
       const tapasNeeded = preformasNeeded;
 
       reqObj[findPreformaForProduct(tamano, '', sabor)?.name || ''] = (reqObj[findPreformaForProduct(tamano, '', sabor)?.name || ''] || 0) + preformasNeeded;

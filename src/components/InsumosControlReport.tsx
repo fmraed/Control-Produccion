@@ -983,7 +983,8 @@ export function InsumosControlReport() {
       const termoNeededKg = plannedPacks * termoWeight;
       
       const packsPerPaleta = PACKS_POR_PALETA[tamano] || 80;
-      const stretchNeededKg = (plannedPacks / packsPerPaleta) * 0.4;
+      const stretchWeight = config?.wasteWeights?.[tamano.toString()]?.stretch ?? WASTE_WEIGHTS[tamano]?.stretch ?? 0.4;
+      const stretchNeededKg = (plannedPacks / packsPerPaleta) * stretchWeight;
       
       const tapasNeeded = preformasNeeded;
       const etiquetasNeeded = preformasNeeded;
@@ -1062,7 +1063,8 @@ export function InsumosControlReport() {
         const termoNeededKg = quantity * termoWeight;
         
         const packsPerPaleta = PACKS_POR_PALETA[tamano] || 80;
-        const stretchNeededKg = (quantity / packsPerPaleta) * 0.4;
+        const stretchWeight = config?.wasteWeights?.[tamano.toString()]?.stretch ?? WASTE_WEIGHTS[tamano]?.stretch ?? 0.4;
+        const stretchNeededKg = (quantity / packsPerPaleta) * stretchWeight;
         
         const tapasNeeded = preformasNeeded;
 
@@ -1209,8 +1211,9 @@ export function InsumosControlReport() {
 
       const preformasNeeded = quantity * botellasPorPack;
       const packsPerPaleta = PACKS_POR_PALETA[tamano] || 80;
-      const stretchNeededKg = (quantity / packsPerPaleta) * 0.4;
-      const bagsWeight = WASTE_WEIGHTS[tamano]?.termo || 0.055;
+      const stretchWeight = config?.wasteWeights?.[tamano.toString()]?.stretch ?? WASTE_WEIGHTS[tamano]?.stretch ?? 0.4;
+      const stretchNeededKg = (quantity / packsPerPaleta) * stretchWeight;
+      const bagsWeight = config?.wasteWeights?.[tamano.toString()]?.termo ?? WASTE_WEIGHTS[tamano]?.termo ?? 0.055;
       const termoNeededKg = quantity * bagsWeight;
 
       const pConf = findPreformaForProduct(tamano, marca, sabor);
@@ -1251,8 +1254,9 @@ export function InsumosControlReport() {
 
       const preformasNeeded = quantity * botellasPorPack;
       const packsPerPaleta = PACKS_POR_PALETA[tamano] || 80;
-      const stretchNeededKg = (quantity / packsPerPaleta) * 0.4;
-      const bagsWeight = WASTE_WEIGHTS[tamano]?.termo || 0.055;
+      const stretchWeight = config?.wasteWeights?.[tamano.toString()]?.stretch ?? WASTE_WEIGHTS[tamano]?.stretch ?? 0.4;
+      const stretchNeededKg = (quantity / packsPerPaleta) * stretchWeight;
+      const bagsWeight = config?.wasteWeights?.[tamano.toString()]?.termo ?? WASTE_WEIGHTS[tamano]?.termo ?? 0.055;
       const termoNeededKg = quantity * bagsWeight;
 
       const pConf = findPreformaForProduct(tamano, marca, sabor);

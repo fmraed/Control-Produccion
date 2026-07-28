@@ -132,12 +132,12 @@ export const VELOCIDAD_MATRIX: Record<string, Record<number, number>> = {
 };
 
 export const WASTE_WEIGHTS: Record<number, { etiq: number; tapa: number; termo: number; stretch: number }> = {
-  3000: { etiq: 0.88, tapa: 2.06, termo: 0.0510, stretch: 0.0500 },
-  2250: { etiq: 0.80, tapa: 2.06, termo: 0.0350, stretch: 0.0400 },
-  2000: { etiq: 1.10, tapa: 0,    termo: 0.0350, stretch: 0.0400 },
-  1000: { etiq: 0.50, tapa: 2.60, termo: 0.0200, stretch: 0.0300 },
-  1500: { etiq: 0.50, tapa: 2.60, termo: 0.0200, stretch: 0.0350 },
-  500:  { etiq: 0.25, tapa: 2.60, termo: 0.0150, stretch: 0.0250 },
+  3000: { etiq: 0.88, tapa: 2.06, termo: 0.0510, stretch: 0.4000 },
+  2250: { etiq: 0.80, tapa: 2.06, termo: 0.0350, stretch: 0.4000 },
+  2000: { etiq: 1.10, tapa: 0,    termo: 0.0350, stretch: 0.4000 },
+  1000: { etiq: 0.50, tapa: 2.60, termo: 0.0200, stretch: 0.4000 },
+  1500: { etiq: 0.50, tapa: 2.60, termo: 0.0200, stretch: 0.4000 },
+  500:  { etiq: 0.25, tapa: 2.60, termo: 0.0150, stretch: 0.4000 },
 };
 
 export const DOWNTIME_CATEGORIES = [

@@ -512,15 +512,12 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin, filters, onFilte
                   {((report.esCanjeHoras || report.esRecuperacionHoras) || 
                     (config?.shiftConfig?.exchangeShifts || []).some(ex => ex.date === report.fecha && (ex.shift === 'Todos' || ex.shift === report.turno))
                   ) && (
-                    <button
-                      type="button"
-                      onClick={() => toggleCanjeReport(report)}
-                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-200 mt-1 transition-colors cursor-pointer"
-                      title="Haz clic para cambiar el estado de Canje / Recuperación"
+                    <span
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200 mt-1"
                     >
                       <Clock className="w-2.5 h-2.5" />
                       Canje / Recuperación
-                    </button>
+                    </span>
                   )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
@@ -602,17 +599,7 @@ export function Dashboard({ onNewReport, onEditReport, isAdmin, filters, onFilte
                     >
                       <ClipboardCheck className="w-4 h-4" />
                     </button>
-                    <button
-                      onClick={() => toggleCanjeReport(report)}
-                      className={`p-2 rounded-md transition-colors ${
-                        (report.esCanjeHoras || report.esRecuperacionHoras) 
-                          ? 'bg-amber-500 text-white hover:bg-amber-600' 
-                          : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
-                      }`}
-                      title={(report.esCanjeHoras || report.esRecuperacionHoras) ? "Marque como Canje (click para desactivar)" : "Marcar como Canje / Recuperación de Horas"}
-                    >
-                      <Clock className="w-4 h-4" />
-                    </button>
+
                     {isEditable && (
                       <button
                         onClick={() => onEditReport(report)}
