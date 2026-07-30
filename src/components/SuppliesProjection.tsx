@@ -1556,10 +1556,18 @@ export function SuppliesProjection() {
                               <td className="p-3 font-black text-slate-700 text-right font-mono">{Intl.NumberFormat('es-AR').format(amount as number)}</td>
                               <td className="p-3 text-center">
                                 <button
-                                  onClick={async () => {
-                                    const newSupplies = { ...separatedSupplies };
-                                    delete newSupplies[name];
-                                    await setDoc(doc(db, 'config', 'separated_supplies'), newSupplies);
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    try {
+                                      const newSupplies = { ...separatedSupplies };
+                                      delete newSupplies[name];
+                                      await setDoc(doc(db, 'config', 'separated_supplies'), newSupplies);
+                                    } catch (err) {
+                                      console.error("Error al eliminar artículo separado:", err);
+                                      alert("No se pudo eliminar el artículo separado. Verifique que tenga permisos de administrador.");
+                                    }
                                   }}
                                   className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
                                   title="Remover"
