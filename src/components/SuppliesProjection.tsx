@@ -87,28 +87,32 @@ export function SuppliesProjection() {
   const findPreformaForProduct = useCallback((tam: number, lin: string, sabor: string) => {
     const list = config?.preformasConfig || [];
     const matchFlavor = (p: any) => !p.flavors || p.flavors.length === 0 || p.flavors.includes(sabor);
-    return list.find(p => (p.sizes || []).includes(tam) && p.line && p.line.toString() === lin.toString() && matchFlavor(p)) ||
-           list.find(p => (p.sizes || []).includes(tam) && !p.line && matchFlavor(p)) ||
-           list.find(p => (p.sizes || []).includes(tam) && matchFlavor(p)) ||
-           list.find(p => (p.sizes || []).includes(tam) && p.line && p.line.toString() === lin.toString()) ||
-           list.find(p => (p.sizes || []).includes(tam));
+    const matchSize = (p: any) => (p.sizes || []).some((s: any) => Number(s) === Number(tam));
+    return list.find(p => matchSize(p) && p.line && p.line.toString() === lin.toString() && matchFlavor(p)) ||
+           list.find(p => matchSize(p) && !p.line && matchFlavor(p)) ||
+           list.find(p => matchSize(p) && matchFlavor(p)) ||
+           list.find(p => matchSize(p) && p.line && p.line.toString() === lin.toString()) ||
+           list.find(p => matchSize(p));
   }, [config]);
 
   const findTermoForProduct = useCallback((tam: number, sabor: string) => {
     const list = config?.termoConfig || [];
     const matchFlavor = (p: any) => !p.flavors || p.flavors.length === 0 || p.flavors.includes(sabor);
-    return list.find(p => (p.sizes || []).includes(tam) && matchFlavor(p)) || list.find(p => (p.sizes || []).includes(tam));
+    const matchSize = (p: any) => (p.sizes || []).some((s: any) => Number(s) === Number(tam));
+    return list.find(p => matchSize(p) && matchFlavor(p)) || list.find(p => matchSize(p));
   }, [config]);
 
   const findStretchForProduct = useCallback((tam: number, sabor: string) => {
     const list = config?.stretchConfig || [];
-    return list.find(p => (p.sizes || []).includes(tam)) || list[0];
+    const matchSize = (p: any) => (p.sizes || []).some((s: any) => Number(s) === Number(tam));
+    return list.find(p => matchSize(p)) || list[0];
   }, [config]);
 
   const findTapaForProduct = useCallback((tam: number, sabor: string) => {
     const list = config?.tapaConfig || [];
     const matchFlavor = (p: any) => !p.flavors || p.flavors.length === 0 || p.flavors.includes(sabor);
-    return list.find(p => (p.sizes || []).includes(tam) && matchFlavor(p)) || list.find(p => (p.sizes || []).includes(tam));
+    const matchSize = (p: any) => (p.sizes || []).some((s: any) => Number(s) === Number(tam));
+    return list.find(p => matchSize(p) && matchFlavor(p)) || list.find(p => matchSize(p));
   }, [config]);
 
 
@@ -200,7 +204,7 @@ export function SuppliesProjection() {
       if (!dailyMap[date]) dailyMap[date] = {};
       const reqObj = dailyMap[date];
 
-      const botellasPorPack = config?.botellasPorPack?.[tamano] || BOTELLAS_POR_PACK[tamano] || 6;
+      const botellasPorPack = (config?.botellasPorPack ? (config.botellasPorPack[tamano] ?? config.botellasPorPack[tamano.toString()]) : null) || BOTELLAS_POR_PACK[tamano] || 6;
       const beverageLiters = plannedPacks * botellasPorPack * (tamano / 1000);
       const mixRatio = config.co2Volumes?.[marca]?.[sabor] !== undefined && config.co2Volumes?.[marca]?.[sabor] === 0 ? 1 : 5;
       const syrupLitersNeeded = beverageLiters / mixRatio;
@@ -217,7 +221,7 @@ export function SuppliesProjection() {
       const preformasNeeded = plannedPacks * botellasPorPack;
       const termoWeight = config?.wasteWeights?.[tamano.toString()]?.termo ?? WASTE_WEIGHTS[tamano]?.termo ?? 0;
       const termoNeededKg = plannedPacks * termoWeight;
-      const packsPerPaleta = PACKS_POR_PALETA[tamano] || 80;
+      const packsPerPaleta = (config?.packsPorPaleta ? (config.packsPorPaleta[tamano] ?? config.packsPorPaleta[tamano.toString()]) : null) || PACKS_POR_PALETA[tamano] || 80;
       const stretchWeight = config?.wasteWeights?.[tamano.toString()]?.stretch ?? WASTE_WEIGHTS[tamano]?.stretch ?? 0.4;
       const stretchNeededKg = (plannedPacks / packsPerPaleta) * stretchWeight;
       const tapasNeeded = preformasNeeded;
@@ -297,7 +301,7 @@ export function SuppliesProjection() {
       if (!planningMonths.includes(month) || quantity <= 0 || !tamano || !marca || !sabor) return;
 
       const reqObj = requirementsByMonth[month];
-      const botellasPorPack = config?.botellasPorPack?.[tamano] || BOTELLAS_POR_PACK[tamano] || 6;
+      const botellasPorPack = (config?.botellasPorPack ? (config.botellasPorPack[tamano] ?? config.botellasPorPack[tamano.toString()]) : null) || BOTELLAS_POR_PACK[tamano] || 6;
       const beverageLiters = quantity * botellasPorPack * (tamano / 1000);
       const mixRatio = config.co2Volumes?.[marca]?.[sabor] !== undefined && config.co2Volumes?.[marca]?.[sabor] === 0 ? 1 : 5;
       const syrupLitersNeeded = beverageLiters / mixRatio;
@@ -311,7 +315,7 @@ export function SuppliesProjection() {
       const preformasNeeded = quantity * botellasPorPack;
       const termoWeight = config?.wasteWeights?.[tamano.toString()]?.termo ?? WASTE_WEIGHTS[tamano]?.termo ?? 0;
       const termoNeededKg = quantity * termoWeight;
-      const packsPerPaleta = PACKS_POR_PALETA[tamano] || 80;
+      const packsPerPaleta = (config?.packsPorPaleta ? (config.packsPorPaleta[tamano] ?? config.packsPorPaleta[tamano.toString()]) : null) || PACKS_POR_PALETA[tamano] || 80;
       const stretchWeight = config?.wasteWeights?.[tamano.toString()]?.stretch ?? WASTE_WEIGHTS[tamano]?.stretch ?? 0.4;
       const stretchNeededKg = (quantity / packsPerPaleta) * stretchWeight;
       const tapasNeeded = preformasNeeded;
@@ -527,7 +531,8 @@ export function SuppliesProjection() {
 
     // Match transits
     const itemTransits = transits.filter(t => {
-      if (!t.status || String(t.status).toLowerCase().includes('recibido') || String(t.status).toLowerCase().includes('completado')) return false;
+      const s = String(t.status || '').toLowerCase();
+      if (!t.status || s.includes('recibido') || s.includes('completado') || s.includes('no se recibir') || s.includes('cancelado') || s.includes('no recibir')) return false;
       
       const tCode = String(t.code || '').toLowerCase().trim().replace(/^0+/, '');
       const tDesc = String(t.description || '').toLowerCase();

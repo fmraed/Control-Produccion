@@ -856,25 +856,26 @@ export function InsumosControlReport() {
     const findPreformaForProduct = (tam: number, lin: string, sabor: string) => {
       const list = config?.preformasConfig || [];
       const matchFlavor = (p: any) => !p.flavors || p.flavors.length === 0 || p.flavors.includes(sabor);
+      const matchSize = (p: any) => (p.sizes || []).some((s: any) => Number(s) === Number(tam));
       
       // 1. Match by size, line, and flavor
-      let matched = list.find(p => p.sizes.includes(tam) && p.line && p.line.toString() === lin.toString() && matchFlavor(p));
+      let matched = list.find(p => matchSize(p) && p.line && p.line.toString() === lin.toString() && matchFlavor(p));
       // 2. Match by size and flavor (no line, or any line with flavor)
       if (!matched) {
-        matched = list.find(p => p.sizes.includes(tam) && !p.line && matchFlavor(p));
+        matched = list.find(p => matchSize(p) && !p.line && matchFlavor(p));
       }
       if (!matched) {
-        matched = list.find(p => p.sizes.includes(tam) && matchFlavor(p));
+        matched = list.find(p => matchSize(p) && matchFlavor(p));
       }
       // 3. Generic matches (ignoring flavor constraint) if no flavor-specific matches found
       if (!matched) {
-        matched = list.find(p => p.sizes.includes(tam) && p.line && p.line.toString() === lin.toString());
+        matched = list.find(p => matchSize(p) && p.line && p.line.toString() === lin.toString());
       }
       if (!matched) {
-        matched = list.find(p => p.sizes.includes(tam) && !p.line);
+        matched = list.find(p => matchSize(p) && !p.line);
       }
       if (!matched) {
-        matched = list.find(p => p.sizes.includes(tam));
+        matched = list.find(p => matchSize(p));
       }
       return matched;
     };
@@ -882,9 +883,10 @@ export function InsumosControlReport() {
     const findTermoForProduct = (tam: number, sabor: string) => {
       const list = config?.termoConfig || [];
       const matchFlavor = (t: any) => !t.flavors || t.flavors.length === 0 || t.flavors.includes(sabor);
-      let matched = list.find(t => t.sizes.includes(tam) && matchFlavor(t));
+      const matchSize = (t: any) => (t.sizes || []).some((s: any) => Number(s) === Number(tam));
+      let matched = list.find(t => matchSize(t) && matchFlavor(t));
       if (!matched) {
-        matched = list.find(t => t.sizes.includes(tam));
+        matched = list.find(t => matchSize(t));
       }
       return matched;
     };
@@ -892,21 +894,23 @@ export function InsumosControlReport() {
     const findStretchForProduct = (tam: number, sabor: string) => {
       const list = config?.stretchConfig || [];
       const matchFlavor = (s: any) => !s.flavors || s.flavors.length === 0 || s.flavors.includes(sabor);
-      let matched = list.find(s => s.sizes.includes(tam) && matchFlavor(s));
+      const matchSize = (s: any) => (s.sizes || []).some((s2: any) => Number(s2) === Number(tam));
+      let matched = list.find(s => matchSize(s) && matchFlavor(s));
       if (!matched) {
-        matched = list.find(s => s.sizes.includes(tam));
+        matched = list.find(s => matchSize(s));
       }
       return matched;
     };
 
     const findTapaForProduct = (tam: number, sabor: string) => {
       const list = config?.tapaConfig || [];
-      let matched = list.find(t => t.sizes.includes(tam) && t.flavors && t.flavors.includes(sabor));
+      const matchSize = (t: any) => (t.sizes || []).some((s: any) => Number(s) === Number(tam));
+      let matched = list.find(t => matchSize(t) && t.flavors && t.flavors.includes(sabor));
       if (!matched) {
-        matched = list.find(t => t.sizes.includes(tam) && (!t.flavors || t.flavors.length === 0));
+        matched = list.find(t => matchSize(t) && (!t.flavors || t.flavors.length === 0));
       }
       if (!matched) {
-        matched = list.find(t => t.sizes.includes(tam));
+        matched = list.find(t => matchSize(t));
       }
       return matched;
     };
@@ -1177,16 +1181,16 @@ export function InsumosControlReport() {
     const planMonthlyRequiredSum: Record<string, number> = {};
 
     const findPreformaForProduct = (tamano: number, marca: string, sabor: string) => {
-      return (config?.preformasConfig || []).find(p => p.size === tamano);
+      return (config?.preformasConfig || []).find(p => (p.sizes || []).some((s: any) => Number(s) === Number(tamano)));
     };
     const findTermoForProduct = (tamano: number, sabor: string) => {
-      return (config?.termoConfig || []).find(t => t.size === tamano);
+      return (config?.termoConfig || []).find(t => (t.sizes || []).some((s: any) => Number(s) === Number(tamano)));
     };
     const findStretchForProduct = (tamano: number, sabor: string) => {
-      return (config?.stretchConfig || []).find(s => s.size === tamano);
+      return (config?.stretchConfig || []).find(s => (s.sizes || []).some((s: any) => Number(s) === Number(tamano)));
     };
     const findTapaForProduct = (tamano: number, sabor: string) => {
-      return (config?.tapaConfig || []).find(t => t.size === tamano);
+      return (config?.tapaConfig || []).find(t => (t.sizes || []).some((s: any) => Number(s) === Number(tamano)));
     };
 
     plans.forEach(plan => {

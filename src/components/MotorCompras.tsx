@@ -21,7 +21,8 @@ import {
   ClipboardList, 
   Search,
   CheckCircle,
-  Truck
+  Truck,
+  XCircle
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useAppConfig } from '../hooks/useAppConfig';
@@ -48,6 +49,8 @@ export function MotorCompras() {
 
   // Transits State
   const [transits, setTransits] = useState<InsumosTransit[]>([]);
+  const [hideReceived, setHideReceived] = useState(false);
+  const [hideCancelled, setHideCancelled] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState('');
   const [showAdd, setShowAdd] = useState(false);
@@ -119,29 +122,44 @@ export function MotorCompras() {
   const findPreformaForProduct = useCallback((tam: number, lin: string, sabor: string) => {
     const list = config?.preformasConfig || [];
     const matchFlavor = (p: any) => !p.flavors || p.flavors.length === 0 || p.flavors.includes(sabor);
-    return list.find(p => (p.sizes || []).includes(tam) && p.line && p.line.toString() === lin.toString() && matchFlavor(p)) ||
-           list.find(p => (p.sizes || []).includes(tam) && !p.line && matchFlavor(p)) ||
-           list.find(p => (p.sizes || []).includes(tam) && matchFlavor(p)) ||
-           list.find(p => (p.sizes || []).includes(tam) && p.line && p.line.toString() === lin.toString()) ||
-           list.find(p => (p.sizes || []).includes(tam));
+    const matchSize = (p: any) => (p.sizes || []).some((s: any) => Number(s) === Number(tam));
+    return list.find(p => matchSize(p) && p.line && p.line.toString() === lin.toString() && matchFlavor(p)) ||
+           list.find(p => matchSize(p) && !p.line && matchFlavor(p)) ||
+           list.find(p => matchSize(p) && matchFlavor(p)) ||
+           list.find(p => matchSize(p) && p.line && p.line.toString() === lin.toString()) ||
+           list.find(p => matchSize(p));
   }, [config]);
 
   const findTermoForProduct = useCallback((tam: number, sabor: string) => {
     const list = config?.termoConfig || [];
     const matchFlavor = (p: any) => !p.flavors || p.flavors.length === 0 || p.flavors.includes(sabor);
-    return list.find(p => (p.sizes || []).includes(tam) && matchFlavor(p)) || list.find(p => (p.sizes || []).includes(tam));
+    const matchSize = (p: any) => (p.sizes || []).some((s: any) => Number(s) === Number(tam));
+    return list.find(p => matchSize(p) && matchFlavor(p)) || list.find(p => matchSize(p));
   }, [config]);
 
   const findStretchForProduct = useCallback((tam: number, sabor: string) => {
     const list = config?.stretchConfig || [];
-    return list.find(p => (p.sizes || []).includes(tam)) || list[0];
+    const matchSize = (p: any) => (p.sizes || []).some((s: any) => Number(s) === Number(tam));
+    return list.find(p => matchSize(p)) || list[0];
   }, [config]);
 
   const findTapaForProduct = useCallback((tam: number, sabor: string) => {
     const list = config?.tapaConfig || [];
     const matchFlavor = (p: any) => !p.flavors || p.flavors.length === 0 || p.flavors.includes(sabor);
-    return list.find(p => (p.sizes || []).includes(tam) && matchFlavor(p)) || list.find(p => (p.sizes || []).includes(tam));
+    const matchSize = (p: any) => (p.sizes || []).some((s: any) => Number(s) === Number(tam));
+    return list.find(p => matchSize(p) && matchFlavor(p)) || list.find(p => matchSize(p));
   }, [config]);
+
+  const getLotConfig = useCallback((item: InsumosGrouped) => {
+    let lotConf = { size: 1, unit: 'un' };
+    if (config?.insumosPurchaseLots) {
+      const foundName = [item.name, ...(item.originalNames || [])].find(n => config.insumosPurchaseLots?.[n]);
+      if (foundName) {
+        lotConf = config.insumosPurchaseLots[foundName];
+      }
+    }
+    return lotConf;
+  }, [config?.insumosPurchaseLots]);
 
   const getConsumoProyectadoYDiario = useCallback((item: InsumosGrouped) => {
     let remainingDays = projectionDays;
@@ -292,6 +310,16 @@ export function MotorCompras() {
     setTransitToDelete(id);
   };
 
+  const handleToggleNoRecibir = async (id: string, currentStatus: string) => {
+    try {
+      const isNoRecibir = String(currentStatus).toUpperCase().includes('NO SE RECIBIR') || String(currentStatus).toUpperCase().includes('CANCELADO');
+      const newStatus = isNoRecibir ? 'PENDIENTE' : 'NO SE RECIBIRÁ';
+      await setDoc(doc(db, 'insumos_transits', id), { status: newStatus }, { merge: true });
+    } catch (err) {
+      console.error("Error al actualizar estado de recepción:", err);
+    }
+  };
+
   const parseNumber = (val: string) => {
     if (!val) return 0;
     const clean = val.replace(/\./g, '').replace(',', '.');
@@ -432,7 +460,7 @@ export function MotorCompras() {
       if (!planningMonths.includes(month) || quantity <= 0 || !tamano || !marca || !sabor) return;
 
       const reqObj = requirementsByMonth[month];
-      const botellasPorPack = config?.botellasPorPack?.[tamano] || BOTELLAS_POR_PACK[tamano] || 6;
+      const botellasPorPack = (config?.botellasPorPack ? (config.botellasPorPack[tamano] ?? config.botellasPorPack[tamano.toString()]) : null) || BOTELLAS_POR_PACK[tamano] || 6;
       const beverageLiters = quantity * botellasPorPack * (tamano / 1000);
       const mixRatio = config.co2Volumes?.[marca]?.[sabor] !== undefined && config.co2Volumes?.[marca]?.[sabor] === 0 ? 1 : 5;
       const syrupLitersNeeded = beverageLiters / mixRatio;
@@ -446,7 +474,7 @@ export function MotorCompras() {
       const preformasNeeded = quantity * botellasPorPack;
       const termoWeight = config?.wasteWeights?.[tamano.toString()]?.termo ?? WASTE_WEIGHTS[tamano]?.termo ?? 0;
       const termoNeededKg = quantity * termoWeight;
-      const packsPerPaleta = PACKS_POR_PALETA[tamano] || 80;
+      const packsPerPaleta = (config?.packsPorPaleta ? (config.packsPorPaleta[tamano] ?? config.packsPorPaleta[tamano.toString()]) : null) || PACKS_POR_PALETA[tamano] || 80;
       const stretchWeight = config?.wasteWeights?.[tamano.toString()]?.stretch ?? WASTE_WEIGHTS[tamano]?.stretch ?? 0.4;
       const stretchNeededKg = (quantity / packsPerPaleta) * stretchWeight;
       const tapasNeeded = preformasNeeded;
@@ -569,6 +597,25 @@ export function MotorCompras() {
   // Filtered Transits List
   const filteredTransitsList = useMemo(() => {
     let result = transits;
+
+    if (hideReceived) {
+      result = result.filter(t => {
+        const isReceived = (t.status || '').toUpperCase().includes('RECIBIDO') || 
+                           (t.status || '').toUpperCase().includes('COMPLETADO') ||
+                           (t.arrivedQuantity >= t.requestedQuantity && t.requestedQuantity > 0);
+        return !isReceived;
+      });
+    }
+
+    if (hideCancelled) {
+      result = result.filter(t => {
+        const isCancelled = (t.status || '').toUpperCase().includes('NO SE RECIBIR') || 
+                            (t.status || '').toUpperCase().includes('CANCELADO') ||
+                            (t.status || '').toUpperCase().includes('NO RECIBIR');
+        return !isCancelled;
+      });
+    }
+
     if (searchTransitQuery) {
       const queryLower = searchTransitQuery.toLowerCase();
       result = result.filter(t => 
@@ -596,7 +643,7 @@ export function MotorCompras() {
     }
     
     return result;
-  }, [transits, searchTransitQuery, sortTransitField, sortTransitDir]);
+  }, [transits, searchTransitQuery, sortTransitField, sortTransitDir, hideReceived, hideCancelled]);
 
   // Export to Excel function for Sugerencias
   const handleExportSugerencias = () => {
@@ -618,7 +665,8 @@ export function MotorCompras() {
       
       let mpTransito = 0;
       transits.forEach(t => {
-        if (!t.status || String(t.status).toLowerCase().includes('recibido') || String(t.status).toLowerCase().includes('completado')) return;
+        const s = String(t.status || '').toLowerCase();
+        if (!t.status || s.includes('recibido') || s.includes('completado') || s.includes('no se recibir') || s.includes('cancelado') || s.includes('no recibir')) return;
         const tCode = String(t.code || '').toLowerCase().trim().replace(/^0+/, '');
         const tDesc = String(t.description || '').toLowerCase();
         let match = false;
@@ -646,7 +694,7 @@ export function MotorCompras() {
       const criticidad = config?.insumosCriticality?.[item.name] || 1;
       const stockSeguridad = consumoDiario * diasSeguridad * criticidad;
       const necesidadReal = Math.max(0, necesidadTeorica + stockSeguridad);
-      const lotConf = config?.insumosPurchaseLots?.[item.name] || { size: 1, unit: 'un' };
+      const lotConf = getLotConfig(item);
       const lotSize = Number(lotConf.size) || 1;
       const lotes = Math.ceil(necesidadReal / lotSize);
       const totalComprar = lotes * lotSize;
@@ -857,7 +905,8 @@ export function MotorCompras() {
                       
                       let mpTransito = 0;
                       transits.forEach(t => {
-                        if (!t.status || String(t.status).toLowerCase().includes('recibido') || String(t.status).toLowerCase().includes('completado')) return;
+                        const s = String(t.status || '').toLowerCase();
+                        if (!t.status || s.includes('recibido') || s.includes('completado') || s.includes('no se recibir') || s.includes('cancelado') || s.includes('no recibir')) return;
                         
                         const tCode = String(t.code || '').toLowerCase().trim().replace(/^0+/, '');
                         const tDesc = String(t.description || '').toLowerCase();
@@ -891,7 +940,7 @@ export function MotorCompras() {
                       
                       const necesidadReal = Math.max(0, necesidadTeorica + stockSeguridad);
                       
-                      const lotConf = config?.insumosPurchaseLots?.[item.name] || { size: 1, unit: 'un' };
+                      const lotConf = getLotConfig(item);
                       const lotSize = Number(lotConf.size) || 1;
                       const lotes = Math.ceil(necesidadReal / lotSize);
                       const totalComprar = lotes * lotSize;
@@ -1063,21 +1112,44 @@ export function MotorCompras() {
       {activeMainTab === 'transitos' && (
         <div className="space-y-6">
           {/* Header Controls for Transits */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="relative flex-1 max-w-md">
-              <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Buscar por req, descripción, código..."
-                value={searchTransitQuery}
-                onChange={e => setSearchTransitQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-all"
-              />
-              {searchTransitQuery && (
-                <button onClick={() => setSearchTransitQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                  <X className="w-4 h-4" />
-                </button>
-              )}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+            <div className="flex flex-col md:flex-row md:items-center gap-4 flex-1">
+              <div className="relative flex-1 max-w-md">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar por req, descripción, código..."
+                  value={searchTransitQuery}
+                  onChange={e => setSearchTransitQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-all"
+                />
+                {searchTransitQuery && (
+                  <button onClick={() => setSearchTransitQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-4 flex-wrap">
+                <label className="flex items-center gap-2 px-3 py-1.5 bg-amber-50/50 border border-amber-200/60 hover:bg-amber-100/40 rounded-xl cursor-pointer select-none transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={hideReceived}
+                    onChange={e => setHideReceived(e.target.checked)}
+                    className="rounded text-amber-600 focus:ring-amber-500 h-4 w-4 border-gray-300"
+                  />
+                  <span className="text-xs font-bold text-amber-900">Ocultar ya recibidos</span>
+                </label>
+                <label className="flex items-center gap-2 px-3 py-1.5 bg-rose-50/50 border border-rose-200/60 hover:bg-rose-100/40 rounded-xl cursor-pointer select-none transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={hideCancelled}
+                    onChange={e => setHideCancelled(e.target.checked)}
+                    className="rounded text-rose-600 focus:ring-rose-500 h-4 w-4 border-gray-300"
+                  />
+                  <span className="text-xs font-bold text-rose-900">Ocultar cancelados / no se recibirán</span>
+                </label>
+              </div>
             </div>
 
             <div className="flex gap-2.5">
@@ -1135,28 +1207,62 @@ export function MotorCompras() {
                 <tbody className="divide-y divide-gray-200">
                   {filteredTransitsList.map((t) => {
                     const restante = Math.max(0, (t.requestedQuantity || 0) - (t.arrivedQuantity || 0));
+                    const todayStr = format(new Date(), 'yyyy-MM-dd');
+                    const statusUpper = (t.status || '').toUpperCase();
+                    const isReceived = statusUpper.includes('RECIBIDO') || 
+                                       statusUpper.includes('COMPLETADO') || 
+                                       (t.arrivedQuantity >= t.requestedQuantity && t.requestedQuantity > 0);
+                    const isCancelled = statusUpper.includes('NO SE RECIBIR') || 
+                                        statusUpper.includes('CANCELADO') || 
+                                        statusUpper.includes('NO RECIBIR');
+                    const isOverdue = t.needDate && t.needDate < todayStr && !isReceived && !isCancelled;
+
                     return (
-                      <tr key={t.id} className="hover:bg-gray-50/80 transition-colors">
+                      <tr 
+                        key={t.id} 
+                        className={`transition-all border-b border-gray-150 ${
+                          isOverdue 
+                            ? 'bg-red-50/45 hover:bg-red-100/40 border-l-4 border-l-red-500 text-red-950' 
+                            : isCancelled 
+                              ? 'bg-gray-100/50 hover:bg-gray-150/50 opacity-60' 
+                              : 'hover:bg-gray-50/80'
+                        }`}
+                      >
                         <td className="px-4 py-3.5 font-bold text-gray-900">{t.requisitionNumber}</td>
-                        <td className="px-4 py-3.5 text-gray-600 whitespace-nowrap">{t.needDate}</td>
+                        <td className={`px-4 py-3.5 whitespace-nowrap font-bold ${isOverdue ? 'text-red-700' : 'text-gray-600'}`}>
+                          <div className="flex items-center gap-1.5">
+                            {isOverdue && <AlertTriangle className="w-4 h-4 text-red-500 animate-pulse shrink-0" title="Tránsito Vencido" />}
+                            {t.needDate}
+                          </div>
+                        </td>
                         <td className="px-4 py-3.5 text-gray-500 whitespace-nowrap">{t.issueDate}</td>
                         <td className="px-4 py-3.5 font-mono text-gray-700 font-semibold">{t.code}</td>
                         <td className="px-4 py-3.5 font-medium text-gray-800 max-w-[220px] truncate" title={t.description}>{t.description}</td>
                         <td className="px-4 py-3.5 text-gray-500">{t.specification}</td>
                         <td className="px-4 py-3.5 text-center">
-                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
-                            (t.status || '').toUpperCase().includes('RECIBIDO') || (t.status || '').toUpperCase().includes('COMPLETADO')
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/50'
-                              : 'bg-amber-50 text-amber-700 border border-amber-200/50'
-                          }`}>
-                            {t.status || 'PENDIENTE'}
-                          </span>
+                          {(() => {
+                            let badgeClasses = 'bg-amber-50 text-amber-700 border border-amber-200/50';
+                            if (isReceived) {
+                              badgeClasses = 'bg-emerald-50 text-emerald-700 border border-emerald-200/50';
+                            } else if (isCancelled) {
+                              badgeClasses = 'bg-rose-50 text-rose-700 border border-rose-200/50';
+                            } else if (statusUpper.includes('DESPACHADO')) {
+                              badgeClasses = 'bg-blue-50 text-blue-700 border border-blue-200/50';
+                            } else if (statusUpper.includes('PUERTO')) {
+                              badgeClasses = 'bg-purple-50 text-purple-700 border border-purple-200/50';
+                            }
+                            return (
+                              <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${badgeClasses}`}>
+                                {t.status || 'PENDIENTE'}
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td className="px-4 py-3.5 text-right font-mono font-medium text-gray-600">{Number(t.requestedQuantity).toLocaleString('es-AR')}</td>
                         <td className="px-4 py-3.5 text-right font-mono font-medium text-gray-600">{Number(t.arrivedQuantity).toLocaleString('es-AR')}</td>
                         <td className="px-4 py-3.5 text-right font-mono font-bold text-blue-600 bg-blue-50/5">{restante.toLocaleString('es-AR')}</td>
                         <td className="px-4 py-3.5 text-center">
-                          <div className="flex items-center justify-center gap-3">
+                          <div className="flex items-center justify-center gap-2">
                             <button 
                               onClick={() => {
                                 setFormData(t);
@@ -1167,6 +1273,17 @@ export function MotorCompras() {
                               title="Editar"
                             >
                               <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={() => handleToggleNoRecibir(t.id!, t.status || '')}
+                              className={`p-1.5 rounded-lg transition-all ${
+                                isCancelled 
+                                  ? 'text-emerald-600 hover:bg-emerald-50 hover:text-emerald-800' 
+                                  : 'text-rose-600 hover:bg-rose-50 hover:text-rose-800'
+                              }`}
+                              title={isCancelled ? "Volver a activar (pendiente)" : "Marcar como NO se recibirá"}
+                            >
+                              {isCancelled ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
                             </button>
                             <button 
                               onClick={() => handleDeleteTransit(t.id!)}
@@ -1354,6 +1471,7 @@ export function MotorCompras() {
                   <option value="DESPACHADO">DESPACHADO (En camino)</option>
                   <option value="PARCIAL">RECIBIDO PARCIAL</option>
                   <option value="RECIBIDO">RECIBIDO / COMPLETADO</option>
+                  <option value="NO SE RECIBIRÁ">NO SE RECIBIRÁ (Cancelado)</option>
                 </select>
               </div>
               
