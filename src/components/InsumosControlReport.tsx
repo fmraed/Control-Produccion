@@ -962,6 +962,64 @@ export function InsumosControlReport() {
       return { beverageLiters, syrupLitersNeeded };
     };
 
+    // Calculate intermediate plan consumption:
+    // Scheduled from today (inclusive) up to the start of the selected week (exclusive)
+    const intermediateRequiredSum: Record<string, number> = {};
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const today = parseISO(todayStr);
+    const start = parseISO(startDateStr);
+
+    if (start > today) {
+      plans.forEach(plan => {
+        if (!plan.date) return;
+        const planDate = parseISO(plan.date);
+        // Only intermediate plans
+        if (planDate >= today && planDate < start) {
+          const { marca, sabor, tamano, plannedPacks, linea } = plan;
+          
+          // Ingredients consumption
+          processCrossoverData(marca, sabor, tamano, plannedPacks, intermediateRequiredSum);
+          
+          // Packaging consumption
+          const botellasPorPack = (config?.botellasPorPack ? (config.botellasPorPack[tamano] ?? config.botellasPorPack[tamano.toString()]) : null) || BOTELLAS_POR_PACK[tamano] || 6;
+          const preformasNeeded = plannedPacks * botellasPorPack;
+          
+          const termoWeight = config?.wasteWeights?.[tamano.toString()]?.termo ?? WASTE_WEIGHTS[tamano]?.termo ?? 0;
+          const termoNeededKg = plannedPacks * termoWeight;
+          
+          const packsPerPaleta = (config?.packsPerPaleta ? (config.packsPerPaleta[tamano] ?? config.packsPerPaleta[tamano.toString()]) : null) || PACKS_POR_PALETA[tamano] || 80;
+          const stretchWeight = config?.wasteWeights?.[tamano.toString()]?.stretch ?? WASTE_WEIGHTS[tamano]?.stretch ?? 0.4;
+          const stretchNeededKg = (plannedPacks / packsPerPaleta) * stretchWeight;
+          
+          const tapasNeeded = preformasNeeded;
+          const etiquetasNeeded = preformasNeeded;
+
+          const prefConf = findPreformaForProduct(tamano, linea?.toString() || '', sabor);
+          if (prefConf) {
+            intermediateRequiredSum[prefConf.name] = (intermediateRequiredSum[prefConf.name] || 0) + preformasNeeded;
+          }
+
+          const termoConf = findTermoForProduct(tamano, sabor);
+          if (termoConf) {
+            intermediateRequiredSum[termoConf.name] = (intermediateRequiredSum[termoConf.name] || 0) + termoNeededKg;
+          }
+
+          const stretchConf = findStretchForProduct(tamano, sabor);
+          if (stretchConf) {
+            intermediateRequiredSum[stretchConf.name] = (intermediateRequiredSum[stretchConf.name] || 0) + stretchNeededKg;
+          }
+
+          const tapaConf = findTapaForProduct(tamano, sabor);
+          if (tapaConf) {
+            intermediateRequiredSum[tapaConf.name] = (intermediateRequiredSum[tapaConf.name] || 0) + tapasNeeded;
+          }
+
+          const labelKey = `Etiqueta ${marca} / ${sabor} / ${tamano}cc`;
+          intermediateRequiredSum[labelKey] = (intermediateRequiredSum[labelKey] || 0) + etiquetasNeeded;
+        }
+      });
+    }
+
     // Weekly packaging aggregates
     const preformasAgg: Record<number, number> = {};
     const termoAgg: Record<number, number> = {};
@@ -1132,19 +1190,30 @@ export function InsumosControlReport() {
       const representativeInsumo = groupKey.startsWith("Etiqueta ") ? groupKey : groupKey.split(' / ')[0];
       const stock = getEffectiveInsumoStock(representativeInsumo);
       
-      const isMet = stock >= required;
+      // Calculate intermediate consumption for all individual members in this compatible group
+      const individualMembers = groupKey.split(' / ');
+      let intermediateConsumed = 0;
+      individualMembers.forEach(member => {
+        intermediateConsumed += intermediateRequiredSum[member] || 0;
+      });
+
+      const projectedStock = Math.max(0, stock - intermediateConsumed);
+      
+      const isMet = projectedStock >= required;
       if (!isMet && required > 0) statusOk = false;
 
-      const monthsOfStock = monthlyRequired > 0 ? (stock / monthlyRequired) : Infinity;
+      const monthsOfStock = monthlyRequired > 0 ? (projectedStock / monthlyRequired) : Infinity;
 
       return {
         insumoName: groupKey, // Show the group label
         requiredKg: required,
         monthlyRequiredKg: monthlyRequired,
         stockKg: stock,
+        intermediateConsumed,
+        projectedStockKg: projectedStock,
         monthsOfStock,
         isMet,
-        deficit: isMet ? 0 : (required - stock)
+        deficit: isMet ? 0 : (required - projectedStock)
       };
     }).filter(item => {
       // Show always standard ingredients, or packaging items that actually are planned/required to avoid listing unused flavors
@@ -1171,7 +1240,7 @@ export function InsumosControlReport() {
       tapasAgg,
       etiquetasAgg
     };
-  }, [config, weeklyPlansOnly, goals, insumoMappings, stockData, simulatedStocks, simulationMode, getEffectiveInsumoStock]);
+  }, [config, weeklyPlansOnly, goals, insumoMappings, stockData, simulatedStocks, simulationMode, getEffectiveInsumoStock, plans]);
 
   // Unified equivalent/compatible groups data aggregator for Excel Inventory tab
   const unifiedGroupAnalysis = useMemo(() => {
@@ -2710,8 +2779,24 @@ export function InsumosControlReport() {
                                         {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.requiredKg)}{unitStr}
                                       </span>
                                     </td>
-                                    <td className="px-4 py-3 text-right font-medium text-gray-800">
-                                      {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}{unitStr}
+                                    <td className="px-4 py-3 text-right">
+                                      {item.intermediateConsumed > 0 ? (
+                                        <div className="inline-block text-right">
+                                          <div className="font-bold text-gray-900 leading-tight">
+                                            {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.projectedStockKg)}{unitStr}
+                                          </div>
+                                          <div className="text-[10px] text-gray-500 leading-none">
+                                            Físico: {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}{unitStr}
+                                          </div>
+                                          <div className="text-[10px] text-amber-600 font-semibold leading-none mt-0.5">
+                                            -{Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.intermediateConsumed)} reservado
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <span className="font-medium text-gray-800">
+                                          {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}{unitStr}
+                                        </span>
+                                      )}
                                     </td>
                                     <td className="px-4 py-3 text-center">
                                       {item.requiredKg === 0 ? (
@@ -2777,8 +2862,24 @@ export function InsumosControlReport() {
                                             {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.requiredKg)}{unitStr}
                                           </span>
                                         </td>
-                                        <td className="px-4 py-3 text-right font-medium text-gray-800">
-                                          {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}{unitStr}
+                                        <td className="px-4 py-3 text-right">
+                                          {item.intermediateConsumed > 0 ? (
+                                            <div className="inline-block text-right">
+                                              <div className="font-bold text-gray-900 leading-tight">
+                                                {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.projectedStockKg)}{unitStr}
+                                              </div>
+                                              <div className="text-[10px] text-gray-500 leading-none">
+                                                Físico: {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}{unitStr}
+                                              </div>
+                                              <div className="text-[10px] text-amber-600 font-semibold leading-none mt-0.5">
+                                                -{Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.intermediateConsumed)} reservado
+                                              </div>
+                                            </div>
+                                          ) : (
+                                            <span className="font-medium text-gray-800">
+                                              {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)}{unitStr}
+                                            </span>
+                                          )}
                                         </td>
                                         <td className="px-4 py-3 text-center">
                                           {item.requiredKg === 0 ? (
@@ -2837,8 +2938,24 @@ export function InsumosControlReport() {
                                             {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.requiredKg)} u.
                                           </span>
                                         </td>
-                                        <td className="px-4 py-3 text-right font-medium text-gray-800">
-                                          {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)} u.
+                                        <td className="px-4 py-3 text-right">
+                                          {item.intermediateConsumed > 0 ? (
+                                            <div className="inline-block text-right">
+                                              <div className="font-bold text-gray-900 leading-tight">
+                                                {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.projectedStockKg)} u.
+                                              </div>
+                                              <div className="text-[10px] text-gray-500 leading-none">
+                                                Físico: {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)} u.
+                                              </div>
+                                              <div className="text-[10px] text-amber-600 font-semibold leading-none mt-0.5">
+                                                -{Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.intermediateConsumed)} reservado
+                                              </div>
+                                            </div>
+                                          ) : (
+                                            <span className="font-medium text-gray-800">
+                                              {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.stockKg)} u.
+                                            </span>
+                                          )}
                                         </td>
                                         <td className="px-4 py-3 text-center">
                                           {item.requiredKg === 0 ? (
