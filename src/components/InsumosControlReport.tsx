@@ -1181,7 +1181,6 @@ export function InsumosControlReport() {
     });
 
     // Cross-check requirements with stocks at the group level
-    let statusOk = true;
     const itemsList = Object.keys(groupedRequirements).map(groupKey => {
       const required = groupedRequirements[groupKey];
       const monthlyRequired = monthlyGroupedRequirements[groupKey] || 0;
@@ -1200,7 +1199,6 @@ export function InsumosControlReport() {
       const projectedStock = Math.max(0, stock - intermediateConsumed);
       
       const isMet = projectedStock >= required;
-      if (!isMet && required > 0) statusOk = false;
 
       const monthsOfStock = monthlyRequired > 0 ? (projectedStock / monthlyRequired) : Infinity;
 
@@ -1230,10 +1228,14 @@ export function InsumosControlReport() {
       return isIngredient || isConfiguredPackage || isPartOfCompatiblePackagingGroups || (isTapaOrLabel && item.requiredKg > 0);
     });
 
+    const insufficientInsumos = itemsList.filter(item => !item.isMet && item.requiredKg > 0);
+    const statusOk = insufficientInsumos.length === 0;
+
     return {
       requiredInsumosAgg: itemsList,
       programSummary: listProductsAnalyzed,
       statusOk,
+      insufficientInsumos,
       preformasAgg,
       termoAgg,
       stretchAgg,
@@ -2735,14 +2737,35 @@ export function InsumosControlReport() {
                         </div>
                       </div>
                     ) : (
-                      <div className="bg-gradient-to-r from-red-500 to-orange-600 p-5 rounded-xl text-white shadow-md shadow-red-50 flex items-center gap-4">
-                        <XCircle className="w-10 h-10 flex-shrink-0" />
-                        <div>
-                          <h4 className="font-black text-base tracking-tight uppercase">Alerta: Insumos Insuficientes</h4>
-                          <p className="text-xs opacity-90 leading-tight">
-                            Se detectan faltantes en el almacén para cubrir las necesidades planteadas en los {plans.length} planes semanales. Revise los detalles abajo.
-                          </p>
+                      <div className="bg-gradient-to-r from-red-500 to-orange-600 p-5 rounded-xl text-white shadow-md shadow-red-50 flex flex-col md:flex-row md:items-center gap-4">
+                        <div className="flex items-center gap-4">
+                          <XCircle className="w-10 h-10 flex-shrink-0" />
+                          <div>
+                            <h4 className="font-black text-base tracking-tight uppercase">Alerta: Insumos Insuficientes</h4>
+                            <p className="text-xs opacity-90 leading-tight">
+                              Se detectan faltantes en el almacén para cubrir las necesidades planteadas en los {plans.length} planes semanales:
+                            </p>
+                          </div>
                         </div>
+                        {programCrossover.insufficientInsumos && programCrossover.insufficientInsumos.length > 0 && (
+                          <div className="flex flex-wrap gap-2 md:ml-auto mt-2 md:mt-0 max-h-32 overflow-y-auto p-1 bg-black/10 rounded-lg">
+                            {programCrossover.insufficientInsumos.map((item: any) => {
+                              const isEtiqueta = item.insumoName.startsWith("Etiqueta ");
+                              const isTapa = item.insumoName.startsWith("Tapa ");
+                              const unit = isEtiqueta || isTapa ? "u." : "kg";
+                              return (
+                                <div key={item.insumoName} className="bg-black/25 backdrop-blur-sm px-2.5 py-1 rounded-lg border border-white/10 text-xs flex flex-col min-w-[120px]">
+                                  <span className="font-bold text-white max-w-[180px] truncate" title={item.insumoName}>
+                                    {item.insumoName}
+                                  </span>
+                                  <span className="text-[10px] text-red-200 font-semibold">
+                                    Faltan: {Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(item.deficit)} {unit}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     )}
 
