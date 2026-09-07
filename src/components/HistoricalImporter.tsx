@@ -310,7 +310,8 @@ export function HistoricalImporter() {
             } else if (jarabeConsumido === 0 && usesSyrup && botellasCalc > 0) {
                // Aprox teorico basado en el mismo cálculo del formulario
                const litrosBebida = (botellasCalc * tamanoVal) / 1000;
-               jarabeConsumido = Number((litrosBebida / 6).toFixed(3));
+               const dilution = config?.syrupFormulas?.[marcaStr]?.[saborStr || '']?.dilution ?? 6;
+               jarabeConsumido = Number((litrosBebida / dilution).toFixed(3));
             }
 
             // CO2

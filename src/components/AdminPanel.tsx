@@ -60,7 +60,7 @@ interface AppConfig {
   stackableFlavors?: string[];
   externalProducts?: Record<string, Record<string, string[]>>;
   wasteWeights?: Record<string, { etiq: number; tapa: number; termo: number; stretch: number }>;
-  syrupFormulas?: Record<string, Record<string, { liters: number; emulsion: number }>>;
+  syrupFormulas?: Record<string, Record<string, { liters: number; emulsion: number; dilution?: number }>>;
   insumos?: string[];
   insumosCategories?: Record<string, string>;
   insumosCategoriesOrder?: string[];
@@ -3253,11 +3253,11 @@ export function AdminPanel() {
                          </h4>
                          <div className="flex flex-col gap-2">
                            {getFlavorsForBrand(brand).filter(sabor => !(config.saboresSinJarabe || SABORES_SIN_JARABE).includes(sabor)).map(sabor => {
-                              const formula = config.syrupFormulas?.[brand]?.[sabor] || { liters: 0, emulsion: 0 };
+                              const formula = config.syrupFormulas?.[brand]?.[sabor] || { liters: 0, emulsion: 0, dilution: 6 };
                               return (
                                  <div key={sabor} className="flex justify-between items-center bg-white p-2 rounded border border-gray-200 text-sm">
-                                    <span className="truncate w-1/3">{sabor}</span>
-                                    <div className="flex items-center gap-2 w-2/3 justify-end">
+                                    <span className="truncate w-1/4 font-semibold text-gray-700">{sabor}</span>
+                                    <div className="flex items-center gap-2 w-3/4 justify-end">
                                         <div className="flex flex-col">
                                             <span className="text-[10px] text-gray-500 mb-1">Litros Jarabe</span>
                                             <input 
@@ -3281,7 +3281,7 @@ export function AdminPanel() {
                                                         }
                                                     });
                                                 }}
-                                                className="w-24 text-right rounded border-gray-300 bg-gray-50 hover:bg-white transition-colors shadow-sm p-1 px-2 border focus:border-blue-500 focus:ring-blue-500"
+                                                className="w-20 text-right rounded border-gray-300 bg-gray-50 hover:bg-white transition-colors shadow-sm p-1 px-2 border focus:border-blue-500 focus:ring-blue-500"
                                             />
                                         </div>
                                         <div className="flex flex-col">
@@ -3307,7 +3307,33 @@ export function AdminPanel() {
                                                         }
                                                     });
                                                 }}
-                                                className="w-24 text-right rounded border-gray-300 bg-gray-50 hover:bg-white transition-colors shadow-sm p-1 px-2 border focus:border-blue-500 focus:ring-blue-500"
+                                                className="w-20 text-right rounded border-gray-300 bg-gray-50 hover:bg-white transition-colors shadow-sm p-1 px-2 border focus:border-blue-500 focus:ring-blue-500"
+                                            />
+                                        </div>
+                                        <div className="flex flex-col">
+                                            <span className="text-[10px] text-gray-500 mb-1">Dilución (1+X)</span>
+                                            <input 
+                                                type="number"
+                                                step="0.1"
+                                                min="1"
+                                                value={formula.dilution === undefined ? '' : formula.dilution}
+                                                placeholder="6"
+                                                onChange={(e) => {
+                                                    const val = e.target.value === '' ? undefined : Number(e.target.value);
+                                                    const current = config.syrupFormulas || {};
+                                                    const brandObj = current[brand] || {};
+                                                    setConfig({
+                                                        ...config,
+                                                        syrupFormulas: {
+                                                            ...current,
+                                                            [brand]: {
+                                                                ...brandObj,
+                                                                [sabor]: { ...(brandObj[sabor] || { liters: 0, emulsion: 0 }), dilution: val }
+                                                            }
+                                                        }
+                                                    });
+                                                }}
+                                                className="w-20 text-right rounded border-gray-300 bg-gray-50 hover:bg-white transition-colors shadow-sm p-1 px-2 border focus:border-blue-500 focus:ring-blue-500"
                                             />
                                         </div>
                                     </div>

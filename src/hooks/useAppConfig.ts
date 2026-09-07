@@ -57,7 +57,7 @@ interface AppConfig {
   stackableFlavors?: string[];
   externalProducts?: Record<string, Record<string, string[]>>;
   wasteWeights?: Record<string, { etiq: number; tapa: number; termo: number }>;
-  syrupFormulas?: Record<string, Record<string, { liters: number; emulsion: number }>>;
+  syrupFormulas?: Record<string, Record<string, { liters: number; emulsion: number; dilution?: number }>>;
   insumos?: string[];
   insumosCategories?: Record<string, string>;
   insumosCategoriesOrder?: string[];

@@ -716,7 +716,8 @@ export function InsumosControlReport() {
     const processMonthlyData = (marca: string, sabor: string, tamano: number, packs: number) => {
       const botellasPorPack = config?.botellasPorPack?.[tamano] || BOTELLAS_POR_PACK[tamano] || 6;
       const beverageLiters = packs * botellasPorPack * (tamano / 1000); 
-      const syrupLitersNeeded = beverageLiters / 6;
+      const dilution = config?.syrupFormulas?.[marca]?.[sabor]?.dilution ?? 6;
+      const syrupLitersNeeded = beverageLiters / dilution;
       const syrupLitersPerUnit = config.syrupFormulas?.[marca]?.[sabor]?.liters || 0;
       const unitsRequired = syrupLitersPerUnit > 0 ? (syrupLitersNeeded / syrupLitersPerUnit) : 0;
       const matrixObj = config.insumosMatrix?.[marca]?.[sabor] || {};
@@ -945,7 +946,8 @@ export function InsumosControlReport() {
       const bottlesTotal = packs * botellasPorPack;
       const beverageLiters = bottlesTotal * (tamano / 1000); 
 
-      const syrupLitersNeeded = beverageLiters / 6;
+      const dilution = config?.syrupFormulas?.[marca]?.[sabor]?.dilution ?? 6;
+      const syrupLitersNeeded = beverageLiters / dilution;
       const syrupLitersPerUnit = config.syrupFormulas?.[marca]?.[sabor]?.liters || 0;
       const unitsRequired = syrupLitersPerUnit > 0 ? (syrupLitersNeeded / syrupLitersPerUnit) : (beverageLiters / 1000);
 
@@ -1272,7 +1274,8 @@ export function InsumosControlReport() {
       
       const botellasPorPack = config?.botellasPorPack?.[tamano] || BOTELLAS_POR_PACK[tamano] || 6;
       const beverageLiters = quantity * botellasPorPack * (tamano / 1000);
-      const syrupLitersNeeded = beverageLiters / 6;
+      const dilution = config?.syrupFormulas?.[marca]?.[sabor]?.dilution ?? 6;
+      const syrupLitersNeeded = beverageLiters / dilution;
       const syrupLitersPerUnit = config.syrupFormulas?.[marca]?.[sabor]?.liters || 0;
       const unitsRequired = syrupLitersPerUnit > 0 ? (syrupLitersNeeded / syrupLitersPerUnit) : 0;
       const matrixObj = config.insumosMatrix?.[marca]?.[sabor] || {};
@@ -1315,7 +1318,8 @@ export function InsumosControlReport() {
       
       const botellasPorPack = config?.botellasPorPack?.[tamano] || BOTELLAS_POR_PACK[tamano] || 6;
       const beverageLiters = quantity * botellasPorPack * (tamano / 1000);
-      const syrupLitersNeeded = beverageLiters / 6;
+      const dilution = config?.syrupFormulas?.[marca]?.[sabor]?.dilution ?? 6;
+      const syrupLitersNeeded = beverageLiters / dilution;
       const syrupLitersPerUnit = config.syrupFormulas?.[marca]?.[sabor]?.liters || 0;
       const unitsRequired = syrupLitersPerUnit > 0 ? (syrupLitersNeeded / syrupLitersPerUnit) : 0;
       const matrixObj = config.insumosMatrix?.[marca]?.[sabor] || {};
@@ -1554,7 +1558,8 @@ export function InsumosControlReport() {
           const bottlesTotal = p.plannedPacks * botellasPorPack;
           const beverageLiters = bottlesTotal * (p.tamano / 1000); 
 
-          const syrupLitersNeeded = beverageLiters / 6;
+          const dilution = config?.syrupFormulas?.[p.marca]?.[p.sabor]?.dilution ?? 6;
+          const syrupLitersNeeded = beverageLiters / dilution;
           const syrupLitersPerUnit = config?.syrupFormulas?.[p.marca]?.[p.sabor]?.liters || 0;
           const unitsRequired = syrupLitersPerUnit > 0 ? (syrupLitersNeeded / syrupLitersPerUnit) : 0;
           usedUnits += unitsRequired;

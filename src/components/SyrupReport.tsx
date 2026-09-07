@@ -127,7 +127,8 @@ export function SyrupReport() {
       
       const botellas = r.botellas || 0;
       const tamano = r.tamano || 0;
-      const t = (botellas * tamano) / 6000;
+      const dilution = config?.syrupFormulas?.[r.marca || '']?.[r.sabor || '']?.dilution ?? 6;
+      const t = (botellas * tamano) / (1000 * dilution);
       stats[r.sabor].teorico += t;
     });
 
@@ -282,7 +283,7 @@ export function SyrupReport() {
           <p className="text-2xl font-black text-blue-900">{totals.teorico.toLocaleString('es-AR', { maximumFractionDigits: 1 })} L</p>
           <div className="mt-2 flex items-center gap-1 text-[10px] text-gray-400">
             <BarChart3 className="w-3 h-3" />
-            <span>Botellas x Calibre / 6</span>
+            <span>Botellas x Calibre / Dilución</span>
           </div>
         </div>
         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">

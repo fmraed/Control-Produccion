@@ -873,7 +873,8 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
       const litrosTotales = (botellas * tamano) / 1000;
       const saboresSinJarabeCfg = config?.saboresSinJarabe || SABORES_SIN_JARABE;
       const usesSyrup = !saboresSinJarabeCfg.includes(report.sabor || '');
-      const jarabeConsumidoCalc = usesSyrup ? litrosTotales / 6 : 0;
+      const dilution = config?.syrupFormulas?.[report.marca || '']?.[report.sabor || '']?.dilution ?? 6;
+      const jarabeConsumidoCalc = usesSyrup ? litrosTotales / dilution : 0;
       const jarabeFinalCalc = usesSyrup ? Math.max(0, jarabeInicial - jarabeConsumidoCalc) : 0;
       
       const keyConsumido = `jarabeConsumido-${index}`;

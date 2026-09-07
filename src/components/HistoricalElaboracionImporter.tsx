@@ -252,7 +252,8 @@ export function HistoricalElaboracionImporter() {
             // Calculations
             const botellas = Math.max(0, contFinal - contInicial);
             const usesSyrup = !(config?.saboresSinJarabe || SABORES_SIN_JARABE).includes(saborStr || '');
-            const teorico = usesSyrup ? Number(((botellas * (tamanoVal || 0)) / 6000).toFixed(2)) : 0;
+            const dilution = config?.syrupFormulas?.[marcaStr]?.[saborStr || '']?.dilution ?? 6;
+            const teorico = usesSyrup ? Number(((botellas * (tamanoVal || 0)) / (1000 * dilution)).toFixed(2)) : 0;
             const consumido = usesSyrup ? Number((jarabeInicial - jarabeFinal).toFixed(2)) : 0;
             const desperdicio = Number((consumido - teorico).toFixed(2));
             const desperdicioPorc = teorico > 0 ? Number(((desperdicio / teorico) * 100).toFixed(2)) : 0;
