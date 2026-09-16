@@ -61,6 +61,7 @@ const isShiftShaded = (day: Date, shift: typeof SHIFTS[number], holidays?: strin
 
 export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) {
   const { config, availableBrands, availableLines, availableFlavors, availableSizes, getFilteredFlavors, getFilteredSizes } = useAppConfig();
+  const activeColors = useMemo(() => config?.flavorColors || FLAVOR_COLORS, [config]);
   const [activeTab, setActiveTab] = useState<'scheduler' | 'projection' | 'config'>('scheduler');
   const [selectedWeek, setSelectedWeek] = useState(new Date());
   const [plans, setPlans] = useState<ProductionPlan[]>([]);
@@ -750,7 +751,7 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
 
                             {slotPlans.map(plan => {
                               const isDraft = plan.status === 'Draft';
-                              const bgColor = FLAVOR_COLORS[plan.sabor] || '#ffffff';
+                              const bgColor = activeColors[plan.sabor] || '#ffffff';
                               // Simple heuristic for text contrast
                               const isLight = ['Soda', 'Agua', 'Pomelo Blanco', 'Lima Limon'].includes(plan.sabor);
 
@@ -971,7 +972,7 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
                                             key={plan.id}
                                             className={`h-full flex items-center justify-center relative border-r border-white/10 last:border-r-0 shrink-0 ${plan.duration === 0.5 && plan.halfShiftPosition === 'end' && slotPlans.length === 1 ? 'ml-auto' : ''}`}
                                             style={{ 
-                                              backgroundColor: FLAVOR_COLORS[plan.sabor] || '#cbd5e1',
+                                              backgroundColor: activeColors[plan.sabor] || '#cbd5e1',
                                               width: `${widthPercent}%`
                                             }}
                                             title={`${plan.sabor} (${plan.duration === 0.5 ? 'Medio' : 'Total'}): ${plan.plannedPacks?.toLocaleString() || 0} packs`}
@@ -1019,7 +1020,7 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
                                             style={{ 
                                               background: isZero
                                                 ? 'repeating-linear-gradient(45deg, #f9fafb, #f9fafb 4px, #f3f4f6 4px, #f3f4f6 8px)'
-                                                : (FLAVOR_COLORS[data.sabor] || '#6366f1'),
+                                                : (activeColors[data.sabor] || '#6366f1'),
                                               left: `${data.left}%`,
                                               width: `${data.width}%` 
                                             }}
@@ -1059,9 +1060,9 @@ export function ProductionScheduler({ isAdmin = false }: { isAdmin?: boolean }) 
               </div>
               
               <div className="mt-12 flex flex-wrap gap-4 pt-8 border-t border-gray-100">
-                {SABORES.map(sabor => (
+                {(config?.flavors || SABORES).map(sabor => (
                   <div key={sabor} className="flex items-center gap-3 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100">
-                    <div className="w-3.5 h-3.5 rounded-full border border-gray-200 shadow-sm" style={{ backgroundColor: FLAVOR_COLORS[sabor] || '#cbd5e1' }} />
+                    <div className="w-3.5 h-3.5 rounded-full border border-gray-200 shadow-sm" style={{ backgroundColor: activeColors[sabor] || '#cbd5e1' }} />
                     <span className="text-[10px] font-black text-gray-600 uppercase tracking-widest">{sabor}</span>
                   </div>
                 ))}

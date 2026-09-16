@@ -39,8 +39,8 @@ export const RANGOS_MANTENIMIENTO = [
 export const RANGOS_MIXTO = Array.from(new Set([...RANGOS_PRODUCCION, ...RANGOS_MANTENIMIENTO]));
 
 export const LINEAS = ['1', '2', '3'];
-export const MARCAS = ['Torasso'];
-export const SABORES = ['Manzana', 'Naranja', 'Cola', 'Lima Limon', 'Pomelo', 'Agua Tónica', 'Pomelo Blanco', 'Citrus', 'Granadina', 'Limonada', 'Soda', 'Soda Sifon', 'Agua'];
+export const MARCAS = ['Torasso', 'Fernando'];
+export const SABORES = ['Manzana', 'Naranja', 'Cola', 'Lima Limon', 'Pomelo', 'Agua Tónica', 'Pomelo Blanco', 'Citrus', 'Granadina', 'Limonada', 'Soda', 'Soda Sifon', 'Agua', 'Fernet', 'Fernet Puro'];
 export const SABORES_SIN_JARABE = ['Soda', 'Soda Sifon', 'Agua'];
 export const DEFAULT_INSUMOS = [
   'Azucar',
@@ -80,7 +80,7 @@ export const DEFAULT_INSUMOS = [
   'Cuasia',
   'Alcohol'
 ];
-export const TAMANOS = [500, 1000, 1500, 2000, 2250, 3000];
+export const TAMANOS = [500, 900, 1000, 1500, 2000, 2250, 3000];
 
 export const FLAVOR_COLORS: Record<string, string> = {
   'Manzana': '#d97706',
@@ -95,7 +95,9 @@ export const FLAVOR_COLORS: Record<string, string> = {
   'Limonada': '#166534',
   'Soda': '#1e40af',
   'Soda Sifon': '#1e40af',
-  'Agua': '#38bdf8'
+  'Agua': '#38bdf8',
+  'Fernet': '#78350f',
+  'Fernet Puro': '#451a03'
 };
 
 export const PACKS_POR_PALETA: Record<number, number> = {
@@ -104,6 +106,7 @@ export const PACKS_POR_PALETA: Record<number, number> = {
   2000: 80,
   1500: 125,
   1000: 175,
+  900: 175,
   500: 176,
 };
 
@@ -113,6 +116,7 @@ export const BOTELLAS_POR_PACK: Record<number, number> = {
   2000: 6,
   1500: 6,
   1000: 6,
+  900: 6,
   500: 12,
 };
 
@@ -122,6 +126,7 @@ export const SEPARADORES_POR_PALETA: Record<number, number> = {
   2000: 4,
   1500: 4,
   1000: 6,
+  900: 6,
   500: 7,
 };
 
@@ -136,6 +141,7 @@ export const WASTE_WEIGHTS: Record<number, { etiq: number; tapa: number; termo: 
   2250: { etiq: 0.80, tapa: 2.06, termo: 0.0350, stretch: 0.4000 },
   2000: { etiq: 1.10, tapa: 0,    termo: 0.0350, stretch: 0.4000 },
   1000: { etiq: 0.50, tapa: 2.60, termo: 0.0200, stretch: 0.4000 },
+  900:  { etiq: 0.50, tapa: 2.60, termo: 0.0200, stretch: 0.4000 },
   1500: { etiq: 0.50, tapa: 2.60, termo: 0.0200, stretch: 0.4000 },
   500:  { etiq: 0.25, tapa: 2.60, termo: 0.0150, stretch: 0.4000 },
 };

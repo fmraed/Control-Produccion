@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
-import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, SABORES_SIN_JARABE, CO2_VOLUMES, WASTE_WEIGHTS, DEFAULT_INSUMOS, DEFAULT_PREFORMAS, DEFAULT_TERMO, DEFAULT_STRETCH, DEFAULT_TAPAS, PreformaConfig, TermoConfig, StretchConfig, TapaConfig } from '../constants';
+import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, SABORES_SIN_JARABE, CO2_VOLUMES, WASTE_WEIGHTS, DEFAULT_INSUMOS, DEFAULT_PREFORMAS, DEFAULT_TERMO, DEFAULT_STRETCH, DEFAULT_TAPAS, PreformaConfig, TermoConfig, StretchConfig, TapaConfig, FLAVOR_COLORS } from '../constants';
 
 interface AppConfig {
   flavors: string[];
@@ -72,6 +72,7 @@ interface AppConfig {
   insumosCriticality?: Record<string, number>;
   insumosPurchaseLots?: Record<string, { size: number; unit: string }>;
   efficiencyExcludedDowntimes: string[];
+  flavorColors?: Record<string, string>;
 }
 
 export function useAppConfig() {
@@ -87,11 +88,11 @@ export function useAppConfig() {
         // Merge with defaults to ensure all fields exist even if the document is old
         const mergedConfig: AppConfig | any = {
           ...data,
-          flavors: Array.isArray(data.flavors) ? data.flavors : SABORES,
+          flavors: Array.isArray(data.flavors) ? Array.from(new Set([...SABORES, ...data.flavors])) : SABORES,
           enabledFlavors: data.enabledFlavors || {},
-          sizes: Array.isArray(data.sizes) ? data.sizes : TAMANOS,
+          sizes: Array.isArray(data.sizes) ? Array.from(new Set([...TAMANOS, ...data.sizes])).sort((a, b) => a - b) : TAMANOS,
           enabledSizes: data.enabledSizes || {},
-          brands: Array.isArray(data.brands) ? data.brands : MARCAS,
+          brands: Array.isArray(data.brands) ? Array.from(new Set([...MARCAS, ...data.brands])) : MARCAS,
           enabledBrands: data.enabledBrands || {},
           lines: Array.isArray(data.lines) ? data.lines : LINEAS,
           enabledLines: data.enabledLines || {},
@@ -135,6 +136,7 @@ export function useAppConfig() {
           insumosCriticality: data.insumosCriticality || {},
           insumosPurchaseLots: data.insumosPurchaseLots || {},
           efficiencyExcludedDowntimes: data.efficiencyExcludedDowntimes || ['Sin programa', 'Mantenimiento programado', 'Otras ajenas a linea'],
+          flavorColors: { ...FLAVOR_COLORS, ...(data.flavorColors || {}) },
           co2Volumes: (() => {
             const defaultVols = { ...CO2_VOLUMES };
             if (data.co2Volumes) {

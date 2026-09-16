@@ -12,6 +12,7 @@ import { useAppConfig } from '../hooks/useAppConfig';
 
 export function SyrupReport() {
   const { config, shouldShowReport } = useAppConfig();
+  const activeColors = useMemo(() => config?.flavorColors || FLAVOR_COLORS, [config]);
   const [productionReports, setProductionReports] = useState<ProductionReport[]>([]);
   const [elaboracionReports, setElaboracionReports] = useState<ElaboracionReport[]>([]);
   const [loading, setLoading] = useState(true);
@@ -360,7 +361,7 @@ export function SyrupReport() {
               <Legend verticalAlign="top" align="right" />
               <Bar dataKey="real" name="Real (Elab.)" radius={[0, 4, 4, 0]} barSize={20}>
                 {syrupStats.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={FLAVOR_COLORS[entry.sabor] || '#6366f1'} opacity={0.8} />
+                  <Cell key={`cell-${index}`} fill={activeColors[entry.sabor] || '#6366f1'} opacity={0.8} />
                 ))}
               </Bar>
               <Bar dataKey="teorico" name="Teórico (Prod.)" fill="#cbd5e1" radius={[0, 4, 4, 0]} barSize={10} />
@@ -397,7 +398,7 @@ export function SyrupReport() {
                     <div className="flex items-center gap-3">
                       <div 
                         className="w-2 h-6 rounded-full" 
-                        style={{ backgroundColor: FLAVOR_COLORS[s.sabor] || '#cbd5e1' }}
+                        style={{ backgroundColor: activeColors[s.sabor] || '#cbd5e1' }}
                       />
                       <span className="font-bold text-gray-900">{s.sabor}</span>
                     </div>
@@ -517,7 +518,7 @@ export function SyrupReport() {
                 ) : jarabesData.map(d => (
                   <tr key={`${d.marca}-${d.sabor}`} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium text-gray-900 border-r border-gray-200 flex items-center gap-2">
-                       <div className="w-2 h-2 rounded-full" style={{ backgroundColor: FLAVOR_COLORS[d.sabor] || '#CBD5E1' }} />
+                       <div className="w-2 h-2 rounded-full" style={{ backgroundColor: activeColors[d.sabor] || '#CBD5E1' }} />
                        {d.marca} {d.sabor}
                     </td>
                     <td className="px-4 py-3 text-center border-r border-gray-200 font-medium text-blue-700">

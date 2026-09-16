@@ -14,10 +14,12 @@ interface GanttChartProps {
 }
 
 export function GanttChart({ onBack }: GanttChartProps) {
-  const { availableLines } = useAppConfig();
+  const { availableLines, config } = useAppConfig();
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [daysBack, setDaysBack] = useState(5);
+
+  const activeColors = useMemo(() => config?.flavorColors || FLAVOR_COLORS, [config]);
 
   const filteredLines = availableLines;
 
@@ -98,13 +100,13 @@ export function GanttChart({ onBack }: GanttChartProps) {
           width: widthPercent,
           start: clampedStart,
           end: clampedEnd,
-          bgColor: FLAVOR_COLORS[report.sabor || ''] || '#cbd5e1'
+          bgColor: activeColors[report.sabor || ''] || '#cbd5e1'
         });
       }
     });
 
     return blocks;
-  }, [reports, startDate, endDate, totalMinutes]);
+  }, [reports, startDate, endDate, totalMinutes, activeColors]);
 
   // Generate day markers for the X-axis
   const dayMarkers = useMemo(() => {
@@ -289,7 +291,7 @@ export function GanttChart({ onBack }: GanttChartProps) {
           <div className="mt-8 pt-6 border-t border-gray-200">
             <h4 className="text-sm font-semibold text-gray-600 mb-3 uppercase tracking-widest text-[10px]">Leyenda de Sabores</h4>
             <div className="flex flex-wrap gap-3">
-              {Object.entries(FLAVOR_COLORS).map(([sabor, color]) => (
+              {Object.entries(activeColors).map(([sabor, color]) => (
                 <div key={sabor} className="flex items-center gap-2 bg-gray-50 px-2 py-1 rounded-md border border-gray-100">
                   <div className="w-3 h-3 rounded-full border border-black/10 shadow-sm" style={{ backgroundColor: color }}></div>
                   <span className="text-[10px] font-black text-gray-600 uppercase">{sabor}</span>

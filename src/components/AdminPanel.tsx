@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment, useMemo } from 'react';
 import { collection, query, orderBy, onSnapshot, doc, getDoc, setDoc, addDoc, deleteDoc, getDocs, writeBatch, updateDoc, where } from 'firebase/firestore';
 import { db } from '../firebase';
-import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, CO2_VOLUMES, SABORES_SIN_JARABE, RANGOS_MIXTO, WASTE_WEIGHTS, DEFAULT_INSUMOS, PreformaConfig, TermoConfig, StretchConfig, TapaConfig } from '../constants';
+import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, CO2_VOLUMES, SABORES_SIN_JARABE, RANGOS_MIXTO, WASTE_WEIGHTS, DEFAULT_INSUMOS, PreformaConfig, TermoConfig, StretchConfig, TapaConfig, FLAVOR_COLORS } from '../constants';
 import { Settings, Save, CheckCircle2, XCircle, AlertCircle, Plus, Trash2, Users, Database, FlaskConical, Link2, Clock, Calendar, ShieldCheck, UserCog, Briefcase, AlertTriangle, Hash, Package, TrendingUp, Scale, ArrowUp, ArrowDown } from 'lucide-react';
 import { UserProfile, UserRole, RolePermissions } from '../types';
 import { SQLIntegration } from './SQLIntegration';
@@ -75,6 +75,7 @@ interface AppConfig {
   insumosCriticality?: Record<string, number>;
   insumosPurchaseLots?: Record<string, { size: number; unit: string }>;
   efficiencyExcludedDowntimes: string[];
+  flavorColors?: Record<string, string>;
 }
 
 export function AdminPanel() {
@@ -401,11 +402,11 @@ export function AdminPanel() {
         }
 
         const mergedConfig: AppConfig = {
-          flavors: Array.isArray(data.flavors) ? data.flavors : SABORES,
+          flavors: Array.isArray(data.flavors) ? Array.from(new Set([...SABORES, ...data.flavors])) : SABORES,
           enabledFlavors: data.enabledFlavors || {},
-          sizes: Array.isArray(data.sizes) ? data.sizes : TAMANOS,
+          sizes: Array.isArray(data.sizes) ? Array.from(new Set([...TAMANOS, ...data.sizes])).sort((a, b) => a - b) : TAMANOS,
           enabledSizes: data.enabledSizes || {},
-          brands: Array.isArray(data.brands) ? data.brands : MARCAS,
+          brands: Array.isArray(data.brands) ? Array.from(new Set([...MARCAS, ...data.brands])) : MARCAS,
           enabledBrands: data.enabledBrands || {},
           lines: Array.isArray(data.lines) ? data.lines : LINEAS,
           enabledLines: data.enabledLines || {},
@@ -447,7 +448,8 @@ export function AdminPanel() {
           categorySecurityDays: data.categorySecurityDays || {},
           insumosCriticality: data.insumosCriticality || {},
           insumosPurchaseLots: data.insumosPurchaseLots || {},
-          efficiencyExcludedDowntimes: data.efficiencyExcludedDowntimes || ['Sin programa', 'Mantenimiento programado', 'Otras ajenas a linea']
+          efficiencyExcludedDowntimes: data.efficiencyExcludedDowntimes || ['Sin programa', 'Mantenimiento programado', 'Otras ajenas a linea'],
+          flavorColors: { ...FLAVOR_COLORS, ...(data.flavorColors || {}) }
         };
         setConfig(mergedConfig);
       } else {
@@ -506,6 +508,7 @@ export function AdminPanel() {
           warehousePositions: 2300,
           stackableFlavors: SABORES.filter(s => s !== 'Soda Sifon' && s !== 'Soda'),
           externalProducts: {},
+          flavorColors: FLAVOR_COLORS,
           shiftConfig: {
             standardShiftDuration: 480,
             shiftDurations: { Mañana: 480, Tarde: 480, Noche: 480 },
@@ -781,7 +784,8 @@ export function AdminPanel() {
     setConfig({
       ...config,
       flavors: [...config.flavors, newFlavor.trim()],
-      enabledFlavors: { ...config.enabledFlavors, [newFlavor.trim()]: true }
+      enabledFlavors: { ...config.enabledFlavors, [newFlavor.trim()]: true },
+      flavorColors: { ...(config.flavorColors || {}), [newFlavor.trim()]: '#6366f1' }
     });
     setNewFlavor('');
   };
@@ -2143,7 +2147,20 @@ export function AdminPanel() {
                           : 'bg-gray-100 border-gray-200 text-gray-400 opacity-60'
                       }`}
                     >
-                      <span className="font-medium">{flavor}</span>
+                      <div className="flex items-center gap-2.5">
+                        <input
+                          type="color"
+                          value={config.flavorColors?.[flavor] || '#cbd5e1'}
+                          onChange={(e) => {
+                            const updatedColors = { ...(config.flavorColors || {}), [flavor]: e.target.value };
+                            setConfig({ ...config, flavorColors: updatedColors });
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-6 h-6 rounded-md border border-gray-300 cursor-pointer p-0 overflow-hidden shrink-0"
+                          title="Cambiar color del sabor"
+                        />
+                        <span className="font-medium">{flavor}</span>
+                      </div>
                       {config.enabledFlavors?.[flavor] !== false ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
                     </button>
 
