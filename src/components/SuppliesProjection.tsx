@@ -115,6 +115,13 @@ export function SuppliesProjection() {
     return list.find(p => matchSize(p) && matchFlavor(p)) || list.find(p => matchSize(p));
   }, [config]);
 
+  const findCapsulaForProduct = useCallback((tam: number, sabor: string) => {
+    const list = config?.capsulaConfig || [];
+    const matchFlavor = (p: any) => !p.flavors || p.flavors.length === 0 || p.flavors.includes(sabor);
+    const matchSize = (p: any) => (p.sizes || []).some((s: any) => Number(s) === Number(tam));
+    return list.find(p => matchSize(p) && matchFlavor(p));
+  }, [config]);
+
 
   React.useEffect(() => {
     const startMonth = planningMonths[0];
@@ -250,6 +257,12 @@ export function SuppliesProjection() {
         reqObj[gk] = (reqObj[gk] || 0) + tapasNeeded;
       }
 
+      const capsulaName = findCapsulaForProduct(tamano, sabor)?.name;
+      if (capsulaName) {
+        const gk = getGroupKey(capsulaName);
+        reqObj[gk] = (reqObj[gk] || 0) + tapasNeeded;
+      }
+
       const isExternal = config?.externalProducts?.[marca]?.[tamano.toString()]?.includes(sabor);
       if (!isExternal) {
         const etiqName = `Etiqueta ${marca} / ${sabor} / ${tamano}cc`;
@@ -288,7 +301,7 @@ export function SuppliesProjection() {
       programmedDaysCount,
       programItemDailyAvg
     };
-  }, [config, productionPlans, findPreformaForProduct, findTermoForProduct, findStretchForProduct, findTapaForProduct]);
+  }, [config, productionPlans, findPreformaForProduct, findTermoForProduct, findStretchForProduct, findTapaForProduct, findCapsulaForProduct]);
 
   const combinedData = useMemo(() => {
     if (!config) return { projection: [], consumption: {}, items: [] };
@@ -319,11 +332,16 @@ export function SuppliesProjection() {
       const stretchWeight = config?.wasteWeights?.[tamano.toString()]?.stretch ?? WASTE_WEIGHTS[tamano]?.stretch ?? 0.4;
       const stretchNeededKg = (quantity / packsPerPaleta) * stretchWeight;
       const tapasNeeded = preformasNeeded;
+      const capsulasNeeded = preformasNeeded;
 
       reqObj[findPreformaForProduct(tamano, '', sabor)?.name || ''] = (reqObj[findPreformaForProduct(tamano, '', sabor)?.name || ''] || 0) + preformasNeeded;
       reqObj[findTermoForProduct(tamano, sabor)?.name || ''] = (reqObj[findTermoForProduct(tamano, sabor)?.name || ''] || 0) + termoNeededKg;
       reqObj[findStretchForProduct(tamano, sabor)?.name || ''] = (reqObj[findStretchForProduct(tamano, sabor)?.name || ''] || 0) + stretchNeededKg;
       reqObj[findTapaForProduct(tamano, sabor)?.name || ''] = (reqObj[findTapaForProduct(tamano, sabor)?.name || ''] || 0) + tapasNeeded;
+      const capsulaMatched = findCapsulaForProduct(tamano, sabor);
+      if (capsulaMatched) {
+        reqObj[capsulaMatched.name] = (reqObj[capsulaMatched.name] || 0) + capsulasNeeded;
+      }
 
       const isExternal = config?.externalProducts?.[marca]?.[tamano.toString()]?.includes(sabor);
       if (!isExternal) {
@@ -506,7 +524,7 @@ export function SuppliesProjection() {
     });
 
     return { projection: projectionResults.sort((a,b) => (a.stockoutMonthIndex === -1 ? 1 : b.stockoutMonthIndex === -1 ? -1 : a.stockoutMonthIndex - b.stockoutMonthIndex)), items: items };
-  }, [config, goals, planningMonths, stockData, findPreformaForProduct, findTermoForProduct, findStretchForProduct, findTapaForProduct, getPackingCategory, insumoMappings, etiquetasMappings, excludeJuiceAndSugar, programRequirementsByDay, simulationMode]);
+  }, [config, goals, planningMonths, stockData, findPreformaForProduct, findTermoForProduct, findStretchForProduct, findTapaForProduct, findCapsulaForProduct, getPackingCategory, insumoMappings, etiquetasMappings, excludeJuiceAndSugar, programRequirementsByDay, simulationMode]);
 
   const getDailySimulation = useCallback((item: any, includeTransit: boolean, mode: 'proyeccion' | 'programa' = simulationMode) => {
     if (!item) return { dailyData: [], events: [], itemTransits: [] };

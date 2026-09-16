@@ -311,6 +311,13 @@ export interface TapaConfig {
   sqlCode: string;
 }
 
+export interface CapsulaConfig {
+  name: string;
+  sizes: number[];
+  flavors: string[];
+  sqlCode: string;
+}
+
 export const DEFAULT_PREFORMAS: PreformaConfig[] = [];
 
 export const DEFAULT_TERMO: TermoConfig[] = [];
@@ -318,3 +325,5 @@ export const DEFAULT_TERMO: TermoConfig[] = [];
 export const DEFAULT_STRETCH: StretchConfig[] = [];
 
 export const DEFAULT_TAPAS: TapaConfig[] = [];
+
+export const DEFAULT_CAPSULAS: CapsulaConfig[] = [];

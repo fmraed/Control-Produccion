@@ -150,6 +150,13 @@ export function MotorCompras() {
     return list.find(p => matchSize(p) && matchFlavor(p)) || list.find(p => matchSize(p));
   }, [config]);
 
+  const findCapsulaForProduct = useCallback((tam: number, sabor: string) => {
+    const list = config?.capsulaConfig || [];
+    const matchFlavor = (p: any) => !p.flavors || p.flavors.length === 0 || p.flavors.includes(sabor);
+    const matchSize = (p: any) => (p.sizes || []).some((s: any) => Number(s) === Number(tam));
+    return list.find(p => matchSize(p) && matchFlavor(p));
+  }, [config]);
+
   const getLotConfig = useCallback((item: InsumosGrouped) => {
     let lotConf = { size: 1, unit: 'un' };
     if (config?.insumosPurchaseLots) {
@@ -478,11 +485,16 @@ export function MotorCompras() {
       const stretchWeight = config?.wasteWeights?.[tamano.toString()]?.stretch ?? WASTE_WEIGHTS[tamano]?.stretch ?? 0.4;
       const stretchNeededKg = (quantity / packsPerPaleta) * stretchWeight;
       const tapasNeeded = preformasNeeded;
+      const capsulasNeeded = preformasNeeded;
 
       reqObj[findPreformaForProduct(tamano, '', sabor)?.name || ''] = (reqObj[findPreformaForProduct(tamano, '', sabor)?.name || ''] || 0) + preformasNeeded;
       reqObj[findTermoForProduct(tamano, sabor)?.name || ''] = (reqObj[findTermoForProduct(tamano, sabor)?.name || ''] || 0) + termoNeededKg;
       reqObj[findStretchForProduct(tamano, sabor)?.name || ''] = (reqObj[findStretchForProduct(tamano, sabor)?.name || ''] || 0) + stretchNeededKg;
       reqObj[findTapaForProduct(tamano, sabor)?.name || ''] = (reqObj[findTapaForProduct(tamano, sabor)?.name || ''] || 0) + tapasNeeded;
+      const capsulaMatched = findCapsulaForProduct(tamano, sabor);
+      if (capsulaMatched) {
+        reqObj[capsulaMatched.name] = (reqObj[capsulaMatched.name] || 0) + capsulasNeeded;
+      }
 
       const isExternal = config?.externalProducts?.[marca]?.[tamano.toString()]?.includes(sabor);
       if (!isExternal) {
@@ -542,6 +554,9 @@ export function MotorCompras() {
             
             const tp = (config?.tapaConfig || []).find(t => t.name === itemName);
             if (tp?.sqlCode) allCodes.push(...String(tp.sqlCode).split(',').map(c => c.trim().toLowerCase()));
+
+            const cp = (config?.capsulaConfig || []).find(c => c.name === itemName);
+            if (cp?.sqlCode) allCodes.push(...String(cp.sqlCode).split(',').map(c => c.trim().toLowerCase()));
         });
         
         return Array.from(new Set(allCodes));
@@ -592,7 +607,7 @@ export function MotorCompras() {
     });
 
     return { projection: projectionResults, items: items };
-  }, [config, goals, planningMonths, stockData, findPreformaForProduct, findTermoForProduct, findStretchForProduct, findTapaForProduct, getPackingCategory, insumoMappings, etiquetasMappings, separatedSupplies]);
+  }, [config, goals, planningMonths, stockData, findPreformaForProduct, findTermoForProduct, findStretchForProduct, findTapaForProduct, findCapsulaForProduct, getPackingCategory, insumoMappings, etiquetasMappings, separatedSupplies]);
 
   // Filtered Transits List
   const filteredTransitsList = useMemo(() => {

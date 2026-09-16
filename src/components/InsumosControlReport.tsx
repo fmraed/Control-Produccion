@@ -916,6 +916,13 @@ export function InsumosControlReport() {
       return matched;
     };
 
+    const findCapsulaForProduct = (tam: number, sabor: string) => {
+      const list = config?.capsulaConfig || [];
+      const matchSize = (t: any) => (t.sizes || []).some((s: any) => Number(s) === Number(tam));
+      const matchFlavor = (t: any) => !t.flavors || t.flavors.length === 0 || t.flavors.includes(sabor);
+      return list.find(t => matchSize(t) && matchFlavor(t));
+    };
+
     // Initialize required sums to 0 for all active config insumos so they appear in output
     config.insumos?.forEach((i: string) => {
       insumosRequiredSum[i] = 0;
@@ -1016,6 +1023,11 @@ export function InsumosControlReport() {
             intermediateRequiredSum[tapaConf.name] = (intermediateRequiredSum[tapaConf.name] || 0) + tapasNeeded;
           }
 
+          const capsulaConf = findCapsulaForProduct(tamano, sabor);
+          if (capsulaConf) {
+            intermediateRequiredSum[capsulaConf.name] = (intermediateRequiredSum[capsulaConf.name] || 0) + tapasNeeded;
+          }
+
           const labelKey = `Etiqueta ${marca} / ${sabor} / ${tamano}cc`;
           intermediateRequiredSum[labelKey] = (intermediateRequiredSum[labelKey] || 0) + etiquetasNeeded;
         }
@@ -1074,6 +1086,11 @@ export function InsumosControlReport() {
       if (tapaConf) {
         insumosRequiredSum[tapaConf.name] = (insumosRequiredSum[tapaConf.name] || 0) + tapasNeeded;
         localTapaKey = tapaConf.name;
+      }
+
+      const capsulaConf = findCapsulaForProduct(tamano, sabor);
+      if (capsulaConf) {
+        insumosRequiredSum[capsulaConf.name] = (insumosRequiredSum[capsulaConf.name] || 0) + tapasNeeded;
       }
 
       const labelKey = `Etiqueta ${marca} / ${sabor} / ${tamano}cc`;
@@ -1151,6 +1168,11 @@ export function InsumosControlReport() {
         const tapaConf = findTapaForProduct(tamano, sabor);
         if (tapaConf) {
           monthlyInsumosRequiredSum[tapaConf.name] = (monthlyInsumosRequiredSum[tapaConf.name] || 0) + tapasNeeded;
+        }
+
+        const capsulaConf = findCapsulaForProduct(tamano, sabor);
+        if (capsulaConf) {
+          monthlyInsumosRequiredSum[capsulaConf.name] = (monthlyInsumosRequiredSum[capsulaConf.name] || 0) + tapasNeeded;
         }
 
         const labelKey = `Etiqueta ${marca} / ${sabor} / ${tamano}cc`;
@@ -1265,6 +1287,12 @@ export function InsumosControlReport() {
     const findTapaForProduct = (tamano: number, sabor: string) => {
       return (config?.tapaConfig || []).find(t => (t.sizes || []).some((s: any) => Number(s) === Number(tamano)));
     };
+    const findCapsulaForProduct = (tamano: number, sabor: string) => {
+      const list = config?.capsulaConfig || [];
+      const matchSize = (t: any) => (t.sizes || []).some((s: any) => Number(s) === Number(tamano));
+      const matchFlavor = (t: any) => !t.flavors || t.flavors.length === 0 || t.flavors.includes(sabor);
+      return list.find(t => matchSize(t) && matchFlavor(t));
+    };
 
     plans.forEach(plan => {
       const marca = plan.brand || '';
@@ -1305,6 +1333,9 @@ export function InsumosControlReport() {
 
       const tpConf = findTapaForProduct(tamano, sabor);
       if (tpConf) planRequiredSum[tpConf.name] = (planRequiredSum[tpConf.name] || 0) + preformasNeeded;
+
+      const cpConf = findCapsulaForProduct(tamano, sabor);
+      if (cpConf) planRequiredSum[cpConf.name] = (planRequiredSum[cpConf.name] || 0) + preformasNeeded;
 
       const labelKey = `Etiqueta ${marca} / ${sabor} / ${tamano}cc`;
       planRequiredSum[labelKey] = (planRequiredSum[labelKey] || 0) + preformasNeeded;
@@ -1349,6 +1380,9 @@ export function InsumosControlReport() {
 
       const tpConf = findTapaForProduct(tamano, sabor);
       if (tpConf) planMonthlyRequiredSum[tpConf.name] = (planMonthlyRequiredSum[tpConf.name] || 0) + preformasNeeded;
+
+      const cpConf = findCapsulaForProduct(tamano, sabor);
+      if (cpConf) planMonthlyRequiredSum[cpConf.name] = (planMonthlyRequiredSum[cpConf.name] || 0) + preformasNeeded;
 
       const labelKey = `Etiqueta ${marca} / ${sabor} / ${tamano}cc`;
       planMonthlyRequiredSum[labelKey] = (planMonthlyRequiredSum[labelKey] || 0) + preformasNeeded;

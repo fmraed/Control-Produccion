@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
-import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, SABORES_SIN_JARABE, CO2_VOLUMES, WASTE_WEIGHTS, DEFAULT_INSUMOS, DEFAULT_PREFORMAS, DEFAULT_TERMO, DEFAULT_STRETCH, DEFAULT_TAPAS, PreformaConfig, TermoConfig, StretchConfig, TapaConfig, FLAVOR_COLORS } from '../constants';
+import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, SABORES_SIN_JARABE, CO2_VOLUMES, WASTE_WEIGHTS, DEFAULT_INSUMOS, DEFAULT_PREFORMAS, DEFAULT_TERMO, DEFAULT_STRETCH, DEFAULT_TAPAS, PreformaConfig, TermoConfig, StretchConfig, TapaConfig, FLAVOR_COLORS, CapsulaConfig, DEFAULT_CAPSULAS } from '../constants';
 
 interface AppConfig {
   flavors: string[];
@@ -68,6 +68,7 @@ interface AppConfig {
   termoConfig?: TermoConfig[];
   stretchConfig?: StretchConfig[];
   tapaConfig?: TapaConfig[];
+  capsulaConfig?: CapsulaConfig[];
   categorySecurityDays?: Record<string, number>;
   insumosCriticality?: Record<string, number>;
   insumosPurchaseLots?: Record<string, { size: number; unit: string }>;
@@ -132,6 +133,7 @@ export function useAppConfig() {
           termoConfig: data.termoConfig || [],
           stretchConfig: data.stretchConfig || [],
           tapaConfig: data.tapaConfig || [],
+          capsulaConfig: data.capsulaConfig || [],
           categorySecurityDays: data.categorySecurityDays || {},
           insumosCriticality: data.insumosCriticality || {},
           insumosPurchaseLots: data.insumosPurchaseLots || {},

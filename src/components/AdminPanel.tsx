@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment, useMemo } from 'react';
 import { collection, query, orderBy, onSnapshot, doc, getDoc, setDoc, addDoc, deleteDoc, getDocs, writeBatch, updateDoc, where } from 'firebase/firestore';
 import { db } from '../firebase';
-import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, CO2_VOLUMES, SABORES_SIN_JARABE, RANGOS_MIXTO, WASTE_WEIGHTS, DEFAULT_INSUMOS, PreformaConfig, TermoConfig, StretchConfig, TapaConfig, FLAVOR_COLORS } from '../constants';
+import { SABORES, TAMANOS, LINEAS, VELOCIDAD_MATRIX, MARCAS, SUPERVISORES, PACKS_POR_PALETA, BOTELLAS_POR_PACK, CO2_VOLUMES, SABORES_SIN_JARABE, RANGOS_MIXTO, WASTE_WEIGHTS, DEFAULT_INSUMOS, PreformaConfig, TermoConfig, StretchConfig, TapaConfig, FLAVOR_COLORS, CapsulaConfig, DEFAULT_CAPSULAS } from '../constants';
 import { Settings, Save, CheckCircle2, XCircle, AlertCircle, Plus, Trash2, Users, Database, FlaskConical, Link2, Clock, Calendar, ShieldCheck, UserCog, Briefcase, AlertTriangle, Hash, Package, TrendingUp, Scale, ArrowUp, ArrowDown } from 'lucide-react';
 import { UserProfile, UserRole, RolePermissions } from '../types';
 import { SQLIntegration } from './SQLIntegration';
@@ -71,6 +71,7 @@ interface AppConfig {
   termoConfig?: TermoConfig[];
   stretchConfig?: StretchConfig[];
   tapaConfig?: TapaConfig[];
+  capsulaConfig?: CapsulaConfig[];
   categorySecurityDays?: Record<string, number>;
   insumosCriticality?: Record<string, number>;
   insumosPurchaseLots?: Record<string, { size: number; unit: string }>;
@@ -305,8 +306,9 @@ export function AdminPanel() {
     (config?.termoConfig || []).forEach(t => items.push(t.name));
     (config?.stretchConfig || []).forEach(s => items.push(s.name));
     (config?.tapaConfig || []).forEach(t => items.push(t.name));
+    (config?.capsulaConfig || []).forEach(c => items.push(c.name));
     return items;
-  }, [config?.preformasConfig, config?.termoConfig, config?.stretchConfig, config?.tapaConfig]);
+  }, [config?.preformasConfig, config?.termoConfig, config?.stretchConfig, config?.tapaConfig, config?.capsulaConfig]);
 
   const uniqueInsumoCategories = useMemo(() => {
     if (!config) return [];
@@ -445,6 +447,7 @@ export function AdminPanel() {
           termoConfig: data.termoConfig || [],
           stretchConfig: data.stretchConfig || [],
           tapaConfig: data.tapaConfig || [],
+          capsulaConfig: data.capsulaConfig || [],
           categorySecurityDays: data.categorySecurityDays || {},
           insumosCriticality: data.insumosCriticality || {},
           insumosPurchaseLots: data.insumosPurchaseLots || {},
@@ -565,6 +568,7 @@ export function AdminPanel() {
           termoConfig: [],
           stretchConfig: [],
           tapaConfig: [],
+          capsulaConfig: [],
           categorySecurityDays: {},
           insumosCriticality: {},
           insumosPurchaseLots: {},
@@ -4512,12 +4516,15 @@ export function AdminPanel() {
                      </table>
                    </div>
                  </div>
-                 {/* Parámetros de Compra de Envases */}
-                 <div className="mt-8 mb-4 border-t border-gray-200 pt-6">
-                   <h4 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
-                     <Package className="w-4 h-4 text-indigo-600" />
-                     Parámetros de Compra de Envases
-                   </h4>
+                  {/* Cápsulas */}
+
+
+                  {/* Parámetros de Compra de Envases */}
+                  <div className="mt-8 mb-4 border-t border-gray-200 pt-6">
+                    <h4 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
+                      <Package className="w-4 h-4 text-indigo-600" />
+                      Parámetros de Compra de Envases
+                    </h4>
                    <p className="text-xs text-gray-500 mb-4">Configure la criticidad y el lote de compra para preformas, termo, stretch y tapas.</p>
                    <div className="overflow-x-auto bg-white border border-gray-200 rounded-lg shadow-sm">
                      <table className="min-w-full divide-y divide-gray-200 text-sm">
