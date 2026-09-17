@@ -4388,7 +4388,7 @@ export function AdminPanel() {
                          ...config,
                          tapaConfig: [
                            ...current,
-                           { name: 'Nueva Tapa', sizes: [3000], flavors: [], sqlCode: '' }
+                           { name: 'Nueva Tapa', sizes: [3000], brands: [], flavors: [], sqlCode: '' }
                          ]
                        });
                      }}
@@ -4403,9 +4403,10 @@ export function AdminPanel() {
                      <table className="w-full text-left border-collapse">
                        <thead className="bg-gray-100 sticky top-0 z-10 shadow-sm">
                          <tr>
-                           <th className="px-4 py-2 text-[10px] uppercase font-bold text-gray-500 w-[25%]">Insumo</th>
-                           <th className="px-4 py-2 text-[10px] uppercase font-bold text-gray-500 w-[35%]">Tamaños (cc)</th>
-                           <th className="px-4 py-2 text-[10px] uppercase font-bold text-gray-500 w-[20%]">Sabores (Opc)</th>
+                           <th className="px-4 py-2 text-[10px] uppercase font-bold text-gray-500 w-[20%]">Insumo</th>
+                           <th className="px-4 py-2 text-[10px] uppercase font-bold text-gray-500 w-[25%]">Tamaños (cc)</th>
+                           <th className="px-4 py-2 text-[10px] uppercase font-bold text-gray-500 w-[20%]">Marcas (Opc)</th>
+                           <th className="px-4 py-2 text-[10px] uppercase font-bold text-gray-500 w-[25%]">Sabores (Opc)</th>
                            <th className="px-4 py-2 text-[10px] uppercase font-bold text-gray-500 w-[10%]">Sistema</th>
                            <th className="px-4 py-2 text-right"></th>
                          </tr>
@@ -4450,6 +4451,36 @@ export function AdminPanel() {
                                        }`}
                                      >
                                        {size}
+                                     </button>
+                                   );
+                                 })}
+                               </div>
+                             </td>
+                             <td className="px-4 py-3 align-top">
+                               <div className="flex flex-wrap gap-1 max-h-[100px] overflow-y-auto w-full">
+                                 {(config.brands || []).map(brand => {
+                                   const isSelected = (tapa.brands || []).includes(brand);
+                                   return (
+                                     <button
+                                       key={brand}
+                                       type="button"
+                                       onClick={() => {
+                                         const updated = [...(config.tapaConfig || [])];
+                                         const currentBrands = updated[idx].brands || [];
+                                         if (isSelected) {
+                                           updated[idx].brands = currentBrands.filter(b => b !== brand);
+                                         } else {
+                                           updated[idx].brands = [...currentBrands, brand];
+                                         }
+                                         setConfig({ ...config, tapaConfig: updated });
+                                       }}
+                                       className={`px-2 py-1 rounded text-[10px] font-medium transition-all ${
+                                         isSelected
+                                           ? "bg-purple-100 text-purple-800 border border-purple-300 shadow-sm"
+                                           : "bg-white text-gray-400 border border-gray-200 hover:border-gray-300 hover:text-gray-600"
+                                       }`}
+                                     >
+                                       {brand}
                                      </button>
                                    );
                                  })}
@@ -4517,6 +4548,182 @@ export function AdminPanel() {
                    </div>
                  </div>
                   {/* Cápsulas */}
+                  <div className="mt-8 mb-4 border-t border-gray-200 pt-6">
+                    <div className="flex justify-between items-center mb-4 pb-2">
+                      <div>
+                        <h4 className="text-sm font-bold text-gray-800 mb-1 flex items-center gap-2">
+                          <Package className="w-4 h-4 text-indigo-600" />
+                          Cápsulas (Tapas de seguridad / Cuellos)
+                        </h4>
+                        <p className="text-xs text-gray-500">Configure los calibres (cc), sabores y código del sistema para las cápsulas.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const current = config.capsulaConfig || [];
+                          setConfig({
+                            ...config,
+                            capsulaConfig: [
+                              ...current,
+                              { name: 'Nueva Cápsula', sizes: [900], flavors: [], brands: [], sqlCode: '' }
+                            ]
+                          });
+                        }}
+                        className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-blue-700 transition flex items-center gap-1 shadow-sm"
+                      >
+                        <Plus className="w-3 h-3" /> Agregar
+                      </button>
+                    </div>
+
+                    <div className="overflow-x-auto bg-white border border-gray-200 rounded-lg shadow-sm">
+                      <table className="min-w-full divide-y divide-gray-200 text-sm">
+                        <thead className="bg-gray-50/50">
+                          <tr>
+                            <th className="px-4 py-2 text-left text-[10px] uppercase font-bold text-gray-500 w-[20%]">Insumo</th>
+                            <th className="px-4 py-2 text-left text-[10px] uppercase font-bold text-gray-500 w-[25%]">Tamaños (cc)</th>
+                            <th className="px-4 py-2 text-left text-[10px] uppercase font-bold text-gray-500 w-[20%]">Marcas (Opcional)</th>
+                            <th className="px-4 py-2 text-left text-[10px] uppercase font-bold text-gray-500 w-[25%]">Sabores (Opcional)</th>
+                            <th className="px-4 py-2 text-left text-[10px] uppercase font-bold text-gray-500 w-[10%]">Cód. Sistema (SQL)</th>
+                            <th className="px-4 py-2 text-right"></th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {(config.capsulaConfig || []).map((capsula, idx) => (
+                            <tr key={idx} className="hover:bg-gray-50/50 transition-colors">
+                              <td className="px-4 py-3 align-top">
+                                <input
+                                  type="text"
+                                  value={capsula.name}
+                                  onChange={(e) => {
+                                    const updated = [...(config.capsulaConfig || [])];
+                                    updated[idx].name = e.target.value;
+                                    setConfig({ ...config, capsulaConfig: updated });
+                                  }}
+                                  className="w-full bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-xs font-bold text-gray-800 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none"
+                                />
+                              </td>
+                              <td className="px-4 py-3 align-top">
+                                <div className="flex flex-wrap gap-1">
+                                  {config.sizes.map(size => {
+                                    const isSelected = (capsula.sizes || []).includes(size);
+                                    return (
+                                      <button
+                                        key={size}
+                                        type="button"
+                                        onClick={() => {
+                                          const updated = [...(config.capsulaConfig || [])];
+                                          const currentSizes = updated[idx].sizes || [];
+                                          if (isSelected) {
+                                            updated[idx].sizes = currentSizes.filter(s => s !== size);
+                                          } else {
+                                            updated[idx].sizes = [...currentSizes, size];
+                                          }
+                                          setConfig({ ...config, capsulaConfig: updated });
+                                        }}
+                                        className={`px-2 py-1 rounded text-[10px] font-black tracking-tight transition-all ${
+                                          isSelected
+                                            ? 'bg-blue-100 text-blue-700 border border-blue-300 shadow-inner'
+                                            : 'bg-white text-gray-400 border border-gray-200 hover:border-gray-300 hover:text-gray-600'
+                                        }`}
+                                      >
+                                        {size}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 align-top">
+                                <div className="flex flex-wrap gap-1 max-h-[100px] overflow-y-auto w-full">
+                                  {(config.brands || []).map(brand => {
+                                    const isSelected = (capsula.brands || []).includes(brand);
+                                    return (
+                                      <button
+                                        key={brand}
+                                        type="button"
+                                        onClick={() => {
+                                          const updated = [...(config.capsulaConfig || [])];
+                                          const currentBrands = updated[idx].brands || [];
+                                          if (isSelected) {
+                                            updated[idx].brands = currentBrands.filter(b => b !== brand);
+                                          } else {
+                                            updated[idx].brands = [...currentBrands, brand];
+                                          }
+                                          setConfig({ ...config, capsulaConfig: updated });
+                                        }}
+                                        className={`px-2 py-1 rounded text-[10px] font-medium transition-all ${
+                                          isSelected
+                                            ? 'bg-purple-100 text-purple-800 border border-purple-300 shadow-sm'
+                                            : 'bg-white text-gray-400 border border-gray-200 hover:border-gray-300 hover:text-gray-600'
+                                        }`}
+                                      >
+                                        {brand}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 align-top">
+                                <div className="flex flex-wrap gap-1 max-h-[100px] overflow-y-auto w-full">
+                                  {config.flavors.map(flavor => {
+                                    const isSelected = (capsula.flavors || []).includes(flavor);
+                                    return (
+                                      <button
+                                        key={flavor}
+                                        type="button"
+                                        onClick={() => {
+                                          const updated = [...(config.capsulaConfig || [])];
+                                          const currentFlavors = updated[idx].flavors || [];
+                                          if (isSelected) {
+                                            updated[idx].flavors = currentFlavors.filter(s => s !== flavor);
+                                          } else {
+                                            updated[idx].flavors = [...currentFlavors, flavor];
+                                          }
+                                          setConfig({ ...config, capsulaConfig: updated });
+                                        }}
+                                        className={`px-2 py-1 rounded text-[10px] font-medium transition-all ${
+                                          isSelected
+                                            ? 'bg-amber-100 text-amber-800 border border-amber-300 shadow-sm'
+                                            : 'bg-white text-gray-400 border border-gray-200 hover:border-gray-300 hover:text-gray-600'
+                                        }`}
+                                      >
+                                        {flavor}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 align-top">
+                                <input
+                                  type="text"
+                                  value={capsula.sqlCode || ''}
+                                  placeholder="Cód"
+                                  onChange={(e) => {
+                                    const updated = [...(config.capsulaConfig || [])];
+                                    updated[idx].sqlCode = e.target.value;
+                                    setConfig({ ...config, capsulaConfig: updated });
+                                  }}
+                                  className="w-full font-mono bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-xs focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none"
+                                />
+                              </td>
+                              <td className="px-4 py-3 text-right align-top">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = (config.capsulaConfig || []).filter((_, i) => i !== idx);
+                                    setConfig({ ...config, capsulaConfig: updated });
+                                  }}
+                                  className="text-gray-400 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-colors"
+                                  title="Eliminar"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
 
 
                   {/* Parámetros de Compra de Envases */}

@@ -308,6 +308,7 @@ export interface TapaConfig {
   name: string;
   sizes: number[];
   flavors: string[];
+  brands?: string[];
   sqlCode: string;
 }
 
@@ -315,6 +316,7 @@ export interface CapsulaConfig {
   name: string;
   sizes: number[];
   flavors: string[];
+  brands?: string[];
   sqlCode: string;
 }
 

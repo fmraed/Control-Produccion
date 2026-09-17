@@ -738,7 +738,6 @@ export default function App() {
                           Desperdicio
                         </button>
                       )}
-
                       {permissions.viewSyrup !== false && (
                         <button
                           onClick={() => {

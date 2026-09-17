@@ -8,14 +8,15 @@ import { es } from 'date-fns/locale';
 import { SABORES, TAMANOS, LINEAS } from '../constants';
 import { useAppConfig } from '../hooks/useAppConfig';
 import { getLogicalDate, getHistoricalMonths } from '../utils';
+import { HistoricalWasteReport } from './HistoricalWasteReport';
 
 export function WasteReport() {
   const { config, getFilteredSizes, availableLines, availableBrands, shouldShowReport } = useAppConfig();
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [elaboracionReports, setElaboracionReports] = useState<ElaboracionReport[]>([]);
+  const [activeTab, setActiveTab] = useState<'general' | 'co2' | 'jarabe' | 'resumen' | 'historico'>('general');
   const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
-  const [activeTab, setActiveTab] = useState<'general' | 'co2' | 'jarabe' | 'resumen'>('general');
 
   useEffect(() => {
     const [year, month] = selectedMonth.split('-');
@@ -564,22 +565,32 @@ export function WasteReport() {
             >
               Resumen
             </button>
+            <button
+              onClick={() => setActiveTab('historico')}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                activeTab === 'historico' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Histórico
+            </button>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Calendar className="w-4 h-4 text-gray-400" />
-          <select
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2 min-w-[180px]"
-          >
-            {months.map(m => (
-              <option key={m} value={m}>
-                {format(parseISO(`${m}-01`), 'MMMM yyyy', { locale: es }).replace(/^\w/, c => c.toUpperCase())}
-              </option>
-            ))}
-          </select>
-        </div>
+        {activeTab !== 'historico' && (
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-gray-400" />
+            <select
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2 min-w-[180px]"
+            >
+              {months.map(m => (
+                <option key={m} value={m}>
+                  {format(parseISO(`${m}-01`), 'MMMM yyyy', { locale: es }).replace(/^\w/, c => c.toUpperCase())}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {activeTab === 'general' ? (
@@ -975,7 +986,7 @@ export function WasteReport() {
             </div>
           </div>
         </div>
-      ) : null}
+      ) : activeTab === 'historico' ? <HistoricalWasteReport /> : null}
     </div>
   );
 }

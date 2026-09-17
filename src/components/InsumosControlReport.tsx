@@ -903,24 +903,20 @@ export function InsumosControlReport() {
       return matched;
     };
 
-    const findTapaForProduct = (tam: number, sabor: string) => {
+    const findTapaForProduct = (tam: number, sabor: string, marca: string) => {
       const list = config?.tapaConfig || [];
       const matchSize = (t: any) => (t.sizes || []).some((s: any) => Number(s) === Number(tam));
-      let matched = list.find(t => matchSize(t) && t.flavors && t.flavors.includes(sabor));
-      if (!matched) {
-        matched = list.find(t => matchSize(t) && (!t.flavors || t.flavors.length === 0));
-      }
-      if (!matched) {
-        matched = list.find(t => matchSize(t));
-      }
-      return matched;
+      const matchFlavor = (t: any) => !t.flavors || t.flavors.length === 0 || t.flavors.includes(sabor);
+      const matchBrand = (t: any) => !t.brands || t.brands.length === 0 || t.brands.includes(marca);
+      return list.find(t => matchSize(t) && matchFlavor(t) && matchBrand(t));
     };
 
-    const findCapsulaForProduct = (tam: number, sabor: string) => {
+    const findCapsulaForProduct = (tam: number, sabor: string, marca: string) => {
       const list = config?.capsulaConfig || [];
       const matchSize = (t: any) => (t.sizes || []).some((s: any) => Number(s) === Number(tam));
       const matchFlavor = (t: any) => !t.flavors || t.flavors.length === 0 || t.flavors.includes(sabor);
-      return list.find(t => matchSize(t) && matchFlavor(t));
+      const matchBrand = (t: any) => !t.brands || t.brands.length === 0 || t.brands.includes(marca);
+      return list.find(t => matchSize(t) && matchFlavor(t) && matchBrand(t));
     };
 
     // Initialize required sums to 0 for all active config insumos so they appear in output
@@ -1018,12 +1014,12 @@ export function InsumosControlReport() {
             intermediateRequiredSum[stretchConf.name] = (intermediateRequiredSum[stretchConf.name] || 0) + stretchNeededKg;
           }
 
-          const tapaConf = findTapaForProduct(tamano, sabor);
+          const tapaConf = findTapaForProduct(tamano, sabor, marca);
           if (tapaConf) {
             intermediateRequiredSum[tapaConf.name] = (intermediateRequiredSum[tapaConf.name] || 0) + tapasNeeded;
           }
 
-          const capsulaConf = findCapsulaForProduct(tamano, sabor);
+          const capsulaConf = findCapsulaForProduct(tamano, sabor, marca);
           if (capsulaConf) {
             intermediateRequiredSum[capsulaConf.name] = (intermediateRequiredSum[capsulaConf.name] || 0) + tapasNeeded;
           }
@@ -1081,14 +1077,14 @@ export function InsumosControlReport() {
         insumosRequiredSum[stretchConf.name] = (insumosRequiredSum[stretchConf.name] || 0) + stretchNeededKg;
       }
 
-      const tapaConf = findTapaForProduct(tamano, sabor);
+      const tapaConf = findTapaForProduct(tamano, sabor, marca);
       let localTapaKey = '';
       if (tapaConf) {
         insumosRequiredSum[tapaConf.name] = (insumosRequiredSum[tapaConf.name] || 0) + tapasNeeded;
         localTapaKey = tapaConf.name;
       }
 
-      const capsulaConf = findCapsulaForProduct(tamano, sabor);
+      const capsulaConf = findCapsulaForProduct(tamano, sabor, marca);
       if (capsulaConf) {
         insumosRequiredSum[capsulaConf.name] = (insumosRequiredSum[capsulaConf.name] || 0) + tapasNeeded;
       }
@@ -1165,12 +1161,12 @@ export function InsumosControlReport() {
           monthlyInsumosRequiredSum[stretchConf.name] = (monthlyInsumosRequiredSum[stretchConf.name] || 0) + stretchNeededKg;
         }
 
-        const tapaConf = findTapaForProduct(tamano, sabor);
+        const tapaConf = findTapaForProduct(tamano, sabor, marca);
         if (tapaConf) {
           monthlyInsumosRequiredSum[tapaConf.name] = (monthlyInsumosRequiredSum[tapaConf.name] || 0) + tapasNeeded;
         }
 
-        const capsulaConf = findCapsulaForProduct(tamano, sabor);
+        const capsulaConf = findCapsulaForProduct(tamano, sabor, marca);
         if (capsulaConf) {
           monthlyInsumosRequiredSum[capsulaConf.name] = (monthlyInsumosRequiredSum[capsulaConf.name] || 0) + tapasNeeded;
         }
@@ -1284,14 +1280,19 @@ export function InsumosControlReport() {
     const findStretchForProduct = (tamano: number, sabor: string) => {
       return (config?.stretchConfig || []).find(s => (s.sizes || []).some((s: any) => Number(s) === Number(tamano)));
     };
-    const findTapaForProduct = (tamano: number, sabor: string) => {
-      return (config?.tapaConfig || []).find(t => (t.sizes || []).some((s: any) => Number(s) === Number(tamano)));
+    const findTapaForProduct = (tamano: number, sabor: string, marca: string) => {
+      const list = config?.tapaConfig || [];
+      const matchSize = (t: any) => (t.sizes || []).some((s: any) => Number(s) === Number(tamano));
+      const matchFlavor = (t: any) => !t.flavors || t.flavors.length === 0 || t.flavors.includes(sabor);
+      const matchBrand = (t: any) => !t.brands || t.brands.length === 0 || t.brands.includes(marca);
+      return list.find(t => matchSize(t) && matchFlavor(t) && matchBrand(t));
     };
-    const findCapsulaForProduct = (tamano: number, sabor: string) => {
+    const findCapsulaForProduct = (tamano: number, sabor: string, marca: string) => {
       const list = config?.capsulaConfig || [];
       const matchSize = (t: any) => (t.sizes || []).some((s: any) => Number(s) === Number(tamano));
       const matchFlavor = (t: any) => !t.flavors || t.flavors.length === 0 || t.flavors.includes(sabor);
-      return list.find(t => matchSize(t) && matchFlavor(t));
+      const matchBrand = (t: any) => !t.brands || t.brands.length === 0 || t.brands.includes(marca);
+      return list.find(t => matchSize(t) && matchFlavor(t) && matchBrand(t));
     };
 
     plans.forEach(plan => {
@@ -1331,10 +1332,10 @@ export function InsumosControlReport() {
       const sConf = findStretchForProduct(tamano, sabor);
       if (sConf) planRequiredSum[sConf.name] = (planRequiredSum[sConf.name] || 0) + stretchNeededKg;
 
-      const tpConf = findTapaForProduct(tamano, sabor);
+      const tpConf = findTapaForProduct(tamano, sabor, marca);
       if (tpConf) planRequiredSum[tpConf.name] = (planRequiredSum[tpConf.name] || 0) + preformasNeeded;
 
-      const cpConf = findCapsulaForProduct(tamano, sabor);
+      const cpConf = findCapsulaForProduct(tamano, sabor, marca);
       if (cpConf) planRequiredSum[cpConf.name] = (planRequiredSum[cpConf.name] || 0) + preformasNeeded;
 
       const labelKey = `Etiqueta ${marca} / ${sabor} / ${tamano}cc`;
@@ -1378,10 +1379,10 @@ export function InsumosControlReport() {
       const sConf = findStretchForProduct(tamano, sabor);
       if (sConf) planMonthlyRequiredSum[sConf.name] = (planMonthlyRequiredSum[sConf.name] || 0) + stretchNeededKg;
 
-      const tpConf = findTapaForProduct(tamano, sabor);
+      const tpConf = findTapaForProduct(tamano, sabor, marca);
       if (tpConf) planMonthlyRequiredSum[tpConf.name] = (planMonthlyRequiredSum[tpConf.name] || 0) + preformasNeeded;
 
-      const cpConf = findCapsulaForProduct(tamano, sabor);
+      const cpConf = findCapsulaForProduct(tamano, sabor, marca);
       if (cpConf) planMonthlyRequiredSum[cpConf.name] = (planMonthlyRequiredSum[cpConf.name] || 0) + preformasNeeded;
 
       const labelKey = `Etiqueta ${marca} / ${sabor} / ${tamano}cc`;

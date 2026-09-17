@@ -108,18 +108,20 @@ export function SuppliesProjection() {
     return list.find(p => matchSize(p)) || list[0];
   }, [config]);
 
-  const findTapaForProduct = useCallback((tam: number, sabor: string) => {
+  const findTapaForProduct = useCallback((tam: number, sabor: string, marca: string) => {
     const list = config?.tapaConfig || [];
     const matchFlavor = (p: any) => !p.flavors || p.flavors.length === 0 || p.flavors.includes(sabor);
     const matchSize = (p: any) => (p.sizes || []).some((s: any) => Number(s) === Number(tam));
-    return list.find(p => matchSize(p) && matchFlavor(p)) || list.find(p => matchSize(p));
+    const matchBrand = (p: any) => !p.brands || p.brands.length === 0 || p.brands.includes(marca);
+    return list.find(p => matchSize(p) && matchFlavor(p) && matchBrand(p));
   }, [config]);
 
-  const findCapsulaForProduct = useCallback((tam: number, sabor: string) => {
+  const findCapsulaForProduct = useCallback((tam: number, sabor: string, marca: string) => {
     const list = config?.capsulaConfig || [];
     const matchFlavor = (p: any) => !p.flavors || p.flavors.length === 0 || p.flavors.includes(sabor);
     const matchSize = (p: any) => (p.sizes || []).some((s: any) => Number(s) === Number(tam));
-    return list.find(p => matchSize(p) && matchFlavor(p));
+    const matchBrand = (p: any) => !p.brands || p.brands.length === 0 || p.brands.includes(marca);
+    return list.find(p => matchSize(p) && matchFlavor(p) && matchBrand(p));
   }, [config]);
 
 
@@ -251,13 +253,13 @@ export function SuppliesProjection() {
         reqObj[gk] = (reqObj[gk] || 0) + stretchNeededKg;
       }
 
-      const tapaName = findTapaForProduct(tamano, sabor)?.name;
+      const tapaName = findTapaForProduct(tamano, sabor, marca)?.name;
       if (tapaName) {
         const gk = getGroupKey(tapaName);
         reqObj[gk] = (reqObj[gk] || 0) + tapasNeeded;
       }
 
-      const capsulaName = findCapsulaForProduct(tamano, sabor)?.name;
+      const capsulaName = findCapsulaForProduct(tamano, sabor, marca)?.name;
       if (capsulaName) {
         const gk = getGroupKey(capsulaName);
         reqObj[gk] = (reqObj[gk] || 0) + tapasNeeded;
@@ -337,8 +339,11 @@ export function SuppliesProjection() {
       reqObj[findPreformaForProduct(tamano, '', sabor)?.name || ''] = (reqObj[findPreformaForProduct(tamano, '', sabor)?.name || ''] || 0) + preformasNeeded;
       reqObj[findTermoForProduct(tamano, sabor)?.name || ''] = (reqObj[findTermoForProduct(tamano, sabor)?.name || ''] || 0) + termoNeededKg;
       reqObj[findStretchForProduct(tamano, sabor)?.name || ''] = (reqObj[findStretchForProduct(tamano, sabor)?.name || ''] || 0) + stretchNeededKg;
-      reqObj[findTapaForProduct(tamano, sabor)?.name || ''] = (reqObj[findTapaForProduct(tamano, sabor)?.name || ''] || 0) + tapasNeeded;
-      const capsulaMatched = findCapsulaForProduct(tamano, sabor);
+      const tapaMatched = findTapaForProduct(tamano, sabor, marca);
+      if (tapaMatched) {
+        reqObj[tapaMatched.name] = (reqObj[tapaMatched.name] || 0) + tapasNeeded;
+      }
+      const capsulaMatched = findCapsulaForProduct(tamano, sabor, marca);
       if (capsulaMatched) {
         reqObj[capsulaMatched.name] = (reqObj[capsulaMatched.name] || 0) + capsulasNeeded;
       }
