@@ -97,3 +97,42 @@ export function getHistoricalMonths(startDateStr: string = '2023-01-01'): string
   }
   return months.sort().reverse();
 }
+
+/**
+ * Determines whether a product requires quality control / liberation before being released to stock.
+ * Checks brand-flavor combination, syrup formulas, or legacy qualityControlFlavors.
+ */
+export function isProductRequiringQC(
+  brand: string,
+  flavor: string,
+  config?: any
+): boolean {
+  if (!config) return false;
+
+  const b = (brand || '').trim();
+  const f = (flavor || '').trim();
+  if (!b && !f) return false;
+
+  // 1. Check explicit flag in syrupFormulas if set for this brand & flavor
+  if (config.syrupFormulas?.[b]?.[f]?.requiresQC !== undefined) {
+    return Boolean(config.syrupFormulas[b][f].requiresQC);
+  }
+
+  // 2. Check qualityControlBrandFlavors list if present
+  if (Array.isArray(config.qualityControlBrandFlavors)) {
+    const keyPipe = `${b}|${f}`.toLowerCase();
+    const keyDash = `${b}-${f}`.toLowerCase();
+    const keySpaceDash = `${b} - ${f}`.toLowerCase();
+    return config.qualityControlBrandFlavors.some((item: string) => {
+      const lower = (item || '').trim().toLowerCase();
+      return lower === keyPipe || lower === keyDash || lower === keySpaceDash;
+    });
+  }
+
+  // 3. Fallback to legacy qualityControlFlavors (defaults to ['Agua'])
+  const legacyList: string[] = Array.isArray(config.qualityControlFlavors)
+    ? config.qualityControlFlavors
+    : ['Agua'];
+  return legacyList.some(item => item.trim().toLowerCase() === f.toLowerCase());
+}
+

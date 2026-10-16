@@ -8,7 +8,7 @@ import { es } from 'date-fns/locale';
 import { BarChart3, Database, Search, RefreshCw, AlertCircle, TrendingUp, Package, Clock, AlertTriangle, CheckCircle2, Calendar, Save, Sparkles, Info } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { useAppConfig } from '../hooks/useAppConfig';
-import { getLogicalDate } from '../utils';
+import { getLogicalDate, isProductRequiringQC } from '../utils';
 import { SQL_PRODUCT_MAPPING } from '../constants';
 
 const FLAVOR_PRIORITY: Record<string, number> = {
@@ -65,13 +65,15 @@ export function StockControl() {
   const isAdmin = auth.currentUser?.email === 'fraed.fordrinks@gmail.com';
 
   const getProductPendingQuantity = (
+    brand: string,
     flavor: string,
     sqlCode?: string,
-    pendingList: any[] = sqlPending,
-    qcFlavors: string[] = config?.qualityControlFlavors || ['Agua']
+    pendingList: any[] = sqlPending
   ): number => {
     if (!sqlCode) return 0;
-    const requiresQC = qcFlavors.some(f => f.trim().toLowerCase() === flavor.trim().toLowerCase());
+    const requiresQC = isProductRequiringQC(brand, flavor, config);
+    if (!requiresQC) return 0;
+
     const pendingData = pendingList.find(s => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim());
     if (!pendingData) return 0;
 
@@ -81,10 +83,7 @@ export function StockControl() {
       : Number(pendingData.nu_cantidad || pendingData.nu_Cantidad || 0);
 
     if (isNaN(rawQty) || rawQty <= 0) return 0;
-    if (requiresQC || qcFlavors.length === 0 || rawQty > 0) {
-      return rawQty;
-    }
-    return 0;
+    return rawQty;
   };
 
   const fetchMappings = async () => {
@@ -126,7 +125,7 @@ export function StockControl() {
         const legacyKey = `${p.sabor}-${p.tamano}`;
         const sqlCode = sqlMappings[mappingKey] || sqlMappings[legacyKey];
         const sqlData = sqlStock.find((s: any) => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim());
-        const pendingQty = getProductPendingQuantity(p.sabor, sqlCode);
+        const pendingQty = getProductPendingQuantity(p.marca, p.sabor, sqlCode);
         const baseStock = sqlData ? (sqlData.stock_inicial ?? sqlData.stock_actual ?? 0) : 0;
         toSave[p.key] = baseStock + pendingQty;
       });
@@ -377,7 +376,7 @@ export function StockControl() {
         const legacyKey = `${p.sabor}-${p.tamano}`;
         const sqlCode = sqlMappings[mappingKey] || sqlMappings[legacyKey];
         const sqlData = sqlStock.find((s: any) => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim());
-        const pendingQty = getProductPendingQuantity(p.sabor, sqlCode);
+        const pendingQty = getProductPendingQuantity(p.marca, p.sabor, sqlCode);
         const baseStock = sqlData ? (sqlData.stock_inicial ?? sqlData.stock_actual ?? 0) : 0;
         const totalInitWithPending = baseStock + pendingQty;
 
@@ -436,7 +435,7 @@ export function StockControl() {
       
       const sqlData = sqlStock.find(s => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim()) || { stock_actual: 0, salida_acumulada: 0, stock_inicial: 0 };
       
-      const pendingQuantity = getProductPendingQuantity(p.sabor, sqlCode);
+      const pendingQuantity = getProductPendingQuantity(p.marca, p.sabor, sqlCode);
       const baseStock = sqlData.stock_inicial ?? sqlData.stock_actual ?? 0;
 
       const initialStock = initialStockOverrides[p.key] !== undefined 
@@ -484,6 +483,7 @@ export function StockControl() {
         accumulatedExit,
         totalProducedMonth,
         pending: pendingQuantity,
+        requiresQC: isProductRequiringQC(p.marca, p.sabor, config),
         positionsUsed,
         income: 0
       };
@@ -995,7 +995,10 @@ export function StockControl() {
                                   </div>
                                 )}
                               </td>
-                              <td className="px-4 py-3 text-base font-black text-orange-700 border border-gray-200 bg-orange-50/10">
+                              <td 
+                                className="px-4 py-3 text-base font-black text-orange-700 border border-gray-200 bg-orange-50/10"
+                                title={p.requiresQC ? (p.pending > 0 ? `Por liberar: ${p.pending.toLocaleString('es-AR')} un.` : 'Requiere liberación (0 pendientes)') : 'No requiere liberación de calidad'}
+                              >
                                 {p.pending > 0 ? p.pending.toLocaleString('es-AR') : '-'}
                               </td>
                               <td className="px-4 py-3 text-sm font-bold text-gray-700 border border-gray-200 italic">

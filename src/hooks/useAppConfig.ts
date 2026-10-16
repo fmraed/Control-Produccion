@@ -53,11 +53,12 @@ interface AppConfig {
   cargasSocialesPercent?: number;
   sacPercent?: number;
   qualityControlFlavors?: string[];
+  qualityControlBrandFlavors?: string[];
   warehousePositions?: number;
   stackableFlavors?: string[];
   externalProducts?: Record<string, Record<string, string[]>>;
   wasteWeights?: Record<string, { etiq: number; tapa: number; termo: number }>;
-  syrupFormulas?: Record<string, Record<string, { liters: number; emulsion: number; dilution?: number }>>;
+  syrupFormulas?: Record<string, Record<string, { liters: number; emulsion: number; dilution?: number; requiresQC?: boolean }>>;
   insumos?: string[];
   insumosCategories?: Record<string, string>;
   insumosCategoriesOrder?: string[];
@@ -119,6 +120,11 @@ export function useAppConfig() {
           cargasSocialesPercent: typeof data.cargasSocialesPercent === 'number' ? data.cargasSocialesPercent : 31.5,
           sacPercent: typeof data.sacPercent === 'number' ? data.sacPercent : 8.33,
           qualityControlFlavors: Array.isArray(data.qualityControlFlavors) ? data.qualityControlFlavors : ['Agua'],
+          qualityControlBrandFlavors: Array.isArray(data.qualityControlBrandFlavors)
+            ? data.qualityControlBrandFlavors
+            : (Array.isArray(data.qualityControlFlavors) ? data.qualityControlFlavors : ['Agua']).flatMap((flav: string) =>
+                (data.brands || MARCAS).map((b: string) => `${b}|${flav}`)
+              ),
           warehousePositions: data.warehousePositions || 2300,
           stackableFlavors: Array.isArray(data.stackableFlavors) ? data.stackableFlavors : (data.flavors || SABORES).filter((s: string) => s !== 'Soda Sifon' && s !== 'Soda'),
           externalProducts: data.externalProducts || {},

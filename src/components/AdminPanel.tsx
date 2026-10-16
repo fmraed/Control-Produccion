@@ -8,6 +8,7 @@ import { SQLIntegration } from './SQLIntegration';
 import { SQLMappingEditor } from './SQLMappingEditor';
 import { CounterControl } from './CounterControl';
 import { SyrupGroupsConfig } from './SyrupGroupsConfig';
+import { isProductRequiringQC } from '../utils';
 
 interface AppConfig {
   flavors: string[];
@@ -57,11 +58,12 @@ interface AppConfig {
   cargasSocialesPercent?: number;
   sacPercent?: number;
   qualityControlFlavors?: string[];
+  qualityControlBrandFlavors?: string[];
   warehousePositions?: number;
   stackableFlavors?: string[];
   externalProducts?: Record<string, Record<string, string[]>>;
   wasteWeights?: Record<string, { etiq: number; tapa: number; termo: number; stretch: number }>;
-  syrupFormulas?: Record<string, Record<string, { liters: number; emulsion: number; dilution?: number }>>;
+  syrupFormulas?: Record<string, Record<string, { liters: number; emulsion: number; dilution?: number; requiresQC?: boolean }>>;
   insumos?: string[];
   insumosCategories?: Record<string, string>;
   insumosCategoriesOrder?: string[];
@@ -102,6 +104,56 @@ export function AdminPanel() {
       return config.flavors.filter(f => allActiveFlavors.has(f));
     }
     return (config.brandFlavorCombinations?.[brand] || []).filter(f => config.flavors.includes(f));
+  };
+
+  const [qcFilterBrand, setQcFilterBrand] = useState<string>('ALL');
+
+  const toggleQCBrandFlavor = (brand: string, sabor: string) => {
+    if (!config) return;
+    const isCurrentlyQC = isProductRequiringQC(brand, sabor, config);
+    const key = `${brand}|${sabor}`;
+
+    const currentList = config.qualityControlBrandFlavors || [];
+    let updatedList: string[];
+    if (isCurrentlyQC) {
+      updatedList = currentList.filter(item => {
+        const lower = item.trim().toLowerCase();
+        return lower !== key.toLowerCase() && 
+               lower !== `${brand}-${sabor}`.toLowerCase() &&
+               lower !== `${brand} - ${sabor}`.toLowerCase();
+      });
+    } else {
+      updatedList = [...currentList, key];
+    }
+
+    const currentFormulas = config.syrupFormulas || {};
+    const brandFormulas = currentFormulas[brand] || {};
+    const formula = brandFormulas[sabor] || { liters: 0, emulsion: 0, dilution: 6 };
+    const updatedFormulas = {
+      ...currentFormulas,
+      [brand]: {
+        ...brandFormulas,
+        [sabor]: {
+          ...formula,
+          requiresQC: !isCurrentlyQC
+        }
+      }
+    };
+
+    const activeFlavorsWithQC = Array.from(new Set(
+      updatedList.map(item => {
+        if (item.includes('|')) return item.split('|')[1];
+        if (item.includes('-')) return item.split('-')[1];
+        return item;
+      }).filter(Boolean)
+    ));
+
+    setConfig({
+      ...config,
+      qualityControlBrandFlavors: updatedList,
+      qualityControlFlavors: activeFlavorsWithQC,
+      syrupFormulas: updatedFormulas
+    });
   };
   const [isPurging, setIsPurging] = useState(false);
   const [confirmPurge, setConfirmPurge] = useState(false);
@@ -450,6 +502,11 @@ export function AdminPanel() {
           cargasSocialesPercent: typeof data.cargasSocialesPercent === 'number' ? data.cargasSocialesPercent : 31.5,
           sacPercent: typeof data.sacPercent === 'number' ? data.sacPercent : 8.33,
           qualityControlFlavors: Array.isArray(data.qualityControlFlavors) ? data.qualityControlFlavors : ['Agua'],
+          qualityControlBrandFlavors: Array.isArray(data.qualityControlBrandFlavors)
+            ? data.qualityControlBrandFlavors
+            : (Array.isArray(data.qualityControlFlavors) ? data.qualityControlFlavors : ['Agua']).flatMap((flav: string) =>
+                (data.brands || MARCAS).map((b: string) => `${b}|${flav}`)
+              ),
           warehousePositions: data.warehousePositions || 2300,
           stackableFlavors: Array.isArray(data.stackableFlavors) ? data.stackableFlavors : (data.flavors || SABORES).filter((s: string) => s !== 'Soda Sifon' && s !== 'Soda'),
           externalProducts: data.externalProducts || {},
@@ -527,6 +584,7 @@ export function AdminPanel() {
           cargasSocialesPercent: 31.5,
           sacPercent: 8.33,
           qualityControlFlavors: ['Agua'],
+          qualityControlBrandFlavors: MARCAS.map(m => `${m}|Agua`),
           warehousePositions: 2300,
           stackableFlavors: SABORES.filter(s => s !== 'Soda Sifon' && s !== 'Soda'),
           externalProducts: {},
@@ -3156,34 +3214,136 @@ export function AdminPanel() {
               
               </section>
               <section className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                 <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Control de Calidad (Por Liberar)</h3>
-                 <p className="text-xs text-gray-500 mb-4">Seleccione qué sabores pasan por Control de Calidad previo a su liberación (ej. Agua).</p>
-                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {config.flavors.map(sabor => {
-                       const isQC = (config.qualityControlFlavors || ['Agua']).includes(sabor);
-                       return (
-                         <button
-                           key={sabor}
-                           onClick={() => {
-                              const list = config.qualityControlFlavors || ['Agua'];
-                              if (isQC) {
-                                 setConfig({...config, qualityControlFlavors: list.filter(s => s !== sabor)});
-                              } else {
-                                 setConfig({...config, qualityControlFlavors: [...list, sabor]});
-                              }
-                           }}
-                           className={`flex-1 flex items-center justify-between p-3 rounded-lg border transition-all ${
-                             isQC
-                               ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-sm' 
-                               : 'bg-white border-gray-200 text-gray-500'
-                           }`}
-                         >
-                           <span className="font-medium text-sm">{sabor}</span>
-                           {isQC ? <CheckCircle2 className="w-4 h-4" /> : <div className="w-4 h-4 rounded-full border-2 border-gray-200" />}
-                         </button>
-                       );
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b pb-2 mb-3 gap-2">
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-800">Control de Calidad (Por Liberar)</h3>
+                    <p className="text-xs text-gray-500">
+                      Seleccione qué productos requieren Control de Calidad previo a su liberación (por combinación <b>Marca - Sabor</b>).
+                      En <b>Control de Stock</b>, el stock por liberar sólo se sumará a aquellos productos marcados aquí.
+                    </p>
+                  </div>
+                  <span className="self-start sm:self-auto text-xs font-semibold bg-orange-100 text-orange-800 px-2.5 py-1 rounded-full whitespace-nowrap">
+                    {(config.qualityControlBrandFlavors || []).length} marcados
+                  </span>
+                </div>
+
+                {/* Filter by brand */}
+                <div className="flex flex-wrap items-center gap-1.5 mb-4">
+                  <span className="text-[11px] font-bold text-gray-500 uppercase mr-1">Filtrar Marca:</span>
+                  <button
+                    type="button"
+                    onClick={() => setQcFilterBrand('ALL')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                      qcFilterBrand === 'ALL'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-100'
+                    }`}
+                  >
+                    Todas ({config.brands.length})
+                  </button>
+                  {config.brands.map(brand => {
+                    const brandCount = (config.qualityControlBrandFlavors || []).filter(item => 
+                      item.toLowerCase().startsWith(`${brand.toLowerCase()}|`) || 
+                      item.toLowerCase().startsWith(`${brand.toLowerCase()}-`)
+                    ).length;
+                    return (
+                      <button
+                        key={brand}
+                        type="button"
+                        onClick={() => setQcFilterBrand(brand)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                          qcFilterBrand === brand
+                            ? 'bg-blue-600 text-white shadow-sm'
+                            : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-100'
+                        }`}
+                      >
+                        <span>{brand}</span>
+                        {brandCount > 0 && (
+                          <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                            qcFilterBrand === brand ? 'bg-blue-800 text-white' : 'bg-orange-100 text-orange-700'
+                          }`}>
+                            {brandCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Brand cards */}
+                <div className="space-y-4">
+                  {config.brands
+                    .filter(brand => qcFilterBrand === 'ALL' || qcFilterBrand === brand)
+                    .map(brand => {
+                      const brandFlavors = Array.from(new Set([
+                        ...getFlavorsForBrand(brand),
+                        'Agua'
+                      ])).filter(f => config.flavors.includes(f));
+
+                      return (
+                        <div key={brand} className="bg-white p-3 rounded-xl border border-gray-200 shadow-xs">
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="font-bold text-gray-800 text-sm flex items-center gap-2">
+                              <div className="w-2 h-2 rounded-full bg-orange-500 shadow-xs"></div>
+                              {brand}
+                            </h4>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const toAdd = brandFlavors.map(f => `${brand}|${f}`);
+                                  const currentList = config.qualityControlBrandFlavors || [];
+                                  const merged = Array.from(new Set([...currentList, ...toAdd]));
+                                  setConfig({ ...config, qualityControlBrandFlavors: merged });
+                                }}
+                                className="text-[10px] text-blue-600 hover:underline font-semibold cursor-pointer"
+                              >
+                                Marcar todos
+                              </button>
+                              <span className="text-gray-300">|</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const brandPrefix = `${brand.toLowerCase()}|`;
+                                  const currentList = config.qualityControlBrandFlavors || [];
+                                  const filtered = currentList.filter(item => !item.toLowerCase().startsWith(brandPrefix));
+                                  setConfig({ ...config, qualityControlBrandFlavors: filtered });
+                                }}
+                                className="text-[10px] text-gray-500 hover:underline font-semibold cursor-pointer"
+                              >
+                                Desmarcar
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                            {brandFlavors.map(sabor => {
+                              const isQC = isProductRequiringQC(brand, sabor, config);
+                              return (
+                                <button
+                                  key={`${brand}-${sabor}`}
+                                  type="button"
+                                  onClick={() => toggleQCBrandFlavor(brand, sabor)}
+                                  className={`flex items-center justify-between p-2 rounded-lg border text-xs transition-all cursor-pointer ${
+                                    isQC
+                                      ? 'bg-orange-50 border-orange-300 text-orange-900 font-bold shadow-xs'
+                                      : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-white'
+                                  }`}
+                                >
+                                  <span className="truncate">{sabor}</span>
+                                  {isQC ? (
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-orange-600 shrink-0 ml-1" />
+                                  ) : (
+                                    <div className="w-3.5 h-3.5 rounded-full border border-gray-300 shrink-0 ml-1" />
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
                     })}
-                 </div>
+                </div>
 
               </section>
               <section className="bg-gray-50 p-4 rounded-xl border border-gray-200">
@@ -3376,6 +3536,28 @@ export function AdminPanel() {
                                                 }}
                                                 className="w-20 text-right rounded border-gray-300 bg-gray-50 hover:bg-white transition-colors shadow-sm p-1 px-2 border focus:border-blue-500 focus:ring-blue-500"
                                             />
+                                        </div>
+                                        <div className="flex flex-col items-center">
+                                            <span className="text-[10px] text-gray-500 mb-1" title="Requiere Control de Calidad / Liberación">Req. Lib.</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => toggleQCBrandFlavor(brand, sabor)}
+                                                title={isProductRequiringQC(brand, sabor, config) ? 'Marcado: requiere liberación previa' : 'No requiere liberación'}
+                                                className={`h-[30px] px-2 rounded border transition-all flex items-center justify-center gap-1 text-xs font-bold cursor-pointer ${
+                                                    isProductRequiringQC(brand, sabor, config)
+                                                        ? 'bg-orange-100 border-orange-300 text-orange-700 shadow-xs'
+                                                        : 'bg-gray-50 border-gray-200 text-gray-400 hover:text-gray-600'
+                                                }`}
+                                            >
+                                                {isProductRequiringQC(brand, sabor, config) ? (
+                                                    <>
+                                                        <CheckCircle2 className="w-3.5 h-3.5 text-orange-600" />
+                                                        <span className="text-[10px]">SÍ</span>
+                                                    </>
+                                                ) : (
+                                                    <span className="text-[10px]">NO</span>
+                                                )}
+                                            </button>
                                         </div>
                                     </div>
                                  </div>

@@ -7,6 +7,7 @@ import { TrendingUp, Package, RefreshCw, AlertCircle } from 'lucide-react';
 import { SQL_PRODUCT_MAPPING } from '../constants';
 import { useAppConfig } from '../hooks/useAppConfig';
 import { es } from 'date-fns/locale';
+import { isProductRequiringQC } from '../utils';
 
 interface SchedulerStockProjectionProps {
   selectedWeek?: Date;
@@ -164,7 +165,7 @@ export function SchedulerStockProjection({
       const sqlCode = sqlMappings[mappingKey] || sqlMappings[legacyKey];
       const sqlData = sqlStock.find(s => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim()) || { stock_actual: 0, stock_inicial: 0 };
       
-      const requiresQC = (config?.qualityControlFlavors || ['Agua']).some(f => f.trim() === p.sabor.trim());
+      const requiresQC = isProductRequiringQC(p.marca, p.sabor, config);
       const pendingData = requiresQC 
         ? sqlPending.find(s => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim()) 
         : undefined;
