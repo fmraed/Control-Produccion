@@ -49,14 +49,14 @@ export function MotorCompras() {
 
   // Transits State
   const [transits, setTransits] = useState<InsumosTransit[]>([]);
-  const [hideReceived, setHideReceived] = useState(false);
-  const [hideCancelled, setHideCancelled] = useState(false);
+  const [hideReceived, setHideReceived] = useState(true);
+  const [hideCancelled, setHideCancelled] = useState(true);
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTransitQuery, setSearchTransitQuery] = useState('');
-  const [sortTransitField, setSortTransitField] = useState<keyof InsumosTransit | ''>('');
+  const [sortTransitField, setSortTransitField] = useState<keyof InsumosTransit | ''>('needDate');
   const [sortTransitDir, setSortTransitDir] = useState<'asc' | 'desc'>('asc');
   const [transitToDelete, setTransitToDelete] = useState<string | null>(null);
 
@@ -649,16 +649,27 @@ export function MotorCompras() {
     
     if (sortTransitField) {
       result = [...result].sort((a, b) => {
-        let valA = a[sortTransitField] as string | number;
-        let valB = b[sortTransitField] as string | number;
-        
-        if (typeof valA === 'string' && typeof valB === 'string') {
-          return sortTransitDir === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        const valA = a[sortTransitField];
+        const valB = b[sortTransitField];
+
+        if (sortTransitField === 'needDate' || sortTransitField === 'issueDate') {
+          const strA = String(valA || '').trim();
+          const strB = String(valB || '').trim();
+          if (!strA && !strB) return 0;
+          if (!strA) return 1;
+          if (!strB) return -1;
+          return sortTransitDir === 'asc' ? strA.localeCompare(strB) : strB.localeCompare(strA);
         }
         
-        valA = Number(valA) || 0;
-        valB = Number(valB) || 0;
-        return sortTransitDir === 'asc' ? valA - valB : valB - valA;
+        if (typeof valA === 'string' || typeof valB === 'string') {
+          const strA = String(valA || '').trim();
+          const strB = String(valB || '').trim();
+          return sortTransitDir === 'asc' ? strA.localeCompare(strB) : strB.localeCompare(strA);
+        }
+        
+        const numA = Number(valA) || 0;
+        const numB = Number(valB) || 0;
+        return sortTransitDir === 'asc' ? numA - numB : numB - numA;
       });
     }
     

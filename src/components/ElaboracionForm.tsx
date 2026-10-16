@@ -27,6 +27,7 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
     availableLines, 
     availableChemists,
     availableFlavors,
+    availableSizes,
     config
   } = useAppConfig();
   const [activeTab, setActiveTab] = useState(0);
@@ -181,10 +182,30 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
     name: 'reports'
   });
   
-  // Cargar borrador al montar
+  // Cargar datos iniciales o borrador al montar
   const [isDraftLoaded, setIsDraftLoaded] = useState(false);
   useEffect(() => {
-    const draftKey = initialData ? `elaboracion_report_draft_${initialData.id}` : 'elaboracion_report_draft';
+    if (initialData) {
+      // Al editar un parte existente, la fuente fidedigna es siempre initialData
+      try {
+        localStorage.removeItem(`elaboracion_report_draft_${initialData.id}`);
+      } catch (e) {}
+
+      reset({
+        reports: [{
+          ...initialData,
+          hourlyData: (initialData.hourlyData || []).map(row => ({
+            ...row,
+            phBebida: row.phBebida || (row as any).ph,
+            acidezPatron: row.acidezPatron || (row as any).acidez,
+          }))
+        }]
+      });
+      setIsDraftLoaded(true);
+      return;
+    }
+
+    const draftKey = 'elaboracion_report_draft';
     const savedData = localStorage.getItem(draftKey);
     if (savedData) {
       try {
@@ -208,7 +229,10 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
   useEffect(() => {
     if (!isDraftLoaded) return;
     
-    const draftKey = initialData ? `elaboracion_report_draft_${initialData.id}` : 'elaboracion_report_draft';
+    // Solo guardamos borrador para reportes nuevos, para no sobreescribir partes existentes involuntariamente
+    if (initialData) return;
+
+    const draftKey = 'elaboracion_report_draft';
     
     // Save to localStorage immediately on change (debounced 1s)
     const localTimeout = setTimeout(() => {
@@ -223,8 +247,8 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
   // Save on unmount to ensure no data is lost
   useEffect(() => {
     return () => {
-      if (isDraftLoaded) {
-        const draftKey = initialData ? `elaboracion_report_draft_${initialData.id}` : 'elaboracion_report_draft';
+      if (isDraftLoaded && !initialData) {
+        const draftKey = 'elaboracion_report_draft';
         const currentData = getValues('reports');
         if (currentData && currentData.length > 0) {
           localStorage.setItem(draftKey, JSON.stringify({ reports: currentData }));
@@ -285,7 +309,24 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
       const botellas = Math.max(0, contFinal - contInicial);
       const saboresSinJarabeCfg = config?.saboresSinJarabe || SABORES_SIN_JARABE;
       const usesSyrup = !saboresSinJarabeCfg.includes(report.sabor || '');
-      const dilution = config?.syrupFormulas?.[report.marca || '']?.[report.sabor || '']?.dilution ?? 6;
+      let dilution = config?.syrupFormulas?.[report.marca || '']?.[report.sabor || '']?.dilution;
+      if (dilution === undefined && config?.compatibleSyrupGroups) {
+        const itemKey = `${report.marca || ''} - ${report.sabor || ''}`;
+        for (const members of Object.values(config.compatibleSyrupGroups)) {
+          if (Array.isArray(members) && (members.includes(itemKey) || members.includes(report.sabor || ''))) {
+            for (const m of members) {
+              const [b, s] = m.includes(' - ') ? m.split(' - ') : ['', m];
+              const d = config?.syrupFormulas?.[b]?.[s]?.dilution;
+              if (d !== undefined) {
+                dilution = d;
+                break;
+              }
+            }
+          }
+          if (dilution !== undefined) break;
+        }
+      }
+      if (dilution === undefined) dilution = 6;
       const teorico = usesSyrup ? Number(((botellas * (report.tamano || 0)) / (1000 * dilution)).toFixed(2)) : 0;
       const consumido = usesSyrup ? Number((jarabeInicial - jarabeFinal).toFixed(2)) : 0;
       const desperdicio = Number((consumido - teorico).toFixed(2));
@@ -572,12 +613,33 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
                   {TURNOS.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Línea</label>
-                <select {...register(`reports.${reportIndex}.linea`)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
-                  {availableLines.map(l => <option key={l} value={l}>Línea {l}</option>)}
-                </select>
-              </div>
+              <Controller
+                name={`reports.${reportIndex}.linea`}
+                control={control}
+                render={({ field }) => {
+                  const currentLinea = field.value || watchedReports?.[reportIndex]?.linea || '';
+                  const lineOptions = Array.from(new Set([
+                    ...(currentLinea ? [currentLinea] : []),
+                    ...availableLines
+                  ])).filter(Boolean);
+
+                  return (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Línea</label>
+                      <select
+                        {...field}
+                        value={currentLinea}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+                      >
+                        <option value="">Seleccione línea...</option>
+                        {lineOptions.map(l => (
+                          <option key={l} value={l}>Línea {l}</option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                }}
+              />
               <div>
                 <label className="block text-sm font-medium text-gray-700">Químico / Operador</label>
                 <select {...register(`reports.${reportIndex}.quimico`)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
@@ -585,24 +647,98 @@ export const ElaboracionForm: React.FC<ElaboracionFormProps> = ({ onCancel, onSu
                   {availableChemists.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Marca</label>
-                <select {...register(`reports.${reportIndex}.marca`)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
-                  {availableBrands.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Calibre (cc)</label>
-                <select {...register(`reports.${reportIndex}.tamano`, { valueAsNumber: true })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
-                  {getFilteredSizes(watchedReports[reportIndex].linea).map(t => <option key={t} value={t}>{t} cc</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Sabor</label>
-                <select {...register(`reports.${reportIndex}.sabor`)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
-                  {getFilteredFlavors(watchedReports[reportIndex].marca, watchedReports[reportIndex].tamano).map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
+              <Controller
+                name={`reports.${reportIndex}.marca`}
+                control={control}
+                render={({ field }) => {
+                  const currentMarca = field.value || watchedReports?.[reportIndex]?.marca || '';
+                  const brandOptions = Array.from(new Set([
+                    ...(currentMarca ? [currentMarca] : []),
+                    ...availableBrands
+                  ])).filter(Boolean);
+
+                  return (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Marca</label>
+                      <select
+                        {...field}
+                        value={currentMarca}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+                      >
+                        <option value="">Seleccione marca...</option>
+                        {brandOptions.map(m => (
+                          <option key={m} value={m}>{m}</option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                }}
+              />
+              <Controller
+                name={`reports.${reportIndex}.tamano`}
+                control={control}
+                render={({ field }) => {
+                  const rawVal = field.value !== undefined && field.value !== null ? field.value : watchedReports?.[reportIndex]?.tamano;
+                  const currentTamano = rawVal !== undefined && rawVal !== null && !isNaN(Number(rawVal)) && Number(rawVal) > 0 ? Number(rawVal) : undefined;
+                  const currentLinea = watchedReports?.[reportIndex]?.linea;
+                  const filteredSizes = getFilteredSizes(currentLinea);
+                  const sizeOptions = Array.from(new Set([
+                    ...(currentTamano ? [currentTamano] : []),
+                    ...filteredSizes,
+                    ...availableSizes
+                  ])).filter(n => typeof n === 'number' && !isNaN(n) && n > 0).sort((a, b) => a - b);
+
+                  return (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Calibre (cc)</label>
+                      <select
+                        value={currentTamano || ''}
+                        onChange={e => field.onChange(Number(e.target.value))}
+                        onBlur={field.onBlur}
+                        name={field.name}
+                        ref={field.ref}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+                      >
+                        <option value="">Seleccione calibre...</option>
+                        {sizeOptions.map(t => (
+                          <option key={t} value={t}>{t} cc</option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                }}
+              />
+              <Controller
+                name={`reports.${reportIndex}.sabor`}
+                control={control}
+                render={({ field }) => {
+                  const currentSabor = field.value || watchedReports?.[reportIndex]?.sabor || '';
+                  const currentMarca = watchedReports?.[reportIndex]?.marca;
+                  const currentTamano = watchedReports?.[reportIndex]?.tamano;
+                  const filteredFlavors = getFilteredFlavors(currentMarca, currentTamano);
+                  const flavorOptions = Array.from(new Set([
+                    ...(currentSabor ? [currentSabor] : []),
+                    ...filteredFlavors,
+                    ...availableFlavors
+                  ])).filter(Boolean);
+
+                  return (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Sabor</label>
+                      <select
+                        {...field}
+                        value={currentSabor}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+                      >
+                        <option value="">Seleccione sabor...</option>
+                        {flavorOptions.map(s => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                }}
+              />
               <div>
                 <label className="block text-sm font-medium text-gray-700">Lote Envasado</label>
                 <input type="text" {...register(`reports.${reportIndex}.lote`)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2" />

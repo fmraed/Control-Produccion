@@ -64,6 +64,7 @@ interface AppConfig {
   insumosMatrix?: Record<string, Record<string, Record<string, number>>>;
   compatibleInsumoGroups?: Record<string, string[]>;
   compatiblePackagingGroups?: Record<string, string[]>;
+  compatibleSyrupGroups?: Record<string, string[]>;
   preformasConfig?: PreformaConfig[];
   termoConfig?: TermoConfig[];
   stretchConfig?: StretchConfig[];
@@ -129,6 +130,7 @@ export function useAppConfig() {
           insumosMatrix: data.insumosMatrix || {},
           compatibleInsumoGroups: data.compatibleInsumoGroups || {},
           compatiblePackagingGroups: data.compatiblePackagingGroups || {},
+          compatibleSyrupGroups: data.compatibleSyrupGroups || {},
           preformasConfig: data.preformasConfig || [],
           termoConfig: data.termoConfig || [],
           stretchConfig: data.stretchConfig || [],

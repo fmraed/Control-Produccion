@@ -7,6 +7,7 @@ import { UserProfile, UserRole, RolePermissions } from '../types';
 import { SQLIntegration } from './SQLIntegration';
 import { SQLMappingEditor } from './SQLMappingEditor';
 import { CounterControl } from './CounterControl';
+import { SyrupGroupsConfig } from './SyrupGroupsConfig';
 
 interface AppConfig {
   flavors: string[];
@@ -67,6 +68,7 @@ interface AppConfig {
   insumosMatrix?: Record<string, Record<string, Record<string, number>>>;
   compatibleInsumoGroups?: Record<string, string[]>;
   compatiblePackagingGroups?: Record<string, string[]>;
+  compatibleSyrupGroups?: Record<string, string[]>;
   preformasConfig?: PreformaConfig[];
   termoConfig?: TermoConfig[];
   stretchConfig?: StretchConfig[];
@@ -280,6 +282,8 @@ export function AdminPanel() {
   const [newInsumo, setNewInsumo] = useState('');
   const [newCompatibleGroup, setNewCompatibleGroup] = useState<string[]>([]);
   const [newCompatiblePackagingGroup, setNewCompatiblePackagingGroup] = useState<string[]>([]);
+  const [newCompatibleSyrupGroup, setNewCompatibleSyrupGroup] = useState<string[]>([]);
+  const [newSyrupGroupName, setNewSyrupGroupName] = useState<string>('');
   
   // Deletion confirmation state
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'brand' | 'line' | 'flavor' | 'size' | 'supervisor' | 'chemist' | 'insumo', id: string | number, step: number } | null>(null);
@@ -309,6 +313,20 @@ export function AdminPanel() {
     (config?.capsulaConfig || []).forEach(c => items.push(c.name));
     return items;
   }, [config?.preformasConfig, config?.termoConfig, config?.stretchConfig, config?.tapaConfig, config?.capsulaConfig]);
+
+  const availableSyrupProducts = useMemo(() => {
+    if (!config) return [];
+    const list: string[] = [];
+    const sinJarabe = config.saboresSinJarabe || SABORES_SIN_JARABE;
+    config.brands.forEach(brand => {
+      getFlavorsForBrand(brand).forEach(sabor => {
+        if (!sinJarabe.includes(sabor)) {
+          list.push(`${brand} - ${sabor}`);
+        }
+      });
+    });
+    return Array.from(new Set(list)).sort();
+  }, [config?.brands, config?.activeProducts, config?.brandFlavorCombinations, config?.flavors, config?.saboresSinJarabe]);
 
   const uniqueInsumoCategories = useMemo(() => {
     if (!config) return [];
@@ -443,6 +461,7 @@ export function AdminPanel() {
           insumosMatrix: data.insumosMatrix || {},
           compatibleInsumoGroups: data.compatibleInsumoGroups || {},
           compatiblePackagingGroups: data.compatiblePackagingGroups || {},
+          compatibleSyrupGroups: data.compatibleSyrupGroups || {},
           preformasConfig: data.preformasConfig || [],
           termoConfig: data.termoConfig || [],
           stretchConfig: data.stretchConfig || [],
@@ -564,6 +583,7 @@ export function AdminPanel() {
           insumosMatrix: {},
           compatibleInsumoGroups: {},
           compatiblePackagingGroups: {},
+          compatibleSyrupGroups: {},
           preformasConfig: [],
           termoConfig: [],
           stretchConfig: [],
@@ -3367,6 +3387,17 @@ export function AdminPanel() {
                  </div>
 
               </section>
+              <SyrupGroupsConfig
+                compatibleSyrupGroups={config.compatibleSyrupGroups}
+                availableProducts={availableSyrupProducts}
+                onChange={(updatedGroups) => {
+                  setConfig({
+                    ...config,
+                    compatibleSyrupGroups: updatedGroups
+                  });
+                }}
+              />
+
               <section className="bg-gray-50 p-4 rounded-xl border border-gray-200 lg:col-span-2 overflow-x-auto">
                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 border-b pb-2">
                    <div>
@@ -4782,7 +4813,7 @@ export function AdminPanel() {
                      </table>
                    </div>
                  </div>
-               </section>
+                </section>
               </section>
           </div>
         </div>

@@ -664,12 +664,31 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
               limit(1)
             );
             const snapshot = await getDocs(q);
+            const checkSameSyrup = (lastSabor?: string, lastMarca?: string, currentSabor?: string, currentMarca?: string) => {
+              if (!lastSabor || !currentSabor) return false;
+              if (lastSabor === currentSabor && (!lastMarca || !currentMarca || lastMarca === currentMarca)) return true;
+              if (config?.compatibleSyrupGroups) {
+                const lastKey = `${lastMarca || ''} - ${lastSabor}`;
+                const currentKey = `${currentMarca || ''} - ${currentSabor}`;
+                for (const members of Object.values(config.compatibleSyrupGroups)) {
+                  if (Array.isArray(members)) {
+                    const hasLast = members.includes(lastKey) || members.includes(lastSabor);
+                    const hasCurrent = members.includes(currentKey) || members.includes(currentSabor);
+                    if (hasLast && hasCurrent) return true;
+                  }
+                }
+              }
+              return false;
+            };
+
             let parcialAnterior = 0;
             let jarabeInicial = 0;
             if (!snapshot.empty) {
               const lastReport = snapshot.docs[0].data();
               if (lastReport.sabor === report.sabor && Number(lastReport.tamano) === Number(report.tamano)) {
                 parcialAnterior = lastReport.parcialActual || 0;
+              }
+              if (checkSameSyrup(lastReport.sabor, lastReport.marca, report.sabor, report.marca)) {
                 jarabeInicial = lastReport.jarabeFinal || 0;
               }
             }
@@ -692,9 +711,30 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
               
               let parcialAnterior = 0;
               let jarabeInicial = 0;
-              if (matchingReport && matchingReport.sabor === report.sabor && Number(matchingReport.tamano) === Number(report.tamano)) {
-                parcialAnterior = matchingReport.parcialActual || 0;
-                jarabeInicial = matchingReport.jarabeFinal || 0;
+              if (matchingReport) {
+                const checkSameSyrup = (lastSabor?: string, lastMarca?: string, currentSabor?: string, currentMarca?: string) => {
+                  if (!lastSabor || !currentSabor) return false;
+                  if (lastSabor === currentSabor && (!lastMarca || !currentMarca || lastMarca === currentMarca)) return true;
+                  if (config?.compatibleSyrupGroups) {
+                    const lastKey = `${lastMarca || ''} - ${lastSabor}`;
+                    const currentKey = `${currentMarca || ''} - ${currentSabor}`;
+                    for (const members of Object.values(config.compatibleSyrupGroups)) {
+                      if (Array.isArray(members)) {
+                        const hasLast = members.includes(lastKey) || members.includes(lastSabor);
+                        const hasCurrent = members.includes(currentKey) || members.includes(currentSabor);
+                        if (hasLast && hasCurrent) return true;
+                      }
+                    }
+                  }
+                  return false;
+                };
+
+                if (matchingReport.sabor === report.sabor && Number(matchingReport.tamano) === Number(report.tamano)) {
+                  parcialAnterior = matchingReport.parcialActual || 0;
+                }
+                if (checkSameSyrup(matchingReport.sabor, matchingReport.marca, report.sabor, report.marca)) {
+                  jarabeInicial = matchingReport.jarabeFinal || 0;
+                }
               }
               setValue(`reports.${index}.parcialAnterior`, parcialAnterior, { shouldValidate: true });
               setValue(`reports.${index}.jarabeInicial`, jarabeInicial, { shouldValidate: true });
@@ -873,7 +913,24 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
       const litrosTotales = (botellas * tamano) / 1000;
       const saboresSinJarabeCfg = config?.saboresSinJarabe || SABORES_SIN_JARABE;
       const usesSyrup = !saboresSinJarabeCfg.includes(report.sabor || '');
-      const dilution = config?.syrupFormulas?.[report.marca || '']?.[report.sabor || '']?.dilution ?? 6;
+      let dilution = config?.syrupFormulas?.[report.marca || '']?.[report.sabor || '']?.dilution;
+      if (dilution === undefined && config?.compatibleSyrupGroups) {
+        const itemKey = `${report.marca || ''} - ${report.sabor || ''}`;
+        for (const members of Object.values(config.compatibleSyrupGroups)) {
+          if (Array.isArray(members) && (members.includes(itemKey) || members.includes(report.sabor || ''))) {
+            for (const m of members) {
+              const [b, s] = m.includes(' - ') ? m.split(' - ') : ['', m];
+              const d = config?.syrupFormulas?.[b]?.[s]?.dilution;
+              if (d !== undefined) {
+                dilution = d;
+                break;
+              }
+            }
+          }
+          if (dilution !== undefined) break;
+        }
+      }
+      if (dilution === undefined) dilution = 6;
       const jarabeConsumidoCalc = usesSyrup ? litrosTotales / dilution : 0;
       const jarabeFinalCalc = usesSyrup ? Math.max(0, jarabeInicial - jarabeConsumidoCalc) : 0;
       
@@ -1197,44 +1254,66 @@ export function NewReportForm({ onCancel, onSuccess, initialData }: NewReportFor
                 <Controller
                   name={`reports.${index}.marca`}
                   control={control}
-                  render={({ field }) => (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Marca</label>
-                      <select {...field} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
-                        <option value="">Seleccione...</option>
-                        {localBrands.map(m => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                      {errors.reports?.[index]?.marca && <p className="text-red-500 text-xs mt-1">{errors.reports?.[index]?.marca?.message}</p>}
-                    </div>
-                  )}
+                  render={({ field }) => {
+                    const brandOptions = Array.from(new Set([
+                      ...(field.value ? [field.value] : []),
+                      ...localBrands
+                    ])).filter(Boolean);
+
+                    return (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Marca</label>
+                        <select {...field} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
+                          <option value="">Seleccione...</option>
+                          {brandOptions.map(m => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                        {errors.reports?.[index]?.marca && <p className="text-red-500 text-xs mt-1">{errors.reports?.[index]?.marca?.message}</p>}
+                      </div>
+                    );
+                  }}
                 />
                 <Controller
                   name={`reports.${index}.tamano`}
                   control={control}
-                  render={({ field }) => (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Calibre</label>
-                      <select {...field} onChange={e => field.onChange(Number(e.target.value))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
-                        <option value={0}>Seleccione...</option>
-                        {getFilteredSizes(reports[index]?.linea).map(t => <option key={t} value={t}>{t} cc</option>)}
-                      </select>
-                      {errors.reports?.[index]?.tamano && <p className="text-red-500 text-xs mt-1">{errors.reports?.[index]?.tamano?.message}</p>}
-                    </div>
-                  )}
+                  render={({ field }) => {
+                    const currentTamano = field.value ? Number(field.value) : undefined;
+                    const sizeOptions = Array.from(new Set([
+                      ...(currentTamano ? [currentTamano] : []),
+                      ...getFilteredSizes(reports[index]?.linea)
+                    ])).filter(n => typeof n === 'number' && !isNaN(n) && n > 0);
+
+                    return (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Calibre</label>
+                        <select {...field} onChange={e => field.onChange(Number(e.target.value))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
+                          <option value={0}>Seleccione...</option>
+                          {sizeOptions.map(t => <option key={t} value={t}>{t} cc</option>)}
+                        </select>
+                        {errors.reports?.[index]?.tamano && <p className="text-red-500 text-xs mt-1">{errors.reports?.[index]?.tamano?.message}</p>}
+                      </div>
+                    );
+                  }}
                 />
                 <Controller
                   name={`reports.${index}.sabor`}
                   control={control}
-                  render={({ field }) => (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Sabor</label>
-                      <select {...field} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
-                        <option value="">Seleccione...</option>
-                        {getFilteredFlavors(reports[index]?.marca, reports[index]?.tamano, false).map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                      {errors.reports?.[index]?.sabor && <p className="text-red-500 text-xs mt-1">{errors.reports?.[index]?.sabor?.message}</p>}
-                    </div>
-                  )}
+                  render={({ field }) => {
+                    const flavorOptions = Array.from(new Set([
+                      ...(field.value ? [field.value] : []),
+                      ...getFilteredFlavors(reports[index]?.marca, reports[index]?.tamano, false)
+                    ])).filter(Boolean);
+
+                    return (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Sabor</label>
+                        <select {...field} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
+                          <option value="">Seleccione...</option>
+                          {flavorOptions.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                        {errors.reports?.[index]?.sabor && <p className="text-red-500 text-xs mt-1">{errors.reports?.[index]?.sabor?.message}</p>}
+                      </div>
+                    );
+                  }}
                 />
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Velocidad (bpm)</label>

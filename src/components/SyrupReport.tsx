@@ -101,36 +101,101 @@ export function SyrupReport() {
   }, [elaboracionReports, selectedMonth]);
 
   const syrupStats = useMemo(() => {
-    const stats: Record<string, { sabor: string, initial: number, real: number, teorico: number }> = {};
+    const stats: Record<string, { 
+      sabor: string; 
+      isGroup?: boolean; 
+      members?: string[]; 
+      initial: number; 
+      real: number; 
+      teorico: number 
+    }> = {};
     const saboresSinJarabeCfg = config?.saboresSinJarabe || SABORES_SIN_JARABE;
-    
-    // Initialize flavors that normally use syrup
-    SABORES.filter(s => !saboresSinJarabeCfg.includes(s)).forEach(sabor => {
-      stats[sabor] = { sabor, initial: initialStocks[sabor] || 0, real: 0, teorico: 0 };
+    const compatibleGroups = config?.compatibleSyrupGroups || {};
+
+    // Helper: find group for a brand + flavor combination
+    const findGroup = (marca?: string, sabor?: string) => {
+      if (!sabor) return null;
+      const fullKey = marca ? `${marca} - ${sabor}` : sabor;
+      for (const [groupName, members] of Object.entries(compatibleGroups)) {
+        if (Array.isArray(members)) {
+          if (members.includes(fullKey) || (marca && members.some(m => m === fullKey || m === sabor))) {
+            return { groupName, members: members as string[] };
+          }
+        }
+      }
+      return null;
+    };
+
+    // 1. Initialize configured shared groups
+    Object.entries(compatibleGroups).forEach(([groupName, members]) => {
+      stats[groupName] = { 
+        sabor: groupName, 
+        isGroup: true, 
+        members: members as string[], 
+        initial: initialStocks[groupName] || 0, 
+        real: 0, 
+        teorico: 0 
+      };
     });
 
-    // 1. Calculate REAL from Elaboration Reports
+    // 2. Initialize standalone flavors that are not mapped in any group
+    SABORES.filter(s => !saboresSinJarabeCfg.includes(s)).forEach(sabor => {
+      const inAnyGroup = Object.values(compatibleGroups).some(
+        m => Array.isArray(m) && m.some(item => item === sabor || item.endsWith(` - ${sabor}`))
+      );
+      if (!inAnyGroup && !stats[sabor]) {
+        stats[sabor] = { 
+          sabor, 
+          isGroup: false, 
+          members: [], 
+          initial: initialStocks[sabor] || 0, 
+          real: 0, 
+          teorico: 0 
+        };
+      }
+    });
+
+    // 3. Calculate REAL from Elaboration Reports
     filteredElab.forEach(r => {
       if (saboresSinJarabeCfg.includes(r.sabor)) return;
-      if (!stats[r.sabor]) {
-        stats[r.sabor] = { sabor: r.sabor, initial: initialStocks[r.sabor] || 0, real: 0, teorico: 0 };
+      const grp = findGroup(r.marca, r.sabor);
+      const statKey = grp ? grp.groupName : r.sabor;
+
+      if (!stats[statKey]) {
+        stats[statKey] = { 
+          sabor: statKey, 
+          isGroup: !!grp, 
+          members: grp?.members || [], 
+          initial: initialStocks[statKey] || 0, 
+          real: 0, 
+          teorico: 0 
+        };
       }
-      stats[r.sabor].real += (r.jarabeConsumido || 0);
+      stats[statKey].real += (r.jarabeConsumido || 0);
     });
 
-    // 2. Calculate THEORETICAL from Production Reports
-    // Formula: (bottles * size) / 6000
+    // 4. Calculate THEORETICAL from Production Reports
     filteredProd.forEach(r => {
       if (!r.sabor || saboresSinJarabeCfg.includes(r.sabor)) return;
-      if (!stats[r.sabor]) {
-        stats[r.sabor] = { sabor: r.sabor, initial: initialStocks[r.sabor] || 0, real: 0, teorico: 0 };
+      const grp = findGroup(r.marca, r.sabor);
+      const statKey = grp ? grp.groupName : r.sabor;
+
+      if (!stats[statKey]) {
+        stats[statKey] = { 
+          sabor: statKey, 
+          isGroup: !!grp, 
+          members: grp?.members || [], 
+          initial: initialStocks[statKey] || 0, 
+          real: 0, 
+          teorico: 0 
+        };
       }
       
       const botellas = r.botellas || 0;
       const tamano = r.tamano || 0;
       const dilution = config?.syrupFormulas?.[r.marca || '']?.[r.sabor || '']?.dilution ?? 6;
       const t = (botellas * tamano) / (1000 * dilution);
-      stats[r.sabor].teorico += t;
+      stats[statKey].teorico += t;
     });
 
     return Object.values(stats).map(s => {
@@ -147,7 +212,7 @@ export function SyrupReport() {
     })
     .filter(s => s.real > 0 || s.teorico > 0 || s.initial > 0)
     .sort((a, b) => b.real - a.real);
-  }, [filteredProd, filteredElab, initialStocks]);
+  }, [filteredProd, filteredElab, initialStocks, config?.compatibleSyrupGroups, config?.syrupFormulas, config?.saboresSinJarabe]);
 
   const totals = useMemo(() => {
     return syrupStats.reduce((acc, s) => ({
@@ -176,8 +241,22 @@ export function SyrupReport() {
   };
 
   const jarabesData = useMemo(() => {
-    const data: Record<string, { marca: string, sabor: string, consumidoL: number, unidades: number, emulsionKg: number }> = {};
+    const data: Record<string, { marca: string, sabor: string, groupName?: string, consumidoL: number, unidades: number, emulsionKg: number }> = {};
     const saboresSinJarabeCfg = config?.saboresSinJarabe || SABORES_SIN_JARABE;
+    const compatibleGroups = config?.compatibleSyrupGroups || {};
+
+    const findGroup = (marca?: string, sabor?: string) => {
+      if (!sabor) return null;
+      const fullKey = marca ? `${marca} - ${sabor}` : sabor;
+      for (const [groupName, members] of Object.entries(compatibleGroups)) {
+        if (Array.isArray(members)) {
+          if (members.includes(fullKey) || (marca && members.some(m => m === fullKey || m === sabor))) {
+            return groupName;
+          }
+        }
+      }
+      return null;
+    };
 
     elaboracionReports.forEach(r => {
       const date = getLogicalDate(r);
@@ -187,7 +266,14 @@ export function SyrupReport() {
 
       const key = `${r.marca}-${r.sabor}`;
       if (!data[key]) {
-        data[key] = { marca: r.marca, sabor: r.sabor, consumidoL: 0, unidades: 0, emulsionKg: 0 };
+        data[key] = { 
+          marca: r.marca, 
+          sabor: r.sabor, 
+          groupName: findGroup(r.marca, r.sabor) || undefined, 
+          consumidoL: 0, 
+          unidades: 0, 
+          emulsionKg: 0 
+        };
       }
       data[key].consumidoL += (r.jarabeConsumido || 0);
     });
@@ -202,7 +288,7 @@ export function SyrupReport() {
     });
 
     return Object.values(data).sort((a, b) => b.consumidoL - a.consumidoL);
-  }, [elaboracionReports, jarabesStartDate, jarabesEndDate, config?.syrupFormulas, config?.saboresSinJarabe]);
+  }, [elaboracionReports, jarabesStartDate, jarabesEndDate, config?.syrupFormulas, config?.saboresSinJarabe, config?.compatibleSyrupGroups]);
 
   if (loading) {
     return (
@@ -397,10 +483,28 @@ export function SyrupReport() {
                   <td className="px-4 py-4 border-r border-gray-100">
                     <div className="flex items-center gap-3">
                       <div 
-                        className="w-2 h-6 rounded-full" 
-                        style={{ backgroundColor: activeColors[s.sabor] || '#cbd5e1' }}
+                        className="w-2 h-6 rounded-full shrink-0" 
+                        style={{ backgroundColor: s.isGroup ? '#f59e0b' : (activeColors[s.sabor] || '#cbd5e1') }}
                       />
-                      <span className="font-bold text-gray-900">{s.sabor}</span>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-gray-900 text-sm">{s.sabor}</span>
+                          {s.isGroup && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                              Jarabe Compartido
+                            </span>
+                          )}
+                        </div>
+                        {s.isGroup && s.members && s.members.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {s.members.map(m => (
+                              <span key={m} className="text-[10px] text-amber-900/80 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/60 font-medium">
+                                {m}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </td>
                   <td className="px-4 py-4 border-r border-gray-100 text-center">
@@ -517,9 +621,16 @@ export function SyrupReport() {
                   <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-500 italic">No hay datos en este período</td></tr>
                 ) : jarabesData.map(d => (
                   <tr key={`${d.marca}-${d.sabor}`} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-medium text-gray-900 border-r border-gray-200 flex items-center gap-2">
-                       <div className="w-2 h-2 rounded-full" style={{ backgroundColor: activeColors[d.sabor] || '#CBD5E1' }} />
-                       {d.marca} {d.sabor}
+                    <td className="px-4 py-3 font-medium text-gray-900 border-r border-gray-200">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: activeColors[d.sabor] || '#CBD5E1' }} />
+                        <span>{d.marca} {d.sabor}</span>
+                        {d.groupName && (
+                          <span className="text-[10px] font-semibold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200">
+                            Grupo: {d.groupName}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-center border-r border-gray-200 font-medium text-blue-700">
                       {d.consumidoL.toLocaleString('es-AR', { maximumFractionDigits: 1 })}

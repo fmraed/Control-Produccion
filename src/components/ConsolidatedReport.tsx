@@ -2,18 +2,26 @@ import { useState, useEffect, useMemo } from 'react';
 import { collection, query, orderBy, onSnapshot, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { ProductionReport } from '../types';
-import { FileText, Calendar, Filter, BarChart3, ChevronDown, ChevronUp } from 'lucide-react';
-import { format, parseISO, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
+import { FileText, Calendar, Filter, BarChart3, ChevronDown, ChevronUp, Clock, ArrowRight } from 'lucide-react';
+import { format, parseISO, startOfMonth, endOfMonth, subDays, addDays, isValid, differenceInCalendarDays } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { SABORES, TAMANOS } from '../constants';
 import { useAppConfig } from '../hooks/useAppConfig';
 import { getLogicalDate, getHistoricalMonths } from '../utils';
 
+export type ConsolidatedPeriodMode = 'range' | 'month' | 'year' | 'all';
+
 export function ConsolidatedReport() {
   const { config, getFilteredFlavors, getFilteredSizes, availableBrands, shouldShowReport } = useAppConfig();
   const [reports, setReports] = useState<ProductionReport[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedPeriod, setSelectedPeriod] = useState<string>(format(new Date(), 'yyyy-MM'));
+
+  // Period mode and dates
+  const [periodMode, setPeriodMode] = useState<ConsolidatedPeriodMode>('range');
+  const [startDate, setStartDate] = useState<string>(() => format(startOfMonth(new Date()), 'yyyy-MM-dd'));
+  const [endDate, setEndDate] = useState<string>(() => format(new Date(), 'yyyy-MM-dd'));
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => format(new Date(), 'yyyy-MM'));
+  const [selectedYear, setSelectedYear] = useState<string>(() => format(new Date(), 'yyyy'));
   const [selectedGestion, setSelectedGestion] = useState<'all' | 'current' | 'previous'>('all');
 
   // Acceder a la config de gestión
@@ -22,28 +30,34 @@ export function ConsolidatedReport() {
   useEffect(() => {
     let q;
     
-    if (selectedPeriod === 'all') {
+    if (periodMode === 'all') {
       q = query(collection(db, 'production_reports'), orderBy('fecha', 'desc'));
-    } else if (selectedPeriod.startsWith('year_')) {
-      // It's a year
-      const year = parseInt(selectedPeriod.replace('year_', ''), 10);
-      const startDate = new Date(year - 1, 11, 28); // Dec 28 prev year
-      const startStr = format(startDate, 'yyyy-MM-dd');
-      const endDate = new Date(year + 1, 0, 5); // Jan 5 next year
-      const endStr = format(endDate, 'yyyy-MM-dd');
-      
-      q = query(
-        collection(db, 'production_reports'), 
-        where('fecha', '>=', startStr),
-        where('fecha', '<=', endStr),
-        orderBy('fecha', 'desc')
-      );
-    } else if (selectedPeriod.includes('-')) {
-      const [year, month] = selectedPeriod.split('-');
-      const startDate = new Date(parseInt(year), parseInt(month) - 2, 28);
-      const startStr = format(startDate, 'yyyy-MM-dd');
-      const endDate = new Date(parseInt(year), parseInt(month), 5);
-      const endStr = format(endDate, 'yyyy-MM-dd');
+    } else if (periodMode === 'range') {
+      try {
+        const s = parseISO(startDate);
+        const e = parseISO(endDate);
+        const minDate = isValid(s) && isValid(e) ? (s <= e ? s : e) : new Date();
+        const maxDate = isValid(s) && isValid(e) ? (s <= e ? e : s) : new Date();
+        // Shift 'Noche' offset buffer: 1 day before minDate and 2 days after maxDate
+        const startStr = format(subDays(minDate, 1), 'yyyy-MM-dd');
+        const endStr = format(addDays(maxDate, 2), 'yyyy-MM-dd');
+
+        q = query(
+          collection(db, 'production_reports'),
+          where('fecha', '>=', startStr),
+          where('fecha', '<=', endStr),
+          orderBy('fecha', 'desc')
+        );
+      } catch (err) {
+        console.error("Error setting up range query:", err);
+        q = query(collection(db, 'production_reports'), orderBy('fecha', 'desc'));
+      }
+    } else if (periodMode === 'year') {
+      const year = parseInt(selectedYear, 10);
+      const startD = new Date(year - 1, 11, 28); // Dec 28 prev year
+      const startStr = format(startD, 'yyyy-MM-dd');
+      const endD = new Date(year + 1, 0, 5); // Jan 5 next year
+      const endStr = format(endD, 'yyyy-MM-dd');
       
       q = query(
         collection(db, 'production_reports'), 
@@ -52,9 +66,22 @@ export function ConsolidatedReport() {
         orderBy('fecha', 'desc')
       );
     } else {
-      q = query(collection(db, 'production_reports'), orderBy('fecha', 'desc'));
+      // 'month'
+      const [year, month] = selectedMonth.split('-');
+      const startD = new Date(parseInt(year), parseInt(month) - 2, 28);
+      const startStr = format(startD, 'yyyy-MM-dd');
+      const endD = new Date(parseInt(year), parseInt(month), 5);
+      const endStr = format(endD, 'yyyy-MM-dd');
+      
+      q = query(
+        collection(db, 'production_reports'), 
+        where('fecha', '>=', startStr),
+        where('fecha', '<=', endStr),
+        orderBy('fecha', 'desc')
+      );
     }
     
+    setLoading(true);
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const reportsData: ProductionReport[] = [];
       snapshot.forEach((doc) => {
@@ -68,7 +95,7 @@ export function ConsolidatedReport() {
     });
 
     return () => unsubscribe();
-  }, [selectedPeriod]);
+  }, [periodMode, startDate, endDate, selectedMonth, selectedYear]);
 
   const years = useMemo(() => {
     const historicalMonths = getHistoricalMonths();
@@ -92,21 +119,30 @@ export function ConsolidatedReport() {
       });
     }
 
-    if (selectedPeriod === 'all') return result;
+    if (periodMode === 'all') return result;
+
+    if (periodMode === 'range') {
+      const minDateStr = startDate <= endDate ? startDate : endDate;
+      const maxDateStr = startDate <= endDate ? endDate : startDate;
+      return result.filter(r => {
+        const logicalDate = getLogicalDate(r);
+        if (!logicalDate) return false;
+        return logicalDate >= minDateStr && logicalDate <= maxDateStr;
+      });
+    }
     
-    if (selectedPeriod.startsWith('year_')) {
-        const year = selectedPeriod.replace('year_', '');
-        return result.filter(r => {
-            const logicalDate = getLogicalDate(r);
-            return logicalDate && logicalDate.startsWith(year);
-        });
+    if (periodMode === 'year') {
+      return result.filter(r => {
+        const logicalDate = getLogicalDate(r);
+        return logicalDate && logicalDate.startsWith(selectedYear);
+      });
     }
 
     return result.filter(r => {
       const logicalDate = getLogicalDate(r);
-      return logicalDate && logicalDate.startsWith(selectedPeriod);
+      return logicalDate && logicalDate.startsWith(selectedMonth);
     });
-  }, [reports, selectedPeriod, selectedGestion, managementStartDate, shouldShowReport]);
+  }, [reports, periodMode, startDate, endDate, selectedMonth, selectedYear, selectedGestion, managementStartDate, shouldShowReport]);
 
   // Consolidated data structure
   // { [marca|sabor]: { [tamano]: { packs: number, extraBot: number } } }
@@ -204,58 +240,290 @@ export function ConsolidatedReport() {
     return { data, totalsBySize, sortedCombinations, filteredSizes: finalSizes, grandTotalPacks, grandTotalExtraBot };
   }, [filteredReports, getFilteredFlavors, getFilteredSizes, availableBrands]);
 
-  if (loading) {
-    return (
-      <div className="flex justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
-
-  const sortedTamanos = [3000, 2250, 2000, 1000, 1500, 500];
+  const periodDescription = useMemo(() => {
+    if (periodMode === 'range') {
+      const minDateStr = startDate <= endDate ? startDate : endDate;
+      const maxDateStr = startDate <= endDate ? endDate : startDate;
+      try {
+        const sFormatted = format(parseISO(minDateStr), "dd/MM/yyyy");
+        const eFormatted = format(parseISO(maxDateStr), "dd/MM/yyyy");
+        const days = Math.abs(differenceInCalendarDays(parseISO(maxDateStr), parseISO(minDateStr))) + 1;
+        return `Del ${sFormatted} al ${eFormatted} (${days} ${days === 1 ? 'día' : 'días'} · ${filteredReports.length} ${filteredReports.length === 1 ? 'parte' : 'partes'})`;
+      } catch {
+        return `Rango personalizado (${filteredReports.length} partes)`;
+      }
+    }
+    if (periodMode === 'month') {
+      try {
+        const formatted = format(parseISO(`${selectedMonth}-01`), 'MMMM yyyy', { locale: es });
+        return `Mes de ${formatted.charAt(0).toUpperCase() + formatted.slice(1)} (${filteredReports.length} ${filteredReports.length === 1 ? 'parte' : 'partes'})`;
+      } catch {
+        return `Mes ${selectedMonth} (${filteredReports.length} partes)`;
+      }
+    }
+    if (periodMode === 'year') {
+      return `Año ${selectedYear} (${filteredReports.length} ${filteredReports.length === 1 ? 'parte' : 'partes'})`;
+    }
+    return `Todo el historial (${filteredReports.length} ${filteredReports.length === 1 ? 'parte' : 'partes'})`;
+  }, [periodMode, startDate, endDate, selectedMonth, selectedYear, filteredReports.length]);
 
   return (
     <div className="space-y-6">
-      {/* Header & Filter */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 flex flex-col sm:flex-row justify-between items-center gap-4">
-        <div className="flex items-center gap-2 text-gray-700 font-medium">
-          <BarChart3 className="w-5 h-5 text-blue-600" />
-          <h2 className="text-lg">Consolidado de Producción</h2>
-        </div>
-        <div className="flex items-center gap-4">
-          {managementStartDate && (
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-gray-500 uppercase tracking-widest">Gestión:</label>
-              <select
-                value={selectedGestion}
-                onChange={(e) => setSelectedGestion(e.target.value as any)}
-                className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2"
+      {/* Header & Filter Card */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 space-y-4">
+        {/* Top bar: Title, Management & Mode Switcher */}
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+          <div className="flex items-center gap-2 text-gray-700 font-medium">
+            <BarChart3 className="w-5 h-5 text-blue-600" />
+            <h2 className="text-lg font-bold text-gray-900">Consolidado de Producción</h2>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            {managementStartDate && (
+              <div className="flex items-center gap-2 bg-gray-50 px-2.5 py-1.5 rounded-lg border border-gray-200">
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Gestión:</label>
+                <select
+                  value={selectedGestion}
+                  onChange={(e) => setSelectedGestion(e.target.value as any)}
+                  className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-xs border p-1 bg-white font-medium"
+                >
+                  <option value="all">Todas</option>
+                  <option value="current">Actual</option>
+                  <option value="previous">Anterior</option>
+                </select>
+              </div>
+            )}
+
+            {/* Mode Switcher Tabs */}
+            <div className="inline-flex p-1 bg-gray-100 rounded-lg border border-gray-200 text-xs font-medium">
+              <button
+                type="button"
+                onClick={() => setPeriodMode('range')}
+                className={`px-3 py-1.5 rounded-md transition-all flex items-center gap-1.5 ${
+                  periodMode === 'range'
+                    ? 'bg-white text-blue-700 shadow-xs font-bold'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
               >
-                <option value="all">Todas</option>
-                <option value="current">Actual</option>
-                <option value="previous">Anterior</option>
-              </select>
+                <Calendar className="w-3.5 h-3.5" />
+                Entre Fechas
+              </button>
+              <button
+                type="button"
+                onClick={() => setPeriodMode('month')}
+                className={`px-3 py-1.5 rounded-md transition-all flex items-center gap-1.5 ${
+                  periodMode === 'month'
+                    ? 'bg-white text-blue-700 shadow-xs font-bold'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5" />
+                Por Mes
+              </button>
+              <button
+                type="button"
+                onClick={() => setPeriodMode('year')}
+                className={`px-3 py-1.5 rounded-md transition-all flex items-center gap-1.5 ${
+                  periodMode === 'year'
+                    ? 'bg-white text-blue-700 shadow-xs font-bold'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Por Año
+              </button>
+              <button
+                type="button"
+                onClick={() => setPeriodMode('all')}
+                className={`px-3 py-1.5 rounded-md transition-all ${
+                  periodMode === 'all'
+                    ? 'bg-white text-blue-700 shadow-xs font-bold'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Todo
+              </button>
             </div>
-          )}
-          <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-gray-400" />
+          </div>
+        </div>
+
+        {/* Dynamic Controls based on selected Mode */}
+        {periodMode === 'range' && (
+          <div className="bg-blue-50/60 p-3.5 rounded-lg border border-blue-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Desde:</span>
+                <input
+                  type="date"
+                  value={startDate}
+                  max={endDate}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setStartDate(val);
+                    if (endDate && val > endDate) {
+                      setEndDate(val);
+                    }
+                  }}
+                  className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm border px-2.5 py-1.5 bg-white font-medium text-gray-800"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Hasta:</span>
+                <input
+                  type="date"
+                  value={endDate}
+                  min={startDate}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setEndDate(val);
+                    if (startDate && val < startDate) {
+                      setStartDate(val);
+                    }
+                  }}
+                  className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm border px-2.5 py-1.5 bg-white font-medium text-gray-800"
+                />
+              </div>
+            </div>
+
+            {/* Quick shortcuts */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mr-1">Atajos:</span>
+              <button
+                type="button"
+                onClick={() => {
+                  const today = format(new Date(), 'yyyy-MM-dd');
+                  setStartDate(today);
+                  setEndDate(today);
+                }}
+                className="px-2 py-1 text-xs font-medium bg-white hover:bg-blue-50 text-gray-700 hover:text-blue-700 rounded border border-gray-200 hover:border-blue-300 shadow-xs transition-colors"
+              >
+                Hoy
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const y = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+                  setStartDate(y);
+                  setEndDate(y);
+                }}
+                className="px-2 py-1 text-xs font-medium bg-white hover:bg-blue-50 text-gray-700 hover:text-blue-700 rounded border border-gray-200 hover:border-blue-300 shadow-xs transition-colors"
+              >
+                Ayer
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setStartDate(format(subDays(new Date(), 7), 'yyyy-MM-dd'));
+                  setEndDate(format(new Date(), 'yyyy-MM-dd'));
+                }}
+                className="px-2 py-1 text-xs font-medium bg-white hover:bg-blue-50 text-gray-700 hover:text-blue-700 rounded border border-gray-200 hover:border-blue-300 shadow-xs transition-colors"
+              >
+                7 días
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setStartDate(format(subDays(new Date(), 15), 'yyyy-MM-dd'));
+                  setEndDate(format(new Date(), 'yyyy-MM-dd'));
+                }}
+                className="px-2 py-1 text-xs font-medium bg-white hover:bg-blue-50 text-gray-700 hover:text-blue-700 rounded border border-gray-200 hover:border-blue-300 shadow-xs transition-colors"
+              >
+                15 días
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setStartDate(format(subDays(new Date(), 30), 'yyyy-MM-dd'));
+                  setEndDate(format(new Date(), 'yyyy-MM-dd'));
+                }}
+                className="px-2 py-1 text-xs font-medium bg-white hover:bg-blue-50 text-gray-700 hover:text-blue-700 rounded border border-gray-200 hover:border-blue-300 shadow-xs transition-colors"
+              >
+                30 días
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setStartDate(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
+                  setEndDate(format(new Date(), 'yyyy-MM-dd'));
+                }}
+                className="px-2 py-1 text-xs font-medium bg-white hover:bg-blue-50 text-gray-700 hover:text-blue-700 rounded border border-gray-200 hover:border-blue-300 shadow-xs transition-colors"
+              >
+                Este Mes
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const prevMonthEnd = subDays(startOfMonth(new Date()), 1);
+                  setStartDate(format(startOfMonth(prevMonthEnd), 'yyyy-MM-dd'));
+                  setEndDate(format(endOfMonth(prevMonthEnd), 'yyyy-MM-dd'));
+                }}
+                className="px-2 py-1 text-xs font-medium bg-white hover:bg-blue-50 text-gray-700 hover:text-blue-700 rounded border border-gray-200 hover:border-blue-300 shadow-xs transition-colors"
+              >
+                Mes Anterior
+              </button>
+            </div>
+          </div>
+        )}
+
+        {periodMode === 'month' && (
+          <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 flex items-center gap-3">
+            <Calendar className="w-4 h-4 text-blue-600" />
+            <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Seleccionar Mes:</label>
             <select
-              value={selectedPeriod}
-              onChange={(e) => setSelectedPeriod(e.target.value)}
-              className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2 min-w-[200px]"
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm border px-3 py-1.5 bg-white font-medium min-w-[220px]"
             >
-              <option value="all">Todo el historial</option>
-              {years.map(y => (
-                  <option key={`year_${y}`} value={`year_${y}`}>
-                      Año {y}
-                  </option>
-              ))}
               {months.map(m => (
                 <option key={`month_${m}`} value={m}>
                   {format(parseISO(`${m}-01`), 'MMMM yyyy', { locale: es }).replace(/^\w/, c => c.toUpperCase())}
                 </option>
               ))}
             </select>
+          </div>
+        )}
+
+        {periodMode === 'year' && (
+          <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 flex items-center gap-3">
+            <Calendar className="w-4 h-4 text-blue-600" />
+            <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Seleccionar Año:</label>
+            <select
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(e.target.value)}
+              className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm border px-3 py-1.5 bg-white font-medium min-w-[160px]"
+            >
+              {years.map(y => (
+                <option key={`year_${y}`} value={y}>
+                  Año {y}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Active evaluation status banner */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-gray-100 text-xs">
+          <div className="flex items-center gap-2 text-gray-600">
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
+              {periodMode === 'range' && '📅 Rango Libre'}
+              {periodMode === 'month' && '📆 Mensual'}
+              {periodMode === 'year' && '🗓️ Anual'}
+              {periodMode === 'all' && '🌐 Historial Completo'}
+            </span>
+            <span className="font-medium text-gray-700">{periodDescription}</span>
+          </div>
+
+          <div className="flex items-center gap-2 text-xs">
+            {loading ? (
+              <span className="inline-flex items-center gap-1.5 text-blue-600 font-medium">
+                <span className="w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></span>
+                Actualizando...
+              </span>
+            ) : (
+              <span className="text-gray-400 font-medium">
+                Total evaluado: <strong className="text-gray-700">{consolidatedData.grandTotalPacks.toLocaleString('es-AR')}</strong> packs
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -363,7 +631,7 @@ export function ConsolidatedReport() {
       <div className="bg-blue-50 rounded-xl shadow-sm border border-blue-200 p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
         <div>
           <h3 className="text-lg font-bold text-blue-900">Total General de Producción</h3>
-          <p className="text-sm text-blue-700">Suma de todos los sabores y calibres en el periodo seleccionado</p>
+          <p className="text-sm text-blue-700">Suma de todos los sabores y calibres &bull; <span className="font-semibold text-blue-900">{periodDescription}</span></p>
         </div>
         <div className="flex items-center gap-6 bg-white px-6 py-4 rounded-lg shadow-sm border border-blue-100">
           <div className="text-center">

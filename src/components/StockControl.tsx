@@ -59,8 +59,33 @@ export function StockControl() {
   // Daily stock inline editing states
   const [editingDailyKey, setEditingDailyKey] = useState<string | null>(null);
   const [editingDailyValue, setEditingDailyValue] = useState<string>('');
+  const [syncingInitialStock, setSyncingInitialStock] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const isAdmin = auth.currentUser?.email === 'fraed.fordrinks@gmail.com';
+
+  const getProductPendingQuantity = (
+    flavor: string,
+    sqlCode?: string,
+    pendingList: any[] = sqlPending,
+    qcFlavors: string[] = config?.qualityControlFlavors || ['Agua']
+  ): number => {
+    if (!sqlCode) return 0;
+    const requiresQC = qcFlavors.some(f => f.trim().toLowerCase() === flavor.trim().toLowerCase());
+    const pendingData = pendingList.find(s => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim());
+    if (!pendingData) return 0;
+
+    const val = pendingData.nu_cantidadPendiente || pendingData.nu_CantidadPendiente;
+    const rawQty = (val !== undefined && val !== null && val !== 0)
+      ? Number(val)
+      : Number(pendingData.nu_cantidad || pendingData.nu_Cantidad || 0);
+
+    if (isNaN(rawQty) || rawQty <= 0) return 0;
+    if (requiresQC || qcFlavors.length === 0 || rawQty > 0) {
+      return rawQty;
+    }
+    return 0;
+  };
 
   const fetchMappings = async () => {
     try {
@@ -87,6 +112,33 @@ export function StockControl() {
     } catch (err) {
       console.error(err);
       setError("Error al guardar stock inicial.");
+    }
+  };
+
+  const handleSyncAllInitialStocksFromSql = async () => {
+    if (!isAdmin) return;
+    setSyncingInitialStock(true);
+    setError(null);
+    try {
+      const toSave: Record<string, number> = {};
+      activeProducts.forEach(p => {
+        const mappingKey = `${p.marca}-${p.sabor}-${p.tamano}`;
+        const legacyKey = `${p.sabor}-${p.tamano}`;
+        const sqlCode = sqlMappings[mappingKey] || sqlMappings[legacyKey];
+        const sqlData = sqlStock.find((s: any) => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim());
+        const pendingQty = getProductPendingQuantity(p.sabor, sqlCode);
+        const baseStock = sqlData ? (sqlData.stock_inicial ?? sqlData.stock_actual ?? 0) : 0;
+        toSave[p.key] = baseStock + pendingQty;
+      });
+
+      await setDoc(doc(db, 'monthly_stock_init', selectedMonth), toSave);
+      setSuccessMessage("Stock inicial sincronizado exitosamente con SQL (incluyendo Por Liberar).");
+      setTimeout(() => setSuccessMessage(null), 5000);
+    } catch (err) {
+      console.error("Error syncing initial stock:", err);
+      setError("Error al sincronizar stock inicial con SQL.");
+    } finally {
+      setSyncingInitialStock(false);
     }
   };
 
@@ -321,18 +373,25 @@ export function StockControl() {
       let needsSave = false;
 
       activeProducts.forEach(p => {
+        const mappingKey = `${p.marca}-${p.sabor}-${p.tamano}`;
+        const legacyKey = `${p.sabor}-${p.tamano}`;
+        const sqlCode = sqlMappings[mappingKey] || sqlMappings[legacyKey];
+        const sqlData = sqlStock.find((s: any) => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim());
+        const pendingQty = getProductPendingQuantity(p.sabor, sqlCode);
+        const baseStock = sqlData ? (sqlData.stock_inicial ?? sqlData.stock_actual ?? 0) : 0;
+        const totalInitWithPending = baseStock + pendingQty;
+
         if (initialStockOverrides[p.key] === undefined) {
-          const mappingKey = `${p.marca}-${p.sabor}-${p.tamano}`;
-          const legacyKey = `${p.sabor}-${p.tamano}`;
-          const sqlCode = sqlMappings[mappingKey] || sqlMappings[legacyKey];
-          const sqlData = sqlStock.find((s: any) => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim());
-          if (sqlData) {
-            toSave[p.key] = sqlData.stock_actual;
-            needsSave = true;
-          } else {
-            toSave[p.key] = 0;
-            needsSave = true;
-          }
+          toSave[p.key] = totalInitWithPending;
+          needsSave = true;
+        } else if (
+          pendingQty > 0 &&
+          sqlData &&
+          initialStockOverrides[p.key] === (sqlData.stock_inicial ?? sqlData.stock_actual ?? 0)
+        ) {
+          // Auto-repair if it was saved by previous bug without Por Liberar
+          toSave[p.key] = totalInitWithPending;
+          needsSave = true;
         }
       });
 
@@ -341,7 +400,7 @@ export function StockControl() {
           .catch(err => console.error("Error auto-saving initial stocks:", err));
       }
     }
-  }, [initialStockLoaded, sqlStock, activeProducts, selectedMonth, initialStockOverrides, sqlMappings]);
+  }, [initialStockLoaded, sqlStock, sqlPending, activeProducts, selectedMonth, initialStockOverrides, sqlMappings, config]);
 
   const dataByProduct = useMemo(() => {
     const productsMap: Record<string, any> = {};
@@ -377,24 +436,12 @@ export function StockControl() {
       
       const sqlData = sqlStock.find(s => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim()) || { stock_actual: 0, salida_acumulada: 0, stock_inicial: 0 };
       
-      const requiresQC = (config.qualityControlFlavors || ['Agua']).some(f => f.trim() === p.sabor.trim());
-      const isExternal = (config.externalProducts?.[p.marca]?.[p.tamano.toString()] || []).includes(p.sabor);
-      
-      const pendingData = requiresQC 
-        ? sqlPending.find(s => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim()) 
-        : undefined;
+      const pendingQuantity = getProductPendingQuantity(p.sabor, sqlCode);
+      const baseStock = sqlData.stock_inicial ?? sqlData.stock_actual ?? 0;
 
-      let pendingQuantity = 0;
-      if (pendingData) {
-        if (pendingData.nu_cantidadPendiente || pendingData.nu_CantidadPendiente) {
-          const val = pendingData.nu_cantidadPendiente || pendingData.nu_CantidadPendiente;
-          pendingQuantity = val !== 0 ? val : (pendingData.nu_cantidad || pendingData.nu_Cantidad || 0);
-        } else {
-          pendingQuantity = pendingData.nu_cantidad || pendingData.nu_Cantidad || 0;
-        }
-      }
-
-      const initialStock = initialStockOverrides[p.key] !== undefined ? initialStockOverrides[p.key] : (sqlData.stock_inicial + pendingQuantity);
+      const initialStock = initialStockOverrides[p.key] !== undefined 
+        ? initialStockOverrides[p.key] 
+        : (baseStock + pendingQuantity);
       
       // For external products, we use income instead of production if available
       const income = 0; 
@@ -404,17 +451,20 @@ export function StockControl() {
         ? (savedDailyStocks[p.key] !== undefined ? savedDailyStocks[p.key] : 0)
         : sqlData.stock_actual;
 
-      // Salida calculada = Stock Inicial + Producción/Ingresos - Stock Actual (Instancia)
-      const accumulatedExit = Math.max(0, initialStock + totalProducedMonth + income - currentStockInstance);
+      // Total físico en planta actual = Stock en depósito (instancia) + Por Liberar actual
+      const currentTotalStock = currentStockInstance + pendingQuantity;
+
+      // Salida calculada = Stock Inicial (incluyendo Por Liberar inicial) + Producción/Ingresos - Stock Total Actual (Instancia + Por Liberar actual)
+      const accumulatedExit = Math.max(0, initialStock + totalProducedMonth + income - currentTotalStock);
 
       // Promedio salida diaria = Total Pedido Mes / 21 (días hábiles típicos)
       const avgDailyExit = goal / 21;
       
       // Días de cobertura = (Stock Actual + Por Liberar) / Promedio salida diaria
-      const coverageDays = avgDailyExit > 0 ? Math.floor((currentStockInstance + pendingQuantity) / avgDailyExit) : 0;
+      const coverageDays = avgDailyExit > 0 ? Math.floor(currentTotalStock / avgDailyExit) : 0;
 
       const packsPorPaleta = config.packsPorPaleta?.[p.tamano] || 1;
-      const totalPalettes = (currentStockInstance + pendingQuantity) / packsPorPaleta;
+      const totalPalettes = currentTotalStock / packsPorPaleta;
       const isStackable = config.stackableFlavors?.includes(p.sabor) ?? true;
       const positionsUsed = isStackable ? Math.ceil(totalPalettes / 2) : Math.ceil(totalPalettes);
 
@@ -632,13 +682,32 @@ export function StockControl() {
           <button
             onClick={() => fetchSqlStock(selectedMonth, true)}
             disabled={refreshing}
-            className="self-end p-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-md shadow-blue-105 disabled:opacity-50"
+            className="self-end p-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-md shadow-blue-100 disabled:opacity-50"
             title="Sincronizar SQL de nuevo"
           >
             <RefreshCw className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
+
+          {isAdmin && (
+            <button
+              onClick={handleSyncAllInitialStocksFromSql}
+              disabled={syncingInitialStock || refreshing}
+              className="flex items-center gap-1.5 self-end py-2.5 px-3 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 rounded-xl text-xs font-bold transition-all shadow-sm disabled:opacity-50"
+              title="Recalcular todo el Stock Inicial del mes desde SQL incluyendo Por Liberar"
+            >
+              <Sparkles className={`w-4 h-4 ${syncingInitialStock ? 'animate-spin' : ''}`} />
+              <span>{syncingInitialStock ? 'Sincronizando...' : 'Sincronizar Stock Inicial (+ Por Liberar)'}</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {successMessage && (
+        <div className="bg-emerald-50 border border-emerald-200 p-3.5 rounded-xl flex items-center gap-2.5 text-emerald-800 text-xs font-bold animate-in fade-in">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <p>{successMessage}</p>
+        </div>
+      )}
 
       {/* Daily Freeze status banner & save button */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50 border border-slate-200 p-4 rounded-xl">
@@ -835,7 +904,22 @@ export function StockControl() {
                     <th className="px-3 py-3 text-xs font-bold text-gray-600 uppercase tracking-widest border border-gray-300 bg-gray-50">% Obj. Prod.</th>
                     <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300">Promedio Salida Diaria</th>
                     <th className="px-6 py-3 text-sm font-black text-blue-900 uppercase tracking-widest border border-gray-300 bg-blue-100">Días Cover.</th>
-                    <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300">Stock Inicial</th>
+                    <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300">
+                      <div className="flex items-center justify-between gap-1">
+                        <span>Stock Inicial</span>
+                        {isAdmin && (
+                          <button
+                            onClick={handleSyncAllInitialStocksFromSql}
+                            disabled={syncingInitialStock}
+                            className="text-[9px] bg-blue-50 text-blue-700 hover:bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200 transition-colors font-bold inline-flex items-center gap-0.5"
+                            title="Recalcular todo el Stock Inicial del mes desde SQL (incluyendo Por Liberar)"
+                          >
+                            <RefreshCw className={`w-2.5 h-2.5 ${syncingInitialStock ? 'animate-spin' : ''}`} />
+                            Sync
+                          </button>
+                        )}
+                      </div>
+                    </th>
                     <th className="px-4 py-3 text-xs font-black text-gray-600 uppercase tracking-widest border border-gray-300">Salida Acumulada</th>
                     <th className="px-3 py-3 text-xs font-bold text-gray-600 uppercase tracking-widest border border-gray-300 bg-gray-50">% Obj. Salida</th>
                   </tr>
@@ -973,7 +1057,15 @@ export function StockControl() {
                                   />
                                 ) : (
                                   <div className="text-right w-[80px] ml-auto border-b border-dashed border-gray-300 pb-0.5">
-                                    {p.initialStock.toLocaleString('es-AR')}
+                                    <span>{p.initialStock.toLocaleString('es-AR')}</span>
+                                    {p.pending > 0 && (
+                                      <span 
+                                        className="block text-[9px] text-orange-600 font-bold leading-tight"
+                                        title={`Incluye ${p.pending.toLocaleString('es-AR')} un. Por Liberar`}
+                                      >
+                                        +{p.pending.toLocaleString('es-AR')} lib.
+                                      </span>
+                                    )}
                                   </div>
                                 )}
                               </td>
@@ -1049,7 +1141,7 @@ export function StockControl() {
                       {(() => {
                         const totalOrdered = groupValues.reduce((sum, g) => sum + g.ordered, 0);
                         const totalExit = groupValues.reduce((sum, g) => sum + g.accumulatedExit, 0);
-                        return totalOrdered > 0 ? ((totalExit / totalOrdered) * 105).toFixed(0) : '0';
+                        return totalOrdered > 0 ? ((totalExit / totalOrdered) * 100).toFixed(0) : '0';
                       })()}%
                     </td>
                   </tr>
