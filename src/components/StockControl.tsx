@@ -131,7 +131,7 @@ export function StockControl() {
       });
 
       await setDoc(doc(db, 'monthly_stock_init', selectedMonth), toSave);
-      setSuccessMessage("Stock inicial sincronizado exitosamente con SQL (incluyendo Por Liberar).");
+      setSuccessMessage("Stock inicial sincronizado exitosamente con SQL (incluyendo Por Liberar para productos de fórmula que lo requieren).");
       setTimeout(() => setSuccessMessage(null), 5000);
     } catch (err) {
       console.error("Error syncing initial stock:", err);
@@ -372,24 +372,16 @@ export function StockControl() {
       let needsSave = false;
 
       activeProducts.forEach(p => {
-        const mappingKey = `${p.marca}-${p.sabor}-${p.tamano}`;
-        const legacyKey = `${p.sabor}-${p.tamano}`;
-        const sqlCode = sqlMappings[mappingKey] || sqlMappings[legacyKey];
-        const sqlData = sqlStock.find((s: any) => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim());
-        const pendingQty = getProductPendingQuantity(p.marca, p.sabor, sqlCode);
-        const baseStock = sqlData ? (sqlData.stock_inicial ?? sqlData.stock_actual ?? 0) : 0;
-        const totalInitWithPending = baseStock + pendingQty;
-
         if (initialStockOverrides[p.key] === undefined) {
-          toSave[p.key] = totalInitWithPending;
-          needsSave = true;
-        } else if (
-          pendingQty > 0 &&
-          sqlData &&
-          initialStockOverrides[p.key] === (sqlData.stock_inicial ?? sqlData.stock_actual ?? 0)
-        ) {
-          // Auto-repair if it was saved by previous bug without Por Liberar
-          toSave[p.key] = totalInitWithPending;
+          const mappingKey = `${p.marca}-${p.sabor}-${p.tamano}`;
+          const legacyKey = `${p.sabor}-${p.tamano}`;
+          const sqlCode = sqlMappings[mappingKey] || sqlMappings[legacyKey];
+          const sqlData = sqlStock.find((s: any) => (s.codigo || '').toString().trim() === (sqlCode || '').toString().trim());
+          const baseStock = sqlData ? (sqlData.stock_inicial ?? sqlData.stock_actual ?? 0) : 0;
+          
+          // Al inicializar el stock inicial del mes, se incluye el por liberar para los productos que lo requieren
+          const pendingQty = getProductPendingQuantity(p.marca, p.sabor, sqlCode);
+          toSave[p.key] = baseStock + pendingQty;
           needsSave = true;
         }
       });
@@ -399,7 +391,7 @@ export function StockControl() {
           .catch(err => console.error("Error auto-saving initial stocks:", err));
       }
     }
-  }, [initialStockLoaded, sqlStock, sqlPending, activeProducts, selectedMonth, initialStockOverrides, sqlMappings, config]);
+  }, [initialStockLoaded, sqlStock, activeProducts, selectedMonth, initialStockOverrides, sqlMappings, config]);
 
   const dataByProduct = useMemo(() => {
     const productsMap: Record<string, any> = {};
@@ -450,20 +442,21 @@ export function StockControl() {
         ? (savedDailyStocks[p.key] !== undefined ? savedDailyStocks[p.key] : 0)
         : sqlData.stock_actual;
 
-      // Total físico en planta actual = Stock en depósito (instancia) + Por Liberar actual
-      const currentTotalStock = currentStockInstance + pendingQuantity;
+      // El stock actual físico en depósito para la salida (el por liberar inicial ya está en Stock Inicial)
+      const currentStockDeposit = currentStockInstance;
 
-      // Salida calculada = Stock Inicial (incluyendo Por Liberar inicial) + Producción/Ingresos - Stock Total Actual (Instancia + Por Liberar actual)
-      const accumulatedExit = Math.max(0, initialStock + totalProducedMonth + income - currentTotalStock);
+      // Salida calculada = Stock Inicial + Producción/Ingresos - Stock Actual en depósito
+      const accumulatedExit = Math.max(0, initialStock + totalProducedMonth + income - currentStockDeposit);
 
       // Promedio salida diaria = Total Pedido Mes / 21 (días hábiles típicos)
       const avgDailyExit = goal / 21;
       
-      // Días de cobertura = (Stock Actual + Por Liberar) / Promedio salida diaria
-      const coverageDays = avgDailyExit > 0 ? Math.floor(currentTotalStock / avgDailyExit) : 0;
+      // Días de cobertura: sí incluyen el Por Liberar para los casos previstos (productos que requieren liberación)
+      const stockForCoverage = currentStockInstance + pendingQuantity;
+      const coverageDays = avgDailyExit > 0 ? Math.floor(stockForCoverage / avgDailyExit) : 0;
 
       const packsPorPaleta = config.packsPorPaleta?.[p.tamano] || 1;
-      const totalPalettes = currentTotalStock / packsPorPaleta;
+      const totalPalettes = stockForCoverage / packsPorPaleta;
       const isStackable = config.stackableFlavors?.includes(p.sabor) ?? true;
       const positionsUsed = isStackable ? Math.ceil(totalPalettes / 2) : Math.ceil(totalPalettes);
 
@@ -692,8 +685,8 @@ export function StockControl() {
             <button
               onClick={handleSyncAllInitialStocksFromSql}
               disabled={syncingInitialStock || refreshing}
-              className="flex items-center gap-1.5 self-end py-2.5 px-3 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 rounded-xl text-xs font-bold transition-all shadow-sm disabled:opacity-50"
-              title="Recalcular todo el Stock Inicial del mes desde SQL incluyendo Por Liberar"
+              className="flex items-center gap-1.5 self-end py-2.5 px-3 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 rounded-xl text-xs font-bold transition-all shadow-sm disabled:opacity-50 cursor-pointer"
+              title="Recalcular todo el Stock Inicial del mes desde SQL (incluyendo Por Liberar para productos que requieren liberación)"
             >
               <Sparkles className={`w-4 h-4 ${syncingInitialStock ? 'animate-spin' : ''}`} />
               <span>{syncingInitialStock ? 'Sincronizando...' : 'Sincronizar Stock Inicial (+ Por Liberar)'}</span>
@@ -911,8 +904,8 @@ export function StockControl() {
                           <button
                             onClick={handleSyncAllInitialStocksFromSql}
                             disabled={syncingInitialStock}
-                            className="text-[9px] bg-blue-50 text-blue-700 hover:bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200 transition-colors font-bold inline-flex items-center gap-0.5"
-                            title="Recalcular todo el Stock Inicial del mes desde SQL (incluyendo Por Liberar)"
+                            className="text-[9px] bg-blue-50 text-blue-700 hover:bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200 transition-colors font-bold inline-flex items-center gap-0.5 cursor-pointer"
+                            title="Recalcular todo el Stock Inicial del mes desde SQL (incluyendo Por Liberar para productos que requieren liberación)"
                           >
                             <RefreshCw className={`w-2.5 h-2.5 ${syncingInitialStock ? 'animate-spin' : ''}`} />
                             Sync
@@ -1019,11 +1012,16 @@ export function StockControl() {
                               <td className="px-4 py-3 text-sm font-bold text-gray-700 border border-gray-200 italic">
                                 {p.avgDailyExit.toLocaleString('es-AR', { maximumFractionDigits: 0 })}
                               </td>
-                              <td className={`px-6 py-3 border border-gray-200 text-center ${
-                                p.coverageDays < 5 ? 'bg-red-500 shadow-inner' :
-                                p.coverageDays < 10 ? 'bg-yellow-400 shadow-inner' :
-                                'bg-green-500 shadow-inner'
-                              }`}>
+                              <td 
+                                className={`px-6 py-3 border border-gray-200 text-center ${
+                                  p.coverageDays < 5 ? 'bg-red-500 shadow-inner' :
+                                  p.coverageDays < 10 ? 'bg-yellow-400 shadow-inner' :
+                                  'bg-green-500 shadow-inner'
+                                }`}
+                                title={p.pending > 0 
+                                  ? `Stock depósito (${p.currentStock.toLocaleString('es-AR')}) + Por Liberar (${p.pending.toLocaleString('es-AR')}) = ${(p.currentStock + p.pending).toLocaleString('es-AR')} un. Cobertura: ${p.coverageDays} días`
+                                  : `Stock depósito: ${p.currentStock.toLocaleString('es-AR')} un. Cobertura: ${p.coverageDays} días`}
+                              >
                                 <div className="flex flex-col items-center">
                                   <span className="text-lg font-black text-white drop-shadow-sm leading-none">
                                     {p.coverageDays}
@@ -1061,14 +1059,6 @@ export function StockControl() {
                                 ) : (
                                   <div className="text-right w-[80px] ml-auto border-b border-dashed border-gray-300 pb-0.5">
                                     <span>{p.initialStock.toLocaleString('es-AR')}</span>
-                                    {p.pending > 0 && (
-                                      <span 
-                                        className="block text-[9px] text-orange-600 font-bold leading-tight"
-                                        title={`Incluye ${p.pending.toLocaleString('es-AR')} un. Por Liberar`}
-                                      >
-                                        +{p.pending.toLocaleString('es-AR')} lib.
-                                      </span>
-                                    )}
                                   </div>
                                 )}
                               </td>
