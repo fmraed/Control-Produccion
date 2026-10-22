@@ -1,12 +1,112 @@
 import { useState, useEffect } from 'react';
-import { Database, RefreshCw, AlertCircle, CheckCircle2, Search, AlertTriangle } from 'lucide-react';
+import { Database, RefreshCw, AlertCircle, CheckCircle2, Search, AlertTriangle, Link2 } from 'lucide-react';
 import { format, addDays } from 'date-fns';
 import { collection, query, where, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SQL_PRODUCT_MAPPING, BOTELLAS_POR_PACK } from '../constants';
 import { getLogicalDate } from '../utils';
+import { useAppConfig } from '../hooks/useAppConfig';
+
+const normalizeKey = (str: string) => (str || '').toLowerCase().replace(/[\s\-_/]+/g, '');
+
+const findSyrupGroup = (
+  brand: string,
+  flavor: string,
+  compatibleGroups?: Record<string, string[]>
+): { groupName: string; members: string[] } | null => {
+  if (!flavor || !compatibleGroups) return null;
+  const brandNorm = normalizeKey(brand);
+  const flavorNorm = normalizeKey(flavor);
+  const combinedNorm = normalizeKey(`${brand}${flavor}`);
+
+  for (const [groupName, members] of Object.entries(compatibleGroups)) {
+    if (!Array.isArray(members)) continue;
+    const isMember = members.some(m => {
+      const mNorm = normalizeKey(m);
+      return (
+        mNorm === combinedNorm ||
+        (brand ? false : mNorm === flavorNorm) ||
+        (brandNorm && flavorNorm && mNorm.includes(brandNorm) && mNorm.includes(flavorNorm))
+      );
+    });
+    if (isMember) {
+      return { groupName, members: members as string[] };
+    }
+  }
+  return null;
+};
+
+const findSqlCodeInMappings = (
+  keyToFind: string,
+  mappings: Record<string, string>
+): string | null => {
+  if (!keyToFind || !mappings) return null;
+  // 1. Direct match
+  if (mappings[keyToFind] && typeof mappings[keyToFind] === 'string' && mappings[keyToFind].trim()) {
+    return mappings[keyToFind].trim();
+  }
+  const targetNorm = normalizeKey(keyToFind);
+  const targetNormWithoutGroup = normalizeKey(keyToFind.replace(/^\[grupo\]\s*/i, ''));
+
+  // 2. Normalized match
+  const entry = Object.entries(mappings).find(([k, val]) => {
+    if (!val || typeof val !== 'string' || !val.trim()) return false;
+    const kNorm = normalizeKey(k);
+    const kNormWithoutGroup = normalizeKey(k.replace(/^\[grupo\]\s*/i, ''));
+    return (
+      kNorm === targetNorm ||
+      kNormWithoutGroup === targetNorm ||
+      kNorm === targetNormWithoutGroup ||
+      kNormWithoutGroup === targetNormWithoutGroup
+    );
+  });
+
+  return entry ? (entry[1] as string).trim() : null;
+};
+
+const resolveSyrupSqlCode = (
+  brand: string,
+  flavor: string,
+  sqlSyrupMappings: Record<string, string>,
+  compatibleGroups?: Record<string, string[]>
+): { sqlCode: string | null; groupName?: string; members?: string[] } => {
+  const directKey1 = `${brand}-${flavor}`;
+  const directKey2 = `${brand} - ${flavor}`;
+
+  // Check if it belongs to an equivalent group
+  const group = findSyrupGroup(brand, flavor, compatibleGroups);
+
+  if (group) {
+    // 1. Check if group name has a mapping
+    let code = findSqlCodeInMappings(group.groupName, sqlSyrupMappings) ||
+               findSqlCodeInMappings(`[Grupo] ${group.groupName}`, sqlSyrupMappings);
+
+    // 2. If not found on group name, check if any member of the group has a mapping
+    if (!code && Array.isArray(group.members)) {
+      for (const member of group.members) {
+        code = findSqlCodeInMappings(member, sqlSyrupMappings);
+        if (code) break;
+      }
+    }
+
+    // 3. Fallback to direct key of this report
+    if (!code) {
+      code = findSqlCodeInMappings(directKey1, sqlSyrupMappings) || findSqlCodeInMappings(directKey2, sqlSyrupMappings);
+    }
+
+    return { sqlCode: code, groupName: group.groupName, members: group.members };
+  }
+
+  // Standalone syrup
+  const code = findSqlCodeInMappings(directKey1, sqlSyrupMappings) ||
+               findSqlCodeInMappings(directKey2, sqlSyrupMappings) ||
+               (flavor ? findSqlCodeInMappings(flavor, sqlSyrupMappings) : null);
+
+  return { sqlCode: code };
+};
 
 export function SQLIntegration() {
+  const { config } = useAppConfig();
   const [loading, setLoading] = useState(false);
   const [productType, setProductType] = useState<'products' | 'syrups'>('products');
   const [periodType, setPeriodType] = useState<'daily' | 'monthly'>('daily');
@@ -19,27 +119,35 @@ export function SQLIntegration() {
   const [sqlMappings, setSqlMappings] = useState<Record<string, string>>(SQL_PRODUCT_MAPPING);
   const [sqlSyrupMappings, setSqlSyrupMappings] = useState<Record<string, string>>({});
   const [syrupInitials, setSyrupInitials] = useState<Record<string, number>>({});
+  const [compatibleGroups, setCompatibleGroups] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
 
   const fetchMappings = async () => {
     try {
       const mappingRef = doc(db, 'config', 'sql_mappings');
       const syrupMappingRef = doc(db, 'config', 'sql_syrup_mappings');
+      const prodConfigRef = doc(db, 'config', 'production');
       let initialsRef = null;
       if (productType === 'syrups' && periodType === 'monthly') {
         initialsRef = doc(db, 'config', `syrup_initials_${month}`);
       }
       
-      const docPromises = [getDoc(mappingRef), getDoc(syrupMappingRef)];
+      const docPromises: Promise<any>[] = [getDoc(mappingRef), getDoc(syrupMappingRef), getDoc(prodConfigRef)];
       if (initialsRef) docPromises.push(getDoc(initialsRef));
 
-      const [docSnap, syrupSnap, initialsSnap] = await Promise.all(docPromises);
+      const [docSnap, syrupSnap, prodConfigSnap, initialsSnap] = await Promise.all(docPromises);
       
       if (docSnap.exists()) {
         setSqlMappings(docSnap.data() as Record<string, string>);
       }
       if (syrupSnap.exists()) {
         setSqlSyrupMappings(syrupSnap.data() as Record<string, string>);
+      }
+      if (prodConfigSnap.exists()) {
+        const prodData = prodConfigSnap.data();
+        if (prodData.compatibleSyrupGroups) {
+          setCompatibleGroups(prodData.compatibleSyrupGroups);
+        }
       }
       if (initialsSnap && initialsSnap.exists()) {
         setSyrupInitials(initialsSnap.data() as Record<string, number>);
@@ -89,6 +197,9 @@ export function SQLIntegration() {
       const totals: Record<string, { packs: number, bottles: number }> = {};
       
       const lineNum = line !== 'TODAS' ? line.match(/\d+/)?.[0] : null;
+      const activeGroups = (config?.compatibleSyrupGroups && Object.keys(config.compatibleSyrupGroups).length > 0)
+        ? config.compatibleSyrupGroups
+        : compatibleGroups;
 
       allDocs.forEach((doc) => {
         const data = doc.data() as any;
@@ -106,8 +217,8 @@ export function SQLIntegration() {
           if (!logicalDate.startsWith(month)) return;
         }
 
-        // Filtrar por línea si no es TODAS
-        if (line !== 'TODAS') {
+        // Filtrar por línea si no es TODAS (en jarabes mensual se computa sin filtrar línea)
+        if (line !== 'TODAS' && !(periodType === 'monthly' && productType === 'syrups')) {
           const reportLine = data.linea;
           if (reportLine !== (lineNum || line)) return;
         }
@@ -138,15 +249,12 @@ export function SQLIntegration() {
             totals[codeKey].bottles += Number(data.botellas) || 0;
           }
         } else {
-          // Both `marca` and `sabor` should exist for this to work correctly
-          const brand = typeof data.marca === 'string' ? data.marca.trim() : data.marca;
-          const flavor = typeof data.sabor === 'string' ? data.sabor.trim() : data.sabor;
-          if (!brand || !flavor) return;
-          const searchKey = `${brand}-${flavor}`.toLowerCase();
+          // Para jarabes: tener en cuenta grupos de jarabes equivalentes configurados
+          const brand = typeof data.marca === 'string' ? data.marca.trim() : (data.marca || '');
+          const flavor = typeof data.sabor === 'string' ? data.sabor.trim() : (data.sabor || '');
+          if (!flavor) return;
 
-          const foundEntry = Object.entries(sqlSyrupMappings).find(([k]) => k.trim().toLowerCase() === searchKey);
-          const sqlCodeRaw = foundEntry ? foundEntry[1] : null;
-          const sqlCode = typeof sqlCodeRaw === 'string' ? sqlCodeRaw.trim() : null;
+          const { sqlCode } = resolveSyrupSqlCode(brand, flavor, sqlSyrupMappings, activeGroups);
           
           if (sqlCode) {
             const codeKey = sqlCode as string;
@@ -386,20 +494,47 @@ export function SQLIntegration() {
                   const activeMappingVals = rawMappingVals
                     .filter((v): v is string => typeof v === 'string')
                     .map(v => v.trim().toLowerCase());
+                  const activeGroups = (config?.compatibleSyrupGroups && Object.keys(config.compatibleSyrupGroups).length > 0)
+                    ? config.compatibleSyrupGroups
+                    : compatibleGroups;
 
                   if (productType === 'syrups') {
                     // Inicializar con todos los jarabes mapeados en config para asegurar que se muestren todos
                     Object.entries(sqlSyrupMappings).forEach(([key, code]) => {
                       if (!code) return;
                       const codeStr = (code as string).trim();
-                      const parts = key.split('-');
-                      const label = parts.length >= 2 ? `Jarabe ${parts[1]} (${parts[0]})` : `Jarabe ${key}`;
-                      groupedSql[codeStr] = {
-                        codigo_abreviado: codeStr,
-                        descripcion_articulo: label,
-                        nu_cantFabri: 0,
-                        ordenes: [],
-                      };
+                      const cleanKey = key.replace(/^\[grupo\]\s*/i, '');
+                      
+                      // Check if key is a group name or a member of an equivalent group
+                      let groupFound: { groupName: string; members: string[] } | null = null;
+                      if (activeGroups[cleanKey]) {
+                        groupFound = { groupName: cleanKey, members: activeGroups[cleanKey] };
+                      } else {
+                        const parts = cleanKey.split('-');
+                        const b = parts.length >= 2 ? parts[0].trim() : '';
+                        const f = parts.length >= 2 ? parts[1].trim() : cleanKey.trim();
+                        groupFound = findSyrupGroup(b, f, activeGroups);
+                      }
+
+                      let label = '';
+                      if (groupFound) {
+                        label = `Jarabe ${groupFound.groupName} (${groupFound.members.join(' / ')})`;
+                      } else {
+                        const parts = key.split('-');
+                        label = parts.length >= 2 ? `Jarabe ${parts[1]} (${parts[0]})` : `Jarabe ${key}`;
+                      }
+
+                      if (!groupedSql[codeStr] || groupFound) {
+                        groupedSql[codeStr] = {
+                          codigo_abreviado: codeStr,
+                          descripcion_articulo: label,
+                          nu_cantFabri: groupedSql[codeStr]?.nu_cantFabri || 0,
+                          ordenes: groupedSql[codeStr]?.ordenes || [],
+                          isEquivalentGroup: !!groupFound,
+                          equivalentMembers: groupFound?.members,
+                          groupName: groupFound?.groupName
+                        };
+                      }
                     });
 
                     // Cargar y sumar los resultados de SQL Server
@@ -425,6 +560,21 @@ export function SQLIntegration() {
                       groupedSql[activeCode].nu_cantFabri += row.nu_cantFabri || 0;
                       if (row.nu_ordenProduccion && !groupedSql[activeCode].ordenes.includes(row.nu_ordenProduccion)) {
                         groupedSql[activeCode].ordenes.push(row.nu_ordenProduccion);
+                      }
+                    });
+
+                    // Asegurar que también aparezcan los códigos con consumo en la App aunque SQL no tenga producción en el periodo
+                    Object.keys(firestoreTotals).forEach(code => {
+                      const codeStr = String(code).trim();
+                      const codeLower = codeStr.toLowerCase();
+                      const matchingKey = Object.keys(groupedSql).find(k => k.trim().toLowerCase() === codeLower);
+                      if (!matchingKey && !groupedSql[codeStr]) {
+                        groupedSql[codeStr] = {
+                          codigo_abreviado: codeStr,
+                          descripcion_articulo: `Jarabe ${codeStr}`,
+                          nu_cantFabri: 0,
+                          ordenes: [],
+                        };
                       }
                     });
                   } else {
@@ -517,7 +667,20 @@ export function SQLIntegration() {
                           </div>
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-500">{row.codigo_abreviado}</td>
-                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 font-medium">{row.descripcion_articulo}</td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 font-medium">
+                          <div className="flex items-center gap-2">
+                            <span>{row.descripcion_articulo}</span>
+                            {row.isEquivalentGroup && (
+                              <span 
+                                className="inline-flex items-center gap-1 text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded border border-amber-200" 
+                                title={`Grupo equivalente: ${row.equivalentMembers?.join(', ') || row.groupName}`}
+                              >
+                                <Link2 className="w-3 h-3 text-amber-600" />
+                                Equivalentes
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         {productType === 'syrups' && periodType === 'monthly' && (
                           <td className="px-2 py-2 whitespace-nowrap">
                             <input 

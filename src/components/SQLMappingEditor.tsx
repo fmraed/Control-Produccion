@@ -228,6 +228,13 @@ export function SQLMappingEditor() {
 
   const generatedSyrupKeys = useMemo(() => {
     const keys: string[] = [];
+    // 1. Grupos de jarabes equivalentes / compartidos configurados
+    if (config?.compatibleSyrupGroups) {
+      Object.keys(config.compatibleSyrupGroups).forEach(groupName => {
+        keys.push(`[Grupo] ${groupName}`);
+      });
+    }
+    // 2. Combinaciones individuales de marca y sabor
     availableBrands.forEach(brand => {
       // Usar todas las combinaciones de sabores para la marca según brandFlavorCombinations o fallback general
       const brandCombos = config?.brandFlavorCombinations?.[brand] || availableFlavors || SABORES;
@@ -238,7 +245,7 @@ export function SQLMappingEditor() {
       });
     });
     return keys;
-  }, [availableBrands, availableFlavors, config?.brandFlavorCombinations, config?.saboresSinJarabe]);
+  }, [availableBrands, availableFlavors, config?.brandFlavorCombinations, config?.saboresSinJarabe, config?.compatibleSyrupGroups]);
 
   const generatedInsumoKeys = useMemo(() => {
     return config?.insumos || [];
@@ -346,18 +353,67 @@ export function SQLMappingEditor() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredKeys.map((key) => (
-          <div key={key} className="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm hover:border-blue-200 transition-colors">
-            <label className="block text-xs font-bold text-gray-600 uppercase mb-2">{key}</label>
-            <input
-              type="text"
-              value={activeMappings[key] || ''}
-              onChange={(e) => activeTab === 'products' ? handleUpdateProductMapping(key, e.target.value) : activeTab === 'syrups' ? handleUpdateSyrupMapping(key, e.target.value) : activeTab === 'etiquetas' ? handleUpdateEtiquetaMapping(key, e.target.value) : handleUpdateInsumoMapping(key, e.target.value)}
-              className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono"
-              placeholder="Código SQL..."
-            />
-          </div>
-        ))}
+        {filteredKeys.map((key) => {
+          const isGroup = activeTab === 'syrups' && key.startsWith('[Grupo] ');
+          const groupName = isGroup ? key.replace('[Grupo] ', '') : null;
+          const groupMembers = groupName && config?.compatibleSyrupGroups ? config.compatibleSyrupGroups[groupName] : null;
+
+          // Check if individual key belongs to any equivalent group
+          let belongsToGroup: string | null = null;
+          if (activeTab === 'syrups' && !isGroup && config?.compatibleSyrupGroups) {
+            const parts = key.split('-');
+            const b = parts[0]?.trim().toLowerCase();
+            const f = parts[1]?.trim().toLowerCase();
+            for (const [gName, members] of Object.entries(config.compatibleSyrupGroups)) {
+              if (Array.isArray(members) && members.some(m => {
+                const mLower = m.toLowerCase();
+                return mLower.includes(b) && mLower.includes(f);
+              })) {
+                belongsToGroup = gName;
+                break;
+              }
+            }
+          }
+
+          return (
+            <div 
+              key={key} 
+              className={`p-4 rounded-xl border shadow-sm transition-colors ${
+                isGroup 
+                  ? 'bg-amber-50/70 border-amber-300 hover:border-amber-400' 
+                  : 'bg-gray-50 border-gray-200 hover:border-blue-200'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-tight">
+                  {key}
+                </label>
+                {isGroup && (
+                  <span className="text-[10px] font-bold bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">
+                    Grupo Equivalente
+                  </span>
+                )}
+                {belongsToGroup && (
+                  <span className="text-[10px] font-semibold bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded" title={`Comparte jarabe con el grupo ${belongsToGroup}`}>
+                    Equiv: {belongsToGroup}
+                  </span>
+                )}
+              </div>
+              {isGroup && groupMembers && (
+                <p className="text-[11px] text-amber-800 mb-2">
+                  Aplica a: {groupMembers.join(' / ')}
+                </p>
+              )}
+              <input
+                type="text"
+                value={activeMappings[key] || ''}
+                onChange={(e) => activeTab === 'products' ? handleUpdateProductMapping(key, e.target.value) : activeTab === 'syrups' ? handleUpdateSyrupMapping(key, e.target.value) : activeTab === 'etiquetas' ? handleUpdateEtiquetaMapping(key, e.target.value) : handleUpdateInsumoMapping(key, e.target.value)}
+                className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono"
+                placeholder={isGroup ? "Código SQL para el grupo..." : "Código SQL..."}
+              />
+            </div>
+          );
+        })}
       </div>
     </div>
   );
